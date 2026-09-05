@@ -14,6 +14,15 @@ stabilization phase.
   renderer console capture passed.
 - Created the permanent status, test matrix, known-issues, and stabilization
   changelog documents before beginning repair work.
+- Created baseline checkpoint `7e85887` before implementation repairs.
+- Added a repeatable packaged filesystem/editor audit covering real nested and
+  Unicode paths, rename/move/duplicate/search/replace/trash, binary and workspace
+  boundaries, Monaco editing/dirty/save/find, Settings, tab close, and renderer
+  error capture.
+- Fixed repeated Monaco inline-completion disposal exceptions during ordinary
+  editing by updating the provider to Monaco 0.56's current disposal contract.
+- Rebuilt the Intel production app and confirmed the filesystem/editor audit
+  completes with zero renderer exceptions.
 
 ## Baseline inherited from OmniCode 0.1.1
 
@@ -27,4 +36,3 @@ These repairs predate this audit but are present in its starting point:
 - Fixed native Ollama application discovery and fresh-Mac Apple shim detection.
 - Fixed cloud empty/refused/blocked response handling and AI provider/model state
   synchronization.
-

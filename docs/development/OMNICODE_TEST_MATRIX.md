@@ -15,27 +15,27 @@ substitute for a real integration test where one is required.
 | Startup | Console | Capture renderer/unhandled startup errors | Pass | Automated smoke | No meaningful errors captured |
 | Filesystem | Open folder | Authorize and display real temporary workspace | Pass | Automated smoke | Tree returned two entries |
 | Filesystem | Open file | Open real file from cold launch | Pass | Automated smoke | Offline Monaco loaded |
-| Filesystem | Create file/folder | Verify nested real filesystem changes | Covered | Unit | UI E2E pending |
-| Filesystem | Rename file/folder | Spaces, punctuation, Unicode | Covered | Unit | UI E2E pending |
-| Filesystem | Move file/folder | Nested paths and invalid cycles | Covered | Unit | UI E2E pending |
-| Filesystem | Duplicate file/folder | Verify contents and destination | Covered | Unit | UI E2E pending |
-| Filesystem | Trash file/folder | Verify scoped deletion | Covered | Unit | Manual Finder/Trash check pending |
-| Filesystem | Save | Persist editor content and clear dirty state | Not run | E2E | Scheduled |
+| Filesystem | Create file/folder | Verify nested real filesystem changes | Pass | Packaged integration | Real nested directory and Unicode file created through preload/backend |
+| Filesystem | Rename file/folder | Spaces, punctuation, Unicode | Pass | Packaged integration + unit | Real file renamed; remaining context-menu UI paths pending |
+| Filesystem | Move file/folder | Nested paths and invalid cycles | Pass | Packaged integration + unit | Real nested file moved; invalid cycles covered by unit test |
+| Filesystem | Duplicate file/folder | Verify contents and destination | Pass | Packaged integration + unit | Real duplicate content verified on disk |
+| Filesystem | Trash file/folder | Verify scoped deletion | Pass | Packaged integration + unit | Disposable file and audit directory moved to macOS Trash through OmniCode |
+| Filesystem | Save | Persist editor content and clear dirty state | Pass | Packaged E2E | Monaco edit saved and exact disk bytes verified |
 | Filesystem | Save As | Persist to user-selected path | Not run | Manual/E2E | Native dialog required |
 | Filesystem | Autosave | Delayed write and conflict behavior | Not run | E2E | Scheduled |
 | Filesystem | External changes | Reload/close/conflict behavior | Covered | Code inspection | Real E2E pending |
 | Filesystem | Recent workspaces | Persist/reopen and remove missing entries | Pass | Unit + smoke | Real restart E2E pending |
-| Filesystem | Outside workspace | Reject unauthorized read/write | Pass | Automated | Filesystem boundary tests |
+| Filesystem | Outside workspace | Reject unauthorized read/write | Pass | Packaged integration + unit | `/etc/passwd` read rejected through production preload/backend |
 | Filesystem | Drag/drop | File and directory authorization | Not run | Manual | Scheduled |
 | Filesystem | Reveal/Open With | Finder integration | Not run | Manual | Scheduled |
 | Editor | Multiple tabs | Open, switch, and close files | Not run | E2E | Scheduled |
 | Editor | Languages | Map HTML/CSS/JS/TS/Python/Java/C/C++/Swift/Rust/Go/JSON/Markdown | Pass | Unit | Seven mapping/registry tests |
-| Editor | Core editing | Type, selection, copy/paste, undo/redo | Not run | E2E | Scheduled |
-| Editor | Find/replace | Find, replace, find-all | Not run | E2E | Scheduled |
+| Editor | Core editing | Type, selection, copy/paste, undo/redo | Partial | Packaged E2E | Select-all and real text insertion passed; clipboard and undo/redo remain |
+| Editor | Find/replace | Find, replace, find-all | Partial | Packaged E2E | Cmd+F opened Monaco find; replace/find-all remain |
 | Editor | Visual features | Lines, indentation, brackets, folding, minimap | Not run | Manual/E2E | Scheduled |
-| Editor | Dirty state | Indicator, save, close prompt | Not run | E2E | Scheduled |
+| Editor | Dirty state | Indicator, save, close prompt | Partial | Packaged E2E | Dirty indicator and clean-after-save passed; unsaved close prompt remains |
 | Editor | Resize | Editor relayout after panel/window changes | Not run | Manual/E2E | Scheduled |
-| Shortcuts | File/edit | ⌘S, ⌘O, ⌘F, ⌘W, ⌘Z, ⌘⇧Z | Not run | Manual/E2E | Scheduled |
+| Shortcuts | File/edit | ⌘S, ⌘O, ⌘F, ⌘W, ⌘Z, ⌘⇧Z | Partial | Packaged E2E/manual | Cmd+F passed; native menu accelerators require unlocked interactive automation/manual pass |
 | Shortcuts | Navigation | ⌘P and ⌘⇧P | Not run | Manual/E2E | Scheduled |
 | Shortcuts | Settings/terminal/AI | ⌘,, ⌘`, ⌃⇧`, ⌘I | Not run | Manual/E2E | Scheduled |
 | Search | Workspace search | ripgrep and fallback results | Covered | Unit | Real UI pending |
@@ -104,7 +104,7 @@ substitute for a real integration test where one is required.
 | Diff | File/hunk accept/reject/all | Filesystem matches decisions | Pass | Unit | Renderer E2E pending |
 | Diff | Create/delete/undo | Restore exact filesystem state | Pass | Unit | Renderer E2E pending |
 | Settings | Workspace JSON | Validate/read/write and corrupt input | Pass | Unit | UI/restart pending |
-| Settings | User preferences | Theme/autosave/permission restart | Not run | E2E | Scheduled |
+| Settings | User preferences | Theme/autosave/permission restart | Partial | Packaged E2E | Settings opens from workbench; persistence controls remain |
 | Settings | AI model/default | Persist selected/default local model | Covered | Unit | Real restart pending |
 | Themes | Dark/light/system | Contrast and component states | Not run | Visual/manual | Scheduled |
 | Layout | Resizing | Sidebars/panel/window min/max | Partial | Setup smoke | Workbench panels pending |
@@ -122,4 +122,3 @@ substitute for a real integration test where one is required.
 | Production | Apple Silicon app | Correct executable/native slices | Pass | Automated inspection | Hardware launch blocked |
 | Production | Archives | DMG/ZIP integrity and checksums | Pass | Automated | 0.1.1 baseline |
 | Production | Signing/notarization | Gatekeeper-ready public release | Blocked | External | Developer ID certificate required |
-

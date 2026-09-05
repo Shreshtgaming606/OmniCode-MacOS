@@ -537,8 +537,8 @@ export function App() {
           }]
         }
       },
-      freeInlineCompletions: () => undefined
-    })
+      disposeInlineCompletions: () => undefined
+    } satisfies languages.InlineCompletionsProvider)
   }
 
   const showGitDiff = async (relativePath: string, staged = false): Promise<void> => {

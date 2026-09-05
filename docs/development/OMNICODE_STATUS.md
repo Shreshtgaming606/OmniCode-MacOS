@@ -19,8 +19,8 @@ surface alone is not evidence that its backing operation works.
   CommonJS preload bridge; TypeScript throughout; no Tauri or Rust.
 - Build: electron-vite and electron-builder, macOS 14 minimum, separate x64 and
   arm64 DMG/ZIP artifacts, native `node-pty` unpacked from ASAR.
-- Git: `master`, no commits or prior history at audit start; all project files
-  were untracked. No user changes were discarded.
+- Git: `master` had no commits at audit start. Baseline checkpoint `7e85887`
+  now preserves all initial project files; no user changes were discarded.
 - Baseline launch: packaged Intel app started on macOS Sonoma without a white
   screen or captured renderer exception. Setup, workspace IPC, real zsh PTY,
   localhost server, and remote-navigation blocking passed the existing smoke.
@@ -34,8 +34,8 @@ surface alone is not evidence that its backing operation works.
 | Application startup | 🟡 Partially Working | Electron lifecycle, single-instance handling, secure window options, React workbench, macOS menu | Fresh packaged launch and console capture passed | None in this phase yet | Minimize/full-screen/close/reopen and repeated-launch soak |
 | Packaging | 🟡 Partially Working | x64/arm64 DMG and ZIP via electron-builder | 0.1.1 archives, slices, checksums previously verified | None in this phase yet | Rebuild only after repairs; Apple-silicon hardware launch blocked |
 | macOS integration | 🟡 Partially Working | Menus, dialogs, notifications, Finder open/reveal, file associations, theme | Packaged launch and cold file-open smoke previously passed | None in this phase yet | Exercise menus, Finder actions, dialogs, close behavior |
-| File explorer / workspace | 🟡 Partially Working | Explorer UI and main-process open/read/write/create/rename/move/duplicate/trash/reveal/watch APIs | Service unit coverage; workspace read in packaged smoke passed | None in this phase yet | Complete real filesystem/UI matrix including nested and Unicode paths |
-| Monaco editor | 🟡 Partially Working | Bundled Monaco, tabs, dirty state, save/autosave, language mapping, diff editor | Offline packaged Monaco open passed; language mapping unit tests pass | None in this phase yet | Real editing, find/replace, undo/redo, folding, shortcuts, resize |
+| File explorer / workspace | 🟡 Partially Working | Explorer UI and main-process open/read/write/create/rename/move/duplicate/trash/reveal/watch APIs | Packaged preload/backend workflow passed nested create, Unicode/punctuation paths, rename, move, duplicate, search/replace, binary rejection, workspace-boundary rejection, and real trash | No filesystem defect found in this slice | Native-dialog, Finder/reveal, drag/drop, autosave/conflict, and every context-menu path remain |
+| Monaco editor | 🟡 Partially Working | Bundled Monaco, tabs, dirty state, save/autosave, language mapping, diff editor | Packaged workflow passed editing, dirty indicator, disk save, Cmd+F, Settings transition, tab close, and zero-error console capture | Fixed Monaco 0.56 provider disposal crash/noise by implementing `disposeInlineCompletions` | Undo/redo, replace/find-all, folding, selection/clipboard, all native menu shortcuts, autosave, and resize remain |
 | Workspace search | 🟡 Partially Working | ripgrep plus fallback, include/exclude options, replace UI | Filesystem tests cover representative search boundaries | None in this phase yet | Real UI search/replace, ignored files, large workspace |
 | Terminal | 🟡 Partially Working | xterm UI, multiple sessions, restart/kill/clear/search, real `node-pty` backend | Packaged zsh command passed | None in this phase yet | Interactive controls, PATH, history, resize, copy/paste, workspace switching |
 | Shell environment | 🟡 Partially Working | Login-shell environment recovery and Intel/Apple Homebrew PATH additions | Unit tests pass | Earlier PATH recovery fixes are present | Validate inside packaged terminal against real host tools |
@@ -78,4 +78,3 @@ These are not failures unless existing UI or documentation claims otherwise:
 - ⚪ Streaming cloud/local chat and stop-generation control
 - ⚪ Conversation persistence across restart
 - ⚪ Window and panel-layout persistence
-

@@ -59,7 +59,7 @@ lost. Secrets, tokens, and authorization headers must never be included here.
 - Current status: 🔵 BLOCKED — USER CONFIGURATION REQUIRED for write testing;
   public read-only clone can still be tested.
 
-## OMI-005 — Repository had no baseline commit
+## OMI-005 — Repository had no baseline commit — Resolved
 
 - Severity: High
 - Reproduction: Run `git log` at stabilization start.
@@ -67,8 +67,8 @@ lost. Secrets, tokens, and authorization headers must never be included here.
 - Actual: `master` had no commits and every project file was untracked.
 - Suspected cause: Initial application work was never committed.
 - Relevant files: entire repository.
-- Current status: 🟡 Open — create a non-destructive baseline checkpoint before
-  implementation repairs.
+- Current status: ✅ Resolved — checkpoint `7e85887` preserves the complete
+  pre-repair baseline.
 
 ## OMI-006 — Distribution is unsigned and unnotarized
 
@@ -126,3 +126,19 @@ lost. Secrets, tokens, and authorization headers must never be included here.
 - Relevant files: `dist/mac-arm64/OmniCode.app`.
 - Current status: 🔵 BLOCKED — APPLE-SILICON HARDWARE REQUIRED.
 
+## OMI-011 — Monaco inline-completion disposal errors — Resolved
+
+- Severity: High
+- Reproduction: Open a file in the packaged app and make ordinary editor changes;
+  capture `Runtime.exceptionThrown` events.
+- Expected: Editing with autocomplete disabled produces no inline-completion
+  errors.
+- Actual: Monaco repeatedly threw `this.provider.disposeInlineCompletions is not
+  a function` because OmniCode implemented an obsolete disposal method name.
+- Suspected cause: The provider contract changed in Monaco 0.56 while the
+  registration object remained on the older API.
+- Relevant files: `src/renderer/src/App.tsx`,
+  `scripts/audit-files-editor.mjs`.
+- Current status: ✅ Resolved — implemented and type-checked the current
+  `disposeInlineCompletions` contract; the rebuilt packaged workflow completes
+  with no renderer errors.
