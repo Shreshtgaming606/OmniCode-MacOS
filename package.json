@@ -1,0 +1,86 @@
+{
+  "name": "omnicode",
+  "version": "0.1.1",
+  "description": "A native macOS code editor with local and cloud AI assistance.",
+  "main": "./out/main/index.js",
+  "author": "OmniCode contributors",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "postinstall": "electron-builder install-app-deps",
+    "dev": "electron-vite dev",
+    "build": "npm run typecheck && electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --configLoader runner",
+    "test:watch": "vitest --configLoader runner",
+    "dist": "npm run build && electron-builder --mac",
+    "dist:dir": "npm run build && electron-builder --mac --dir",
+    "dist:x64": "npm run build && electron-builder --mac --x64",
+    "dist:arm64": "npm run build && electron-builder --mac --arm64",
+    "rebuild:native": "electron-rebuild -f -w node-pty"
+  },
+  "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-search": "^0.16.0",
+    "@xterm/xterm": "^6.0.0",
+    "chokidar": "^4.0.3",
+    "ignore": "^7.0.5",
+    "lucide-react": "^0.542.0",
+    "node-pty": "^1.1.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.0.1",
+    "@types/node": "^24.3.0",
+    "@types/react": "^19.1.12",
+    "@types/react-dom": "^19.1.9",
+    "@vitejs/plugin-react": "^5.0.2",
+    "electron": "^44.1.0",
+    "electron-builder": "^26.0.12",
+    "electron-vite": "^5.0.0",
+    "typescript": "^5.9.2",
+    "vite": "^7.3.6",
+    "vitest": "^4.0.0"
+  },
+  "overrides": {
+    "dompurify": "3.4.14"
+  },
+  "build": {
+    "appId": "com.omnicode.editor",
+    "productName": "OmniCode",
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/node-pty/**"
+    ],
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.icns",
+      "minimumSystemVersion": "14.0",
+      "target": ["dmg", "zip"],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "extendInfo": {
+        "NSHighResolutionCapable": true
+      }
+    },
+    "fileAssociations": [
+      {
+        "ext": ["html", "htm", "css", "scss", "less", "js", "mjs", "cjs", "jsx", "ts", "mts", "cts", "tsx", "py", "pyw", "pyi", "java", "c", "h", "cc", "cpp", "cxx", "hh", "hpp", "m", "mm", "swift", "cs", "rs", "go", "php", "rb", "kt", "kts", "lua", "json", "jsonc", "xml", "yaml", "yml", "md", "mdx", "sql", "sh", "bash", "zsh", "fish", "toml", "ini", "cfg", "conf", "gradle", "vue", "svelte", "ps1", "bat", "cmd"],
+        "name": "Source Code",
+        "role": "Editor"
+      }
+    ],
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
+    "dmg": {
+      "title": "OmniCode ${version}"
+    }
+  }
+}
