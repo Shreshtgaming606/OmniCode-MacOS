@@ -21,6 +21,14 @@ function validatePaths(paths: string[]): void {
   }
 }
 
+export function redactGitOutput(value: string): string {
+  return value
+    .replaceAll(/([a-z][a-z0-9+.-]*:\/\/[^\s/:@]+:)[^\s/@]+(@)/giu, '$1••••$2')
+    .replaceAll(/(https?:\/\/)[^\s/:@]+(@)/giu, '$1••••$2')
+    .replaceAll(/([?&](?:access[_-]?token|auth|key|password|signature|token)=)[^\s&#]+/giu, '$1••••')
+    .replaceAll(/\b(?:github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9_]{20,})\b/gu, '••••')
+}
+
 function parseBranchHeader(header: string): { branch: string; ahead: number; behind: number } {
   const details = header.replace(/^## /, '')
   const ahead = Number(details.match(/ahead (\d+)/)?.[1] ?? 0)
@@ -43,7 +51,7 @@ export function parseGitStatus(output: string): GitStatus {
     const workingTreeStatus = record[1] ?? ' '
     const filePath = record.slice(3)
     let originalPath: string | undefined
-    if (indexStatus === 'R' || indexStatus === 'C') {
+    if (indexStatus === 'R' || indexStatus === 'C' || workingTreeStatus === 'R' || workingTreeStatus === 'C') {
       originalPath = records[index + 1]
       index += 1
     }
@@ -94,7 +102,7 @@ export async function runGit(root: string, args: string[], options: GitRunOption
       if (settled) return
       settled = true
       if (code !== null && allowed.has(code)) resolve(stdout)
-      else reject(new Error(stderr.trim() || `Git exited with code ${code ?? 'unknown'}.`))
+      else reject(new Error(redactGitOutput(stderr.trim()) || `Git exited with code ${code ?? 'unknown'}.`))
     })
   })
 }

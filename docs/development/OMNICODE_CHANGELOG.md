@@ -38,6 +38,13 @@ stabilization phase.
 - Added real packaged static-server and npm-project coverage for HTML/CSS/JS,
   nested assets, live-reload events, port conflicts, restart/release, package
   detection, Run-view scripts, server logs, and process-tree shutdown.
+- Fixed porcelain Git status parsing for working-tree rename/copy records and
+  added credential/token redaction to Git process errors.
+- Added a packaged Git audit covering UI init, diff, stage, unstage, commit,
+  create/switch/delete branch, rename metadata, useful failure reporting, and
+  real fetch/pull/push synchronization against a local bare remote.
+- Verified real clone behavior through the manager and confirmed public HTTPS
+  cloning from GitHub; authenticated GitHub/SSH testing remains externally blocked.
 
 ## Baseline inherited from OmniCode 0.1.1
 

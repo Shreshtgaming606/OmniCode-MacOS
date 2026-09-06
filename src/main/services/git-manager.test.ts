@@ -4,7 +4,7 @@ import path from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { GitManager, parseGitStatus, runGit } from './git-manager'
+import { GitManager, parseGitStatus, redactGitOutput, runGit } from './git-manager'
 
 const temporaryDirectories: string[] = []
 
@@ -38,6 +38,22 @@ describe('parseGitStatus', () => {
       indexStatus: 'R',
       workingTreeStatus: ' '
     }])
+  })
+
+  it('consumes the original path for a working-tree rename', () => {
+    const result = parseGitStatus('## main\0 R src/new.ts\0src/old.ts\0 M other.ts\0')
+    expect(result.changes).toEqual([
+      { path: 'src/new.ts', originalPath: 'src/old.ts', indexStatus: ' ', workingTreeStatus: 'R' },
+      { path: 'other.ts', originalPath: undefined, indexStatus: ' ', workingTreeStatus: 'M' }
+    ])
+  })
+})
+
+describe('redactGitOutput', () => {
+  it('removes URL credentials, token parameters, and recognizable GitHub tokens', () => {
+    const output = redactGitOutput('fatal: https://user:secret@example.test/repo?access_token=visible ghp_abcdefghijklmnopqrstuvwxyz123456')
+    expect(output).toBe('fatal: https://user:••••@example.test/repo?access_token=•••• ••••')
+    expect(output).not.toMatch(/secret|visible|ghp_/u)
   })
 })
 
@@ -87,5 +103,35 @@ describe('GitManager', () => {
 
     await new GitManager().status(root)
     await expect(fs.access(marker)).rejects.toThrow()
+  })
+
+  it('clones, fetches, pulls, and pushes against a real local bare remote', async () => {
+    const source = await repository()
+    const remoteContainer = await fs.mkdtemp(path.join(os.tmpdir(), 'omnicode-git-remote-'))
+    const cloneContainer = await fs.mkdtemp(path.join(os.tmpdir(), 'omnicode-git-clone-'))
+    temporaryDirectories.push(remoteContainer, cloneContainer)
+    const remote = path.join(remoteContainer, 'omnicode-audit.git')
+    await fs.mkdir(remote)
+    await runGit(remote, ['init', '--bare'])
+    await fs.writeFile(path.join(source, 'shared.txt'), 'one\n')
+    await runGit(source, ['add', '--', 'shared.txt'])
+    await runGit(source, ['commit', '-m', 'Initial remote content'])
+    const branch = (await new GitManager().status(source)).branch
+    await runGit(source, ['remote', 'add', 'origin', remote])
+    await runGit(source, ['push', '--set-upstream', 'origin', branch])
+
+    const manager = new GitManager()
+    const cloned = await manager.clone(cloneContainer, remote)
+    await runGit(cloned, ['config', 'user.email', 'tests@omnicode.local'])
+    await runGit(cloned, ['config', 'user.name', 'OmniCode Tests'])
+    expect(await fs.readFile(path.join(cloned, 'shared.txt'), 'utf8')).toBe('one\n')
+    await fs.writeFile(path.join(cloned, 'shared.txt'), 'one\ntwo\n')
+    await manager.stage(cloned, ['shared.txt'])
+    await manager.commit(cloned, 'Update from clone')
+    await manager.operation(cloned, 'push')
+
+    await manager.operation(source, 'fetch')
+    await manager.operation(source, 'pull')
+    expect(await fs.readFile(path.join(source, 'shared.txt'), 'utf8')).toBe('one\ntwo\n')
   })
 })

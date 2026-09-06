@@ -69,12 +69,12 @@ substitute for a real integration test where one is required.
 | Server | Secret denial | Deny `.git` and `.env` | Pass | Packaged smoke | Both returned 403 |
 | Server | Stop/restart/port release | Lifecycle correctness | Pass | Packaged integration + unit | Static/package restart passed, stopped ports rebound, explicit conflict was useful |
 | Server | Live reload | HTML/CSS/JS browser update | Partial | Packaged integration | Injected client and real SSE reload after write passed; actual browser page refresh remains manual |
-| Git | Repository detection/status | Real disposable repository | Covered | Unit | Real integration pending |
-| Git | Stage/unstage/commit/diff | Actual state matches UI | Covered | Unit | Real integration pending |
-| Git | Init/branches | Initialize, create, switch, delete | Covered | Unit | Real integration pending |
-| Git | Fetch/pull/push | Report exit success/failure accurately | Covered | Unit | Authenticated remote pending |
-| Git | Clone | HTTPS/SSH URL validation and actual clone | Covered | Unit | Safe remote integration pending |
-| GitHub | Authentication | Existing SSH/HTTPS/gh state | Blocked | Manual | Requires configured credentials and safe repo |
+| Git | Repository detection/status | Real disposable repository | Pass | Packaged E2E + unit | UI initialized repository and reflected clean/changed/staged states |
+| Git | Stage/unstage/commit/diff | Actual state matches UI | Pass | Packaged E2E | Real working diff reached Output; UI stage/unstage/commit matched disk and Git |
+| Git | Init/branches | Initialize, create, switch, delete | Pass | Packaged E2E | All branch controls passed in disposable repository |
+| Git | Fetch/pull/push | Report exit success/failure accurately | Pass | Packaged E2E + integration | Real local bare remote synchronized; missing-remote push rejected usefully |
+| Git | Clone | HTTPS/SSH URL validation and actual clone | Pass | Real integration + unit | Manager cloned local bare remote; public GitHub HTTPS clone passed via host Git; native picker UI remains manual |
+| GitHub | Authentication | Existing SSH/HTTPS/gh state | Blocked | Host inspection | `gh` absent and no safe configured writable remote; USER CONFIGURATION REQUIRED for authenticated writes |
 | Keychain | Save/read/restart | All provider keys across manager instances | Pass | Native integration | Disposable keychain; user keys untouched |
 | Keychain | Update/remove | Replace and delete all provider keys | Pass | Native integration | Disposable keychain |
 | Keychain | Secret leakage | Source/log/config/Git scan | Partial | Automated/code | Full runtime log scan pending |

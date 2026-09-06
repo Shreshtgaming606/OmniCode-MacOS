@@ -186,3 +186,33 @@ lost. Secrets, tokens, and authorization headers must never be included here.
 - Current status: ✅ Resolved — startup now requires a detected, reachable local
   port; premature exit, timeout, and explicit port conflict are failures. Real
   failing and successful npm fixtures passed in the rebuilt packaged app.
+
+## OMI-015 — Working-tree rename records could corrupt Git status parsing — Resolved
+
+- Severity: High
+- Reproduction: Parse porcelain-v1 `-z` output where the working-tree status,
+  rather than the index status, is `R` or `C`.
+- Expected: The destination is one change and the following NUL record is its
+  original path.
+- Actual: Only index-side `R`/`C` consumed the original-path record, so a
+  worktree rename/copy could create a bogus second change.
+- Suspected cause: The parser inspected only the first status column.
+- Relevant files: `src/main/services/git-manager.ts`,
+  `src/main/services/git-manager.test.ts`, `scripts/audit-git.mjs`.
+- Current status: ✅ Resolved — both status columns consume rename/copy metadata;
+  regression tests pass and a real staged rename was verified in the package.
+
+## OMI-016 — Git failures could expose credentials embedded in URLs — Resolved
+
+- Severity: High
+- Reproduction: A Git remote with a URL password/token fails and Git repeats the
+  URL in stderr.
+- Expected: The useful error is shown without credential material.
+- Actual: `runGit` previously returned raw stderr in its thrown error.
+- Suspected cause: No Git-specific secret scrubber was applied at the process
+  boundary.
+- Relevant files: `src/main/services/git-manager.ts`,
+  `src/main/services/git-manager.test.ts`.
+- Current status: ✅ Resolved — URL passwords, token-only HTTPS credentials,
+  sensitive query parameters, and recognizable GitHub token forms are redacted;
+  regression coverage confirms the original values are absent.
