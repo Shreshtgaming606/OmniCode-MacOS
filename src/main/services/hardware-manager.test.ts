@@ -97,6 +97,56 @@ describe('HardwareManager', () => {
     expect(hardware.warnings).toEqual([])
   })
 
+  it('recognizes Sonoma Metal-family tokens without treating attached displays as GPUs', async () => {
+    const runner = vi.fn<SafeCommandRunner>(async (executable, args = []) => {
+      const invocation = [executable, ...args].join(' ')
+      switch (invocation) {
+        case '/usr/bin/sw_vers -productVersion':
+          return success('14.8.9\n')
+        case '/usr/sbin/sysctl -n machdep.cpu.brand_string':
+          return success('Intel(R) Core(TM) i5-8210Y CPU @ 1.60GHz\n')
+        case '/usr/sbin/sysctl -n hw.model':
+          return success('MacBookAir8,1\n')
+        case '/usr/sbin/sysctl -n hw.physicalcpu':
+          return success('2\n')
+        case '/usr/sbin/sysctl -n hw.logicalcpu':
+          return success('4\n')
+        case '/usr/sbin/system_profiler SPDisplaysDataType -json':
+          return success(JSON.stringify({
+            SPDisplaysDataType: [{
+              _name: 'kHW_IntelUHDGraphics617Item',
+              sppci_model: 'Intel UHD Graphics 617',
+              sppci_device_type: 'spdisplays_gpu',
+              spdisplays_mtlgpufamilysupport: 'spdisplays_metal3',
+              spdisplays_ndrvs: [{ _name: 'Color LCD', spdisplays_display_type: 'spdisplays_built-in_retinaLCD' }]
+            }]
+          }))
+        case '/usr/bin/xcode-select -p':
+          return success('/Library/Developer/CommandLineTools\n')
+        case '/usr/bin/xcodebuild -version':
+          return failure('Full Xcode is not installed')
+        default:
+          return failure(`Unexpected invocation: ${invocation}`)
+      }
+    })
+    const manager = new HardwareManager(managerOptions({
+      runner,
+      architecture: 'x64',
+      cpus: Array.from({ length: 4 }, () => ({ model: 'Intel(R) Core(TM) i5-8210Y CPU @ 1.60GHz' })),
+      totalMemoryBytes: 8 * 1024 ** 3,
+      availableMemoryBytes: 2 * 1024 ** 3,
+      isAccessible: async () => false
+    }))
+
+    const hardware = await manager.detect()
+
+    expect(hardware.metalSupported).toBe(true)
+    expect(hardware.gpus).toEqual(['Intel UHD Graphics 617'])
+    expect(hardware.gpu).toBe('Intel UHD Graphics 617')
+    expect(hardware.metal.details).toBe('spdisplays_metal3')
+    expect(hardware.warnings).toEqual([])
+  })
+
   it('returns portable baseline information without running macOS commands elsewhere', async () => {
     const runner = vi.fn<SafeCommandRunner>(async () => {
       throw new Error('macOS commands must not run')

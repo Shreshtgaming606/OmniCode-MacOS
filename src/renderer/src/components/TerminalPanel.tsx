@@ -28,6 +28,7 @@ import type {
   TerminalExitEvent,
   TerminalSessionInfo
 } from '../../../shared/contracts'
+import { buildShellCommand } from '../lib/terminal-command'
 import './TerminalPanel.css'
 
 export interface TerminalPanelProps {
@@ -122,24 +123,6 @@ function exitDescription(event: TerminalExitEvent): string {
 
 function terminalDomId(id: string): string {
   return `omnicode-terminal-${id.replaceAll(/[^a-zA-Z0-9_-]/g, '-')}`
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", `'\\''`)}'`
-}
-
-function buildShellCommand(request: TerminalRunRequest): string | null {
-  if (!request.cwd) throw new Error('The run request does not have a working directory.')
-  if (!request.command) return null
-
-  const environment = Object.entries(request.env ?? {}).map(([name, value]) => {
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
-      throw new Error(`The environment variable name “${name}” is not valid.`)
-    }
-    return `${name}=${shellQuote(value)}`
-  })
-
-  return [...environment, shellQuote(request.command), ...request.args.map(shellQuote)].join(' ')
 }
 
 function TerminalViewport({

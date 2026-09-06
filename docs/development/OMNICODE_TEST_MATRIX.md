@@ -42,26 +42,26 @@ substitute for a real integration test where one is required.
 | Search | Replace all | Scoped replacement | Covered | Unit | Real UI pending |
 | Search | Ignore/include/exclude | `.gitignore`, `.omnicodeignore`, globs | Covered | Unit | Large real fixture pending |
 | Terminal | zsh | Start real login shell | Pass | Packaged smoke | `/bin/zsh` launched |
-| Terminal | Working directory | `pwd` equals workspace | Not run | Integration | Smoke uses workspace cwd but does not assert `pwd` output |
-| Terminal | Basic commands | `ls`, `echo`, `whoami`, environment | Partial | Packaged smoke | One `printf` command passed |
-| Terminal | PATH | Intel/Apple Homebrew paths visible | Covered | Unit | Real PTY assertion pending |
-| Terminal | Interactive | Ctrl+C, history, interactive process | Not run | E2E | Scheduled |
-| Terminal | Sessions | Create/switch/close/restart/clear multiple terminals | Not run | E2E | Scheduled |
-| Terminal | Resize/scroll/copy/paste | xterm behavior | Not run | E2E | Scheduled |
-| Runtime | Detection | 33 allowlisted tools return installed/missing states | Pass | Packaged smoke | Individual host comparison pending |
+| Terminal | Working directory | `pwd` equals workspace | Pass | Packaged integration | Real PTY printed exact authorized workspace cwd |
+| Terminal | Basic commands | `ls`, `echo`, `whoami`, environment | Pass | Packaged integration | Real zsh identity and environment markers passed |
+| Terminal | PATH | Intel/Apple Homebrew paths visible | Pass | Packaged integration + unit | Both standard Homebrew bin paths and real Node/Git lookup passed |
+| Terminal | Interactive | Ctrl+C, history, interactive process | Partial | Packaged integration | Real sleep interrupted with Ctrl+C; history UI remains |
+| Terminal | Sessions | Create/switch/close/restart/clear multiple terminals | Partial | Packaged integration | Multiple isolated sessions, restart, and kill passed; UI switch/clear remains |
+| Terminal | Resize/scroll/copy/paste | xterm behavior | Partial | Packaged integration | PTY resize and xterm mount passed; scroll/clipboard remain |
+| Runtime | Detection | 33 allowlisted tools return installed/missing states | Pass | Packaged integration + unit | Requested tool states matched independent host command lookup |
 | Runtime | Missing tools | Clean state without crash or stack trace | Pass | Automated | Runtime tests and setup smoke |
 | Runtime | Fresh Mac shims | Detection does not trigger Apple installer | Pass | Unit | Regression coverage |
 | Runtime | Installation | Formula/native paths, progress, cancellation | Pass | Unit/integration-mock | No real system changes made |
-| Hardware | Current Mac | Architecture/CPU/RAM/macOS/Metal correctness | Not run | Integration | Scheduled |
+| Hardware | Current Mac | Architecture/CPU/RAM/macOS/Metal correctness | Pass | Packaged integration | x64 Sonoma 14.8.9, Intel i5, 8 GiB, UHD 617, Metal 3 verified |
 | Hardware | Recommendations | Memory-based model ranking | Pass | Unit | Real host comparison pending |
-| Run | Python | Real success and syntax error through OmniCode | Not run | E2E | Depends on detected Python |
-| Run | JavaScript | Real success and runtime error through OmniCode | Not run | E2E | Depends on Node |
-| Run | C/C++ | Real compile/run and compiler error | Not run | E2E | Depends on Clang/Clang++ |
-| Run | Swift | Real script/compile | Not run | E2E | Depends on Swift |
-| Run | Java | Real compile/run | Not run | E2E | Conditional on JDK |
-| Run | Rust | Real Cargo build/run | Not run | E2E | Conditional on Rust |
-| Run | Go | Real build/run | Not run | E2E | Conditional on Go |
-| Run | Error reporting | stdout, stderr, exit code, missing tool | Covered | Unit | Real workbench output pending |
+| Run | Python | Real success and syntax error through OmniCode | Pass | Packaged integration | `PYTHON_OK`; syntax error returned nonzero |
+| Run | JavaScript | Real success and runtime error through OmniCode | Pass | Packaged integration | `NODE_OK`; thrown error returned nonzero |
+| Run | C/C++ | Real compile/run and compiler error | Pass | Packaged integration | Clang and Clang++ outputs passed; invalid C returned compiler diagnostics |
+| Run | Swift | Real script/compile | Pass | Packaged integration | `SWIFT_OK`; first cold invocation was slow but completed |
+| Run | Java | Real compile/run | Pass | Packaged integration | javac/java produced `JAVA_OK` |
+| Run | Rust | Real Cargo build/run | Blocked | Host integration | BLOCKED — USER CONFIGURATION REQUIRED: rustc/Cargo not installed |
+| Run | Go | Real build/run | Blocked | Host integration | BLOCKED — USER CONFIGURATION REQUIRED: Go not installed |
+| Run | Error reporting | stdout, stderr, exit code, missing tool | Pass | Packaged E2E + unit | Run UI showed stdout and `[Process exited with code 0]`; deliberate failures nonzero |
 | npm | Script detection | Read package scripts and choose runner | Covered | Unit/code | Real fixture pending |
 | npm | Install/run/server | Real lifecycle with approval boundary | Not run | E2E | Scheduled |
 | Server | Static start | Start valid localhost port | Pass | Packaged smoke | HTTP README returned 200 |

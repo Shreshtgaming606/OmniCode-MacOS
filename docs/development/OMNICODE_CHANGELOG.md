@@ -23,6 +23,15 @@ stabilization phase.
   editing by updating the provider to Monaco 0.56's current disposal contract.
 - Rebuilt the Intel production app and confirmed the filesystem/editor audit
   completes with zero renderer exceptions.
+- Added packaged terminal/runtime auditing for real zsh cwd, identity,
+  environment, Homebrew paths, Ctrl+C, multiple sessions, restart, resize,
+  workspace isolation, and host-vs-app tool detection.
+- Fixed Sonoma hardware parsing so Metal 3 is recognized and attached displays
+  are not listed as GPUs; verified against this Mac's real profiler output.
+- Added explicit Run-terminal process exit-code reporting with regression tests.
+- Added real packaged run/compile coverage: Python, JavaScript, C, C++, Swift,
+  and Java passed; deliberate Python, Node, Clang, and missing-TypeScript-runtime
+  failures returned nonzero with useful diagnostics.
 
 ## Baseline inherited from OmniCode 0.1.1
 

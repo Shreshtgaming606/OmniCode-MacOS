@@ -142,3 +142,31 @@ lost. Secrets, tokens, and authorization headers must never be included here.
 - Current status: ✅ Resolved — implemented and type-checked the current
   `disposeInlineCompletions` contract; the rebuilt packaged workflow completes
   with no renderer errors.
+
+## OMI-012 — Sonoma Metal hardware profile was parsed incorrectly — Resolved
+
+- Severity: Medium
+- Reproduction: Open hardware/setup data on the current Intel Sonoma Mac.
+- Expected: Intel UHD Graphics 617 is the only GPU and Metal 3 is supported.
+- Actual: OmniCode reported Metal unsupported and included `Color LCD` as a GPU.
+- Suspected cause: The parser did not recognize Sonoma's
+  `spdisplays_mtlgpufamilysupport` key/token and recursively treated nested
+  display records as graphics devices.
+- Relevant files: `src/main/services/hardware-manager.ts`,
+  `src/main/services/hardware-manager.test.ts`.
+- Current status: ✅ Resolved — the parser recognizes Metal-family tokens and
+  filters display records; verified in the rebuilt packaged app on the real host.
+
+## OMI-013 — Run sessions did not report process exit codes — Resolved
+
+- Severity: High
+- Reproduction: Run a successful or failing file from the Run button.
+- Expected: stdout/stderr and the real exit code are visible.
+- Actual: The command ran in an interactive terminal and returned to the prompt,
+  but no explicit exit code was displayed.
+- Suspected cause: The generated terminal command did not capture `$?`.
+- Relevant files: `src/renderer/src/lib/terminal-command.ts`,
+  `src/renderer/src/components/TerminalPanel.tsx`.
+- Current status: ✅ Resolved — Run commands now print
+  `[Process exited with code N]`; unit tests cover success/failure and packaged UI
+  execution confirmed code 0.

@@ -119,8 +119,14 @@ function metalSupportValue(value: unknown): boolean | undefined {
   if (typeof value === 'boolean') return value
   if (typeof value !== 'string') return undefined
   if (/not[ _-]?supported|unsupported/iu.test(value)) return false
-  if (/supported|metal\s+[0-9]/iu.test(value)) return true
+  if (/supported|metal[\s_-]*[0-9]/iu.test(value)) return true
   return undefined
+}
+
+function isGraphicsDeviceEntry(entry: Record<string, unknown>): boolean {
+  if (typeof entry.sppci_model === 'string' || typeof entry.spdisplays_product_name === 'string') return true
+  if (typeof entry.sppci_device_type === 'string' && /gpu|graphics/iu.test(entry.sppci_device_type)) return true
+  return Object.keys(entry).some((key) => /metal|mtlgpu/iu.test(key))
 }
 
 function parseMetalProfile(output: string): MetalInfo | undefined {
@@ -133,12 +139,13 @@ function parseMetalProfile(output: string): MetalInfo | undefined {
     let supported: boolean | undefined
 
     for (const entry of entries) {
+      if (!isGraphicsDeviceEntry(entry)) continue
       const device = [entry.sppci_model, entry.spdisplays_product_name, entry._name]
         .find((value): value is string => typeof value === 'string' && value.trim().length > 0)
       if (device) devices.push(device)
 
       for (const [key, value] of Object.entries(entry)) {
-        if (!key.toLowerCase().includes('metal')) continue
+        if (!/metal|mtlgpu/iu.test(key)) continue
         const parsedSupport = metalSupportValue(value)
         if (parsedSupport === true) supported = true
         else if (parsedSupport === false && supported === undefined) supported = false
