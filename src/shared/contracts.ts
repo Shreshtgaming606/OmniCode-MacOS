@@ -158,6 +158,21 @@ export interface PackageScript {
 
 export type AIProviderId = 'ollama' | 'openai' | 'anthropic' | 'google'
 
+export type AIProviderConnectionState =
+  | 'not-configured'
+  | 'stored'
+  | 'connected'
+  | 'authentication-failed'
+  | 'unavailable'
+
+export interface AIProviderConnectionStatus {
+  provider: Exclude<AIProviderId, 'ollama'>
+  state: AIProviderConnectionState
+  stored: boolean
+  message: string
+  checkedAt?: string
+}
+
 export type AIModelRecommendation =
   | 'Recommended'
   | 'Should Run'
@@ -435,6 +450,7 @@ export interface OmniCodeAPI {
     chat(request: AIChatRequest): Promise<AIChatResponse>
     setCredential(provider: Exclude<AIProviderId, 'ollama'>, apiKey: string): Promise<void>
     hasCredential(provider: Exclude<AIProviderId, 'ollama'>): Promise<boolean>
+    testProviderConnection(provider: Exclude<AIProviderId, 'ollama'>): Promise<AIProviderConnectionStatus>
     deleteCredential(provider: Exclude<AIProviderId, 'ollama'>): Promise<void>
     index(root: string): Promise<WorkspaceIndexStatus>
     contextPreview(root: string, query: string): Promise<string[]>

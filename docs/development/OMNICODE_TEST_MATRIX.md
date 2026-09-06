@@ -1,6 +1,6 @@
 # OmniCode Stabilization Test Matrix
 
-Last updated: 2026-09-05
+Last updated: 2026-09-06
 
 Results are changed to **Pass** only after the recorded behavior was observed.
 “Covered” means an existing automated test exercises the code path; it does not
@@ -75,16 +75,18 @@ substitute for a real integration test where one is required.
 | Git | Fetch/pull/push | Report exit success/failure accurately | Pass | Packaged E2E + integration | Real local bare remote synchronized; missing-remote push rejected usefully |
 | Git | Clone | HTTPS/SSH URL validation and actual clone | Pass | Real integration + unit | Manager cloned local bare remote; public GitHub HTTPS clone passed via host Git; native picker UI remains manual |
 | GitHub | Authentication | Existing SSH/HTTPS/gh state | Blocked | Host inspection | `gh` absent and no safe configured writable remote; USER CONFIGURATION REQUIRED for authenticated writes |
-| Keychain | Save/read/restart | All provider keys across manager instances | Pass | Native integration | Disposable keychain; user keys untouched |
+| Keychain | Save/read/restart | All provider keys across manager instances | Pass | Native + packaged E2E | Isolated native test passed all providers; packaged temporary OpenAI key survived a full app restart and was actually used; user Google key untouched |
 | Keychain | Update/remove | Replace and delete all provider keys | Pass | Native integration | Disposable keychain |
 | Keychain | Secret leakage | Source/log/config/Git scan | Partial | Automated/code | Full runtime log scan pending |
 | OpenAI | Request adapter | Auth header, payload, response/errors | Pass | Unit | Mock server/fetch |
-| OpenAI | Real minimal request | Response reaches UI | Blocked | Manual/E2E | USER CONFIGURATION REQUIRED if no key |
+| OpenAI | Invalid credential | Stored key is used and an accurate redacted auth error reaches UI | Pass | Packaged E2E | Temporary audit key survived restart, produced authentication failure, never appeared in returned error, and was deleted |
+| OpenAI | Real minimal successful request | Response reaches UI | Blocked | Manual/E2E | BLOCKED — USER CONFIGURATION REQUIRED; no valid OpenAI key is configured |
 | Claude | Request adapter | Auth headers, payload, response/errors | Pass | Unit | Mock server/fetch |
 | Claude | Real minimal request | Response reaches UI | Blocked | Manual/E2E | USER CONFIGURATION REQUIRED if no key |
 | Gemini | Request adapter | Auth header, payload, response/errors | Pass | Unit | Mock server/fetch |
-| Gemini | Real minimal request | Response reaches UI | Blocked | Manual/E2E | USER CONFIGURATION REQUIRED if no key |
-| Providers | Status UI | Stored vs authenticated/connected | Fail | Inspection | No connection test currently exists |
+| Gemini | Real minimal request | Exact response reaches packaged app | Pass | Packaged E2E | Existing Keychain credential authenticated; exact `OmniCode Cloud AI Test Successful` response received; no renderer errors |
+| Providers | Connection endpoints | Lightweight official endpoint, headers, auth/rate/network states | Pass | Unit | OpenAI, Anthropic, and Google request shapes and state mapping covered |
+| Providers | Status UI | Stored vs authenticated/connected | Pass | Packaged E2E | Stored/not-tested after restart, Connected for valid Gemini, Authentication failed for invalid OpenAI; Save/Test/Delete exercised |
 | Ollama | Installed/service states | Distinguish absent, stopped, available | Covered | Unit | Current-host comparison pending |
 | Ollama | Model list | Real installed/running models | Blocked | Integration | Ollama service required |
 | Ollama | Pull/cancel/delete/default | Real small-model lifecycle | Blocked | E2E | Ollama service/model required |
@@ -112,7 +114,7 @@ substitute for a real integration test where one is required.
 | Security | Renderer sandbox/IPC sender | Reject untrusted calls/navigation | Pass | Automated/smoke | Further adversarial tests pending |
 | Security | Workspace boundary | Reject arbitrary external paths | Pass | Unit | Agent/terminal special cases pending |
 | Security | Dangerous commands | Backend approval enforcement | Not run | Security integration | Scheduled |
-| Failure | Offline/provider/rate-limit/timeout | Graceful accurate errors | Partial | Unit | Real network scenarios pending |
+| Failure | Offline/provider/rate-limit/timeout | Graceful accurate errors | Partial | Unit + packaged E2E | Auth failure and a real transient Gemini 503 surfaced honestly; offline and timeout E2E remain |
 | Failure | Permission/read-only/moved files | Graceful accurate errors | Partial | Unit | Real filesystem E2E pending |
 | Performance | Startup/idle | Time, CPU, memory | Not run | Measurement | Scheduled |
 | Performance | Large workspace/index/search | Responsiveness and bounds | Not run | Measurement | Scheduled |

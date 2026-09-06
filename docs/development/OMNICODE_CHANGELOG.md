@@ -3,6 +3,23 @@
 This log records repairs and audit milestones made during the no-new-features
 stabilization phase.
 
+## 2026-09-06
+
+- Repaired cloud-provider status so OmniCode no longer equates a stored API key
+  with a working connection. Save and Test Connection now call the providers'
+  lightweight models endpoints and report stored/not-tested, connected,
+  authentication-failed, unavailable, and not-configured states separately.
+- Added regression coverage for the exact OpenAI, Anthropic, and Google
+  connection URLs and headers plus missing credentials, invalid credentials,
+  rate limits, network failures, and credential redaction.
+- Verified the rebuilt packaged Settings/Keychain workflow with a temporary
+  OpenAI audit credential: save, automatic authentication failure, persistence
+  across a full app restart, actual chat retrieval, redacted error, explicit
+  retest, and deletion all passed. The pre-existing Google key was untouched.
+- Verified Google Gemini end to end in the packaged app using the already saved
+  Keychain credential: the authentication probe connected and the real minimal
+  prompt returned the exact expected response with no renderer errors.
+
 ## 2026-09-05
 
 - Opened the stabilization phase and inventoried the actual Electron/React/

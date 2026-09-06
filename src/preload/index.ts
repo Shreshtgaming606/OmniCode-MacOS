@@ -111,6 +111,7 @@ const api: OmniCodeAPI = {
     chat: (request: AIChatRequest) => ipcRenderer.invoke('ai:chat', request),
     setCredential: (provider: Exclude<AIProviderId, 'ollama'>, apiKey: string) => ipcRenderer.invoke('ai:set-credential', provider, apiKey),
     hasCredential: (provider: Exclude<AIProviderId, 'ollama'>) => ipcRenderer.invoke('ai:has-credential', provider),
+    testProviderConnection: (provider: Exclude<AIProviderId, 'ollama'>) => ipcRenderer.invoke('ai:test-provider-connection', provider),
     deleteCredential: (provider: Exclude<AIProviderId, 'ollama'>) => ipcRenderer.invoke('ai:delete-credential', provider),
     index: (root) => ipcRenderer.invoke('ai:index', root),
     contextPreview: (root, query) => ipcRenderer.invoke('ai:context-preview', root, query)

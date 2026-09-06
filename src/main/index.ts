@@ -483,6 +483,7 @@ function registerIpc(): void {
   }))
   handle('ai:set-credential', (_event, provider, apiKey: string) => ai.setCredential(provider, apiKey))
   handle('ai:has-credential', (_event, provider) => ai.hasCredential(provider))
+  handle('ai:test-provider-connection', (_event, provider) => ai.testProviderConnection(provider))
   handle('ai:delete-credential', (_event, provider) => ai.deleteCredential(provider))
   handle('ai:index', (_event, root: string) => ai.index(assertCurrentWorkspace(root)))
   handle('ai:context-preview', (_event, root: string, query: string) => ai.contextPreview(assertCurrentWorkspace(root), query))

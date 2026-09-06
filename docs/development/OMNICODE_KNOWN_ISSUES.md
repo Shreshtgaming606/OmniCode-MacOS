@@ -1,36 +1,45 @@
 # OmniCode Known Issues
 
-Last updated: 2026-09-05
+Last updated: 2026-09-06
 
 Resolved issues remain in this file with a resolution so audit history is not
 lost. Secrets, tokens, and authorization headers must never be included here.
 
-## OMI-001 — Provider status does not verify connectivity
+## OMI-001 — Provider status did not verify connectivity — Resolved
 
 - Severity: High
 - Reproduction: Save a syntactically non-empty but invalid API key in Settings.
 - Expected: The provider is shown as authenticated only after a minimal provider
   request succeeds; authentication/network/model failures are distinguishable.
-- Actual: Settings reports only whether a credential is stored in Keychain.
+- Actual: Settings previously reported only whether a credential was stored in
+  Keychain.
 - Suspected cause: No connection-test API or UI state exists.
 - Relevant files: `src/renderer/src/components/SettingsPanel.tsx`,
   `src/main/services/ai-manager.ts`, `src/main/index.ts`, `src/preload/index.ts`,
   `src/shared/contracts.ts`.
-- Current status: 🔴 Open — repair scheduled during provider audit.
+- Current status: ✅ Resolved — Settings now starts at Stored / Not tested,
+  performs a real lightweight provider request on Save or Test Connection, and
+  distinguishes Connected, Authentication failed, unavailable, and not
+  configured. Unit tests cover all three providers; packaged invalid-OpenAI and
+  valid-Gemini workflows passed.
 
-## OMI-002 — Real cloud-provider operation is unverified
+## OMI-002 — Some real cloud-provider operations require credentials
 
 - Severity: High
 - Reproduction: Configure a valid OpenAI, Claude, or Gemini key and send a prompt.
 - Expected: Minimal request succeeds, UI receives the answer, and credentials do
   not appear in output or logs.
-- Actual: Request shapes and failures pass mocked tests; a paid live request has
-  not been authorized or executed in this audit.
+- Actual: Gemini authentication and an exact live response passed through the
+  rebuilt packaged app. A temporary invalid OpenAI key was proved to persist,
+  be retrieved, and produce a redacted authentication failure. OpenAI success
+  and all Claude live behavior remain unavailable because those keys are not
+  configured.
 - Suspected cause: Valid account credentials and account/model access are external.
 - Relevant files: `src/main/services/ai-manager.ts`,
   `src/renderer/src/components/AIChat.tsx`, `src/main/services/credential-manager.ts`.
-- Current status: 🔵 BLOCKED — USER CONFIGURATION REQUIRED if no usable key is
-  configured. Everything around the live call remains testable.
+- Current status: 🟡 Partially resolved — Gemini is verified end to end. OpenAI
+  and Claude successful live requests are BLOCKED — USER CONFIGURATION REQUIRED.
+  No user credential was overwritten or printed.
 
 ## OMI-003 — Local inference is unverified on the current host
 

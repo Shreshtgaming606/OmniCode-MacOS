@@ -9,6 +9,7 @@ import type {
   AIModelPreferences,
   AIModelRecommendation,
   AIProviderId,
+  AIProviderConnectionStatus,
   HardwareInfo,
   OllamaPullProgress,
   OllamaPullResult,
@@ -27,6 +28,7 @@ const CLOUD_PROVIDER_NAMES: Record<Exclude<AIProviderId, 'ollama'>, string> = {
   anthropic: 'Anthropic',
   google: 'Google Gemini'
 }
+const PROVIDER_CONNECTION_TIMEOUT_MS = 10_000
 
 interface InstalledOllamaModel {
   name: string
@@ -746,6 +748,56 @@ export class AIManager {
 
   hasCredential(provider: Exclude<AIProviderId, 'ollama'>): Promise<boolean> {
     return this.credentials.has(cloudProvider(provider))
+  }
+
+  async testProviderConnection(provider: Exclude<AIProviderId, 'ollama'>): Promise<AIProviderConnectionStatus> {
+    const selected = cloudProvider(provider)
+    const name = CLOUD_PROVIDER_NAMES[selected]
+    let key: string
+    try {
+      key = await this.credentials.get(selected)
+    } catch (error) {
+      if (error instanceof CredentialNotFoundError) {
+        return { provider: selected, state: 'not-configured', stored: false, message: 'No API key is stored in macOS Keychain.' }
+      }
+      return {
+        provider: selected,
+        state: 'unavailable',
+        stored: false,
+        message: `OmniCode could not read this credential from macOS Keychain: ${error instanceof Error ? error.message : String(error)}`
+      }
+    }
+
+    const request: { url: string; headers: Record<string, string> } = selected === 'openai'
+      ? { url: 'https://api.openai.com/v1/models', headers: { Authorization: `Bearer ${key}` } }
+      : selected === 'anthropic'
+        ? { url: 'https://api.anthropic.com/v1/models?limit=1', headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' } }
+        : { url: 'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', headers: { 'x-goog-api-key': key } }
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), PROVIDER_CONNECTION_TIMEOUT_MS)
+    try {
+      const response = await this.#fetch(request.url, { method: 'GET', headers: request.headers, signal: controller.signal })
+      const checkedAt = new Date().toISOString()
+      if (response.ok) {
+        return { provider: selected, state: 'connected', stored: true, checkedAt, message: `${name} accepted the saved credential.` }
+      }
+      if (response.status === 401 || response.status === 403) {
+        return { provider: selected, state: 'authentication-failed', stored: true, checkedAt, message: `${name} rejected the saved credential (HTTP ${response.status}).` }
+      }
+      if (response.status === 429) {
+        return { provider: selected, state: 'unavailable', stored: true, checkedAt, message: `${name} is reachable, but the account is rate-limited or out of quota (HTTP 429).` }
+      }
+      return { provider: selected, state: 'unavailable', stored: true, checkedAt, message: `${name} returned HTTP ${response.status} during the connection test.` }
+    } catch (error) {
+      const checkedAt = new Date().toISOString()
+      if (controller.signal.aborted) {
+        return { provider: selected, state: 'unavailable', stored: true, checkedAt, message: `${name} did not respond within 10 seconds.` }
+      }
+      const detail = (error instanceof Error ? error.message : String(error)).replaceAll(key, '••••')
+      return { provider: selected, state: 'unavailable', stored: true, checkedAt, message: `${name} could not be reached: ${detail}` }
+    } finally {
+      clearTimeout(timeout)
+    }
   }
 
   deleteCredential(provider: Exclude<AIProviderId, 'ollama'>): Promise<void> {

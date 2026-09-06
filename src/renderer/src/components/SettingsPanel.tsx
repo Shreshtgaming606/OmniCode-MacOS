@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { CheckCircle2, KeyRound, LoaderCircle, Shield, Trash2, X } from 'lucide-react'
-import type { AIModel, AIProviderId, ThemePreference, WorkspaceSettings } from '../../../shared/contracts'
+import type { AIModel, AIProviderConnectionStatus, AIProviderId, ThemePreference, WorkspaceSettings } from '../../../shared/contracts'
 
 type CloudProvider = Exclude<AIProviderId, 'ollama'>
 const PROVIDERS: Array<{ id: CloudProvider; name: string; placeholder: string }> = [
@@ -44,7 +44,8 @@ export function SettingsPanel({
 }) {
   const [keys, setKeys] = useState<Record<CloudProvider, string>>({ openai: '', anthropic: '', google: '' })
   const [stored, setStored] = useState<Record<CloudProvider, boolean | null>>({ openai: null, anthropic: null, google: null })
-  const [credentialBusy, setCredentialBusy] = useState<Partial<Record<CloudProvider, 'saving' | 'removing'>>>({})
+  const [connections, setConnections] = useState<Partial<Record<CloudProvider, AIProviderConnectionStatus>>>({})
+  const [credentialBusy, setCredentialBusy] = useState<Partial<Record<CloudProvider, 'saving' | 'testing' | 'removing'>>>({})
   const [credentialErrors, setCredentialErrors] = useState<Partial<Record<CloudProvider, string>>>({})
   const [status, setStatus] = useState('')
   const [statusError, setStatusError] = useState(false)
@@ -54,7 +55,16 @@ export function SettingsPanel({
     let active = true
     for (const { id } of PROVIDERS) {
       void window.omnicode.ai.hasCredential(id)
-        .then((value) => { if (active) setStored((current) => ({ ...current, [id]: value })) })
+        .then((value) => {
+          if (!active) return
+          setStored((current) => ({ ...current, [id]: value }))
+          setConnections((current) => ({
+            ...current,
+            [id]: value
+              ? { provider: id, state: 'stored', stored: true, message: 'Credential stored in macOS Keychain; connection not tested yet.' }
+              : { provider: id, state: 'not-configured', stored: false, message: 'No API key is stored in macOS Keychain.' }
+          }))
+        })
         .catch((cause) => { if (active) setCredentialErrors((current) => ({ ...current, [id]: cause instanceof Error ? cause.message : String(cause) })) })
     }
     return () => { active = false }
@@ -69,19 +79,43 @@ export function SettingsPanel({
     if (!workspacePath) return setWorkspaceJson('{}')
     void window.omnicode.settings.read(workspacePath).then((settings) => setWorkspaceJson(JSON.stringify(settings, null, 2))).catch((cause) => { setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause)) })
   }, [workspacePath])
+  const testConnection = async (provider: CloudProvider, keepBusy = false): Promise<AIProviderConnectionStatus | undefined> => {
+    if (credentialBusy[provider] && !keepBusy) return
+    if (!keepBusy) setCredentialBusy((current) => ({ ...current, [provider]: 'testing' }))
+    setCredentialErrors((current) => ({ ...current, [provider]: undefined }))
+    setStatus('')
+    try {
+      const result = await window.omnicode.ai.testProviderConnection(provider)
+      setStored((current) => ({ ...current, [provider]: result.stored }))
+      setConnections((current) => ({ ...current, [provider]: result }))
+      setStatusError(result.state !== 'connected')
+      setStatus(result.message)
+      return result
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause)
+      setCredentialErrors((current) => ({ ...current, [provider]: message }))
+      setStatusError(true)
+      setStatus(message)
+      return undefined
+    } finally {
+      if (!keepBusy) setCredentialBusy((current) => ({ ...current, [provider]: undefined }))
+    }
+  }
   const saveKey = async (provider: CloudProvider): Promise<void> => {
     if (credentialBusy[provider]) return
     setCredentialBusy((current) => ({ ...current, [provider]: 'saving' }))
     setCredentialErrors((current) => ({ ...current, [provider]: undefined }))
     setStatus('')
+    let saved = false
     try {
       await window.omnicode.ai.setCredential(provider, keys[provider])
+      saved = true
       setStored((current) => ({ ...current, [provider]: true }))
       setKeys((current) => ({ ...current, [provider]: '' }))
-      setStatusError(false)
-      setStatus(`${PROVIDERS.find((item) => item.id === provider)!.name} API key saved and verified in macOS Keychain.`)
+      const result = await testConnection(provider, true)
+      if (result) setStatus(`${PROVIDERS.find((item) => item.id === provider)!.name} API key saved securely. ${result.message}`)
     } catch (cause) {
-      setStored((current) => ({ ...current, [provider]: null }))
+      setStored((current) => ({ ...current, [provider]: saved ? true : null }))
       setCredentialErrors((current) => ({ ...current, [provider]: cause instanceof Error ? cause.message : String(cause) }))
     } finally { setCredentialBusy((current) => ({ ...current, [provider]: undefined })) }
   }
@@ -93,6 +127,7 @@ export function SettingsPanel({
     try {
       await window.omnicode.ai.deleteCredential(provider)
       setStored((current) => ({ ...current, [provider]: false }))
+      setConnections((current) => ({ ...current, [provider]: { provider, state: 'not-configured', stored: false, message: 'No API key is stored in macOS Keychain.' } }))
       setStatusError(false)
       setStatus(`${PROVIDERS.find((item) => item.id === provider)!.name} API key removed.`)
     } catch (cause) {
@@ -111,9 +146,10 @@ export function SettingsPanel({
           <section id="files"><h2>Files & Autosave</h2><label className="setting-toggle"><span><strong>Autosave</strong><small>Save changed files after a short delay.</small></span><input type="checkbox" checked={autosave} onChange={(event) => onAutosave(event.target.checked)} /></label></section>
           <section id="providers"><h2>AI Providers</h2><p>Credentials are written to macOS Keychain and never to a workspace or log.</p>
             {PROVIDERS.map((provider) => <div className="provider-setting" key={provider.id} aria-busy={!!credentialBusy[provider.id]}>
-              <div><KeyRound /><span><strong>{provider.name}</strong><small>{credentialBusy[provider.id] ? <><LoaderCircle className="spin" />{credentialBusy[provider.id] === 'saving' ? 'Saving and verifying…' : 'Removing…'}</> : credentialErrors[provider.id] ? 'Keychain needs attention' : stored[provider.id] === null ? 'Checking Keychain…' : stored[provider.id] ? <><CheckCircle2 /> Credential stored</> : 'Not configured'}</small></span></div>
+              <div><KeyRound /><span><strong>{provider.name}</strong><small>{credentialBusy[provider.id] ? <><LoaderCircle className="spin" />{credentialBusy[provider.id] === 'saving' ? 'Saving and testing…' : credentialBusy[provider.id] === 'testing' ? 'Testing connection…' : 'Removing…'}</> : credentialErrors[provider.id] ? 'Keychain needs attention' : stored[provider.id] === null ? 'Checking Keychain…' : connections[provider.id]?.state === 'connected' ? <><CheckCircle2 /> Connected</> : connections[provider.id]?.state === 'authentication-failed' ? 'Authentication failed' : connections[provider.id]?.state === 'unavailable' ? 'Stored · Connection unavailable' : stored[provider.id] ? 'Credential stored · Not tested' : 'Not configured'}</small></span></div>
               <input aria-label={`${provider.name} API key`} type="password" autoComplete="off" disabled={!!credentialBusy[provider.id]} value={keys[provider.id]} placeholder={stored[provider.id] ? 'Replace saved credential' : provider.placeholder} onChange={(event) => setKeys((current) => ({ ...current, [provider.id]: event.target.value }))} onKeyDown={(event) => { if (event.key === 'Enter' && keys[provider.id].trim()) void saveKey(provider.id) }} />
               <button aria-label={`Save ${provider.name} API key`} disabled={!keys[provider.id].trim() || !!credentialBusy[provider.id]} onClick={() => void saveKey(provider.id)}>{credentialBusy[provider.id] === 'saving' ? 'Saving…' : 'Save'}</button>
+              {stored[provider.id] && <button aria-label={`Test ${provider.name} connection`} disabled={!!credentialBusy[provider.id]} onClick={() => void testConnection(provider.id)}>{credentialBusy[provider.id] === 'testing' ? 'Testing…' : 'Test'}</button>}
               {stored[provider.id] && <button className="icon-button danger" title={`Delete ${provider.name} credential`} disabled={!!credentialBusy[provider.id]} onClick={() => void deleteKey(provider.id)}><Trash2 /></button>}
               {credentialErrors[provider.id] && <p className="provider-error" role="alert">{credentialErrors[provider.id]}</p>}
             </div>)}

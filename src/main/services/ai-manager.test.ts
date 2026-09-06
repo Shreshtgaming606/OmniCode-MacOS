@@ -393,4 +393,70 @@ describe('AIManager cloud providers', () => {
     await manager.setCredential('google', 'test-key')
     await expect(manager.chat({ provider: 'google', model: 'test-model', messages })).rejects.toThrow(`AI provider returned ${status}`)
   })
+
+  it.each([
+    { provider: 'openai' as const, url: 'https://api.openai.com/v1/models', header: 'authorization', value: 'Bearer connection-key' },
+    { provider: 'anthropic' as const, url: 'https://api.anthropic.com/v1/models?limit=1', header: 'x-api-key', value: 'connection-key' },
+    { provider: 'google' as const, url: 'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', header: 'x-goog-api-key', value: 'connection-key' }
+  ])('authenticates the saved $provider key with its lightweight models endpoint', async ({ provider, url, header, value }) => {
+    const credentials = storedCredentials()
+    await credentials.set(provider, 'connection-key')
+    const requests: Array<{ url: string; init?: RequestInit }> = []
+    const manager = new AIManager(credentials, new WorkspaceIndexer(), TEST_HARDWARE, {
+      fetch: (async (input: string | URL | Request, init?: RequestInit) => {
+        requests.push({ url: String(input), init })
+        return new Response(JSON.stringify({ data: [] }), { status: 200 })
+      }) as typeof fetch
+    })
+
+    const result = await manager.testProviderConnection(provider)
+
+    expect(result).toMatchObject({ provider, state: 'connected', stored: true })
+    expect(result.checkedAt).toBeTruthy()
+    expect(requests).toHaveLength(1)
+    expect(requests[0]?.url).toBe(url)
+    expect(requests[0]?.init?.method).toBe('GET')
+    expect(new Headers(requests[0]?.init?.headers).get(header)).toBe(value)
+    if (provider === 'anthropic') {
+      expect(new Headers(requests[0]?.init?.headers).get('anthropic-version')).toBe('2023-06-01')
+    }
+  })
+
+  it.each([401, 403])('distinguishes an HTTP %s authentication failure from stored state', async (status) => {
+    const credentials = storedCredentials()
+    await credentials.set('google', 'invalid-key')
+    const manager = new AIManager(credentials, new WorkspaceIndexer(), TEST_HARDWARE, {
+      fetch: (async () => new Response('', { status })) as typeof fetch
+    })
+
+    await expect(manager.testProviderConnection('google')).resolves.toMatchObject({
+      state: 'authentication-failed', stored: true, message: expect.stringContaining(`HTTP ${status}`)
+    })
+    await expect(manager.hasCredential('google')).resolves.toBe(true)
+  })
+
+  it('reports missing, rate-limited, and unreachable providers without exposing the key', async () => {
+    let requestCount = 0
+    const missing = new AIManager({
+      async get() { throw new CredentialNotFoundError('openai') }
+    } as unknown as CredentialManager, new WorkspaceIndexer(), TEST_HARDWARE, {
+      fetch: (async () => { requestCount += 1; return new Response() }) as typeof fetch
+    })
+    await expect(missing.testProviderConnection('openai')).resolves.toMatchObject({ state: 'not-configured', stored: false })
+    expect(requestCount).toBe(0)
+
+    const credentials = storedCredentials()
+    await credentials.set('anthropic', 'private-connection-key')
+    const rateLimited = new AIManager(credentials, new WorkspaceIndexer(), TEST_HARDWARE, {
+      fetch: (async () => new Response('', { status: 429 })) as typeof fetch
+    })
+    await expect(rateLimited.testProviderConnection('anthropic')).resolves.toMatchObject({ state: 'unavailable', stored: true })
+
+    const unreachable = new AIManager(credentials, new WorkspaceIndexer(), TEST_HARDWARE, {
+      fetch: (async () => { throw new Error('socket failed for private-connection-key') }) as typeof fetch
+    })
+    const result = await unreachable.testProviderConnection('anthropic')
+    expect(result).toMatchObject({ state: 'unavailable', stored: true })
+    expect(result.message).not.toContain('private-connection-key')
+  })
 })
