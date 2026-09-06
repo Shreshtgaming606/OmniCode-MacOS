@@ -19,6 +19,14 @@ describe('workspace retrieval', () => {
     expect(rankIndexedFile(named, ['login'])).toBeGreaterThan(rankIndexedFile(bodyOnly, ['login']))
   })
 
+  it('does not return README or manifest files that have no query match', () => {
+    const readme: IndexedFile = {
+      path: '/tmp/README.md', relativePath: 'README.md', content: 'Project overview',
+      symbols: [], imports: [], tokens: new Set(['project', 'overview'])
+    }
+    expect(rankIndexedFile(readme, ['unrelatedmarker'])).toBe(0)
+  })
+
   it('does not automatically index environment files or credential stores', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'omnicode-index-'))
     try {
@@ -57,6 +65,34 @@ describe('workspace retrieval', () => {
       expect(indexer.relevant('mustRemainVisible')).toHaveLength(1)
     } finally {
       await fs.rm(container, { recursive: true, force: true })
+    }
+  })
+
+  it('replaces updated, created, renamed, and deleted files on each refresh', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'omnicode-index-'))
+    try {
+      const original = path.join(root, 'original.ts')
+      const created = path.join(root, 'created.ts')
+      const renamed = path.join(root, 'renamed.ts')
+      await fs.writeFile(original, 'export const ORIGINAL_CITRUS_MARKER = true')
+      const indexer = new WorkspaceIndexer()
+      await indexer.index(root)
+      expect(indexer.relevant('ORIGINAL_CITRUS_MARKER').map((file) => file.path)).toEqual([original])
+
+      await fs.writeFile(original, 'export const UPDATED_VIOLET_MARKER = true')
+      await fs.writeFile(created, 'export const CREATED_COBALT_MARKER = true')
+      await indexer.index(root)
+      expect(indexer.relevant('ORIGINAL_CITRUS_MARKER')).toHaveLength(0)
+      expect(indexer.relevant('UPDATED_VIOLET_MARKER').map((file) => file.path)).toEqual([original])
+      expect(indexer.relevant('CREATED_COBALT_MARKER').map((file) => file.path)).toEqual([created])
+
+      await fs.rename(created, renamed)
+      await fs.rm(original)
+      await indexer.index(root)
+      expect(indexer.relevant('UPDATED_VIOLET_MARKER')).toHaveLength(0)
+      expect(indexer.relevant('CREATED_COBALT_MARKER').map((file) => file.path)).toEqual([renamed])
+    } finally {
+      await fs.rm(root, { recursive: true, force: true })
     }
   })
 })

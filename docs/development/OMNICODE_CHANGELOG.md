@@ -19,6 +19,36 @@ stabilization phase.
 - Verified Google Gemini end to end in the packaged app using the already saved
   Keychain credential: the authentication probe connected and the real minimal
   prompt returned the exact expected response with no renderer errors.
+- Audited Ollama on the real host and rebuilt package. The CLI and app bundle are
+  absent, port 11434 refuses connections, installed-model count is zero, the UI
+  accurately says Not Installed, and all model download controls remain disabled.
+- Replaced the raw offline Local AI `TypeError: fetch failed` with an actionable
+  distinction between Ollama not installed and installed-but-service-unavailable,
+  while preserving genuine HTTP/model diagnostics. Added unit and packaged
+  regression coverage; real inference remains externally blocked.
+- Fixed workspace AI context going stale after file changes by debouncing index
+  refreshes from the existing filesystem watcher. Packaged update, create,
+  rename, and delete lifecycle tests now return current files without a manual
+  reindex.
+- Fixed README and manifest ranking so a tie-break bonus cannot make an unrelated
+  file appear relevant when no query token matches.
+- Verified live multi-file Workspace context in the AI sidebar: consent listed
+  the retrieved paths and Gemini derived three undisclosed values from the
+  disposable project. Sensitive/ignored files stayed excluded and an outside
+  attachment was denied.
+- Moved Agent dangerous-command policy and confirmation into the main process,
+  expanded blocking for privileged/destructive/Keychain/nested-shell patterns,
+  and made the three permission tiers control cloud-context consent rather than
+  merely changing a label.
+- Added packaged diff/security coverage. Real modify/create/delete changes stayed
+  staged until acceptance, acceptance matched disk, undo restored the snapshot,
+  rejection preserved disk, traversal/wrong-workspace/`sudo` requests were
+  denied, and cleanup completed without renderer errors.
+- Exercised the real multi-file Agent planning workflow. Two calls stopped safely
+  on Google's transient HTTP 503 high-demand response and wrote nothing; a later
+  bounded retry read config/database facts, proposed one derived file, opened
+  Diff Review, stayed in-memory until acceptance, matched disk after acceptance,
+  and disappeared after undo with zero renderer errors.
 
 ## 2026-09-05
 

@@ -15,6 +15,7 @@ import { SettingsManager } from './services/settings-manager'
 import { WorkspaceHistoryManager } from './services/workspace-history-manager'
 import { RUNTIME_TOOL_DEFINITIONS, detectHardware, detectTools } from './services/runtime-manager'
 import { RuntimeInstaller, installationPlanFor, runtimeToolId } from './services/runtime-installer'
+import { validateAgentCommand } from './services/agent-command-policy'
 
 let mainWindow: BrowserWindow | null = null
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
@@ -487,6 +488,24 @@ function registerIpc(): void {
   handle('ai:delete-credential', (_event, provider) => ai.deleteCredential(provider))
   handle('ai:index', (_event, root: string) => ai.index(assertCurrentWorkspace(root)))
   handle('ai:context-preview', (_event, root: string, query: string) => ai.contextPreview(assertCurrentWorkspace(root), query))
+  handle('agent:approve-command', async (event, workspaceRoot: string, command: string, reason: string) => {
+    assertCurrentWorkspace(workspaceRoot)
+    const validated = validateAgentCommand(command, reason)
+    const options: Electron.MessageBoxOptions = {
+      type: 'warning',
+      buttons: ['Run Command', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+      message: 'Run this AI Agent command?',
+      detail: `${validated.command}\n\nReason: ${validated.reason}\n\nThe command will run inside the current workspace with your normal macOS user permissions.`
+    }
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    const response = owner
+      ? await dialog.showMessageBox(owner, options)
+      : await dialog.showMessageBox(options)
+    return response.response === 0
+  })
   handle('settings:read', (_event, root: string) => settings.read(assertCurrentWorkspace(root)))
   handle('settings:write', (_event, root: string, value) => settings.write(assertCurrentWorkspace(root), value))
 }

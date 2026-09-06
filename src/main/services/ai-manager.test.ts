@@ -1,3 +1,6 @@
+import { promises as fs } from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -189,6 +192,51 @@ describe('AIManager model lifecycle', () => {
       expect.objectContaining({ model: 'qwen2.5-coder:3b', keep_alive: 0 })
     ])
   })
+
+  it.each([
+    {
+      installed: false,
+      message: 'Ollama is not installed. Install it from Setup or Tools & Runtimes before using Local AI.'
+    },
+    {
+      installed: true,
+      message: 'Ollama is installed, but its local service is unavailable. Start Ollama and try again.'
+    }
+  ])('turns a failed local connection into a useful installed=$installed error', async ({ installed, message }) => {
+    const manager = new AIManager(
+      new CredentialManager(),
+      new WorkspaceIndexer(),
+      TEST_HARDWARE,
+      { fetch: (async () => { throw new TypeError('fetch failed') }) as typeof fetch }
+    )
+    manager.ollamaStatus = async () => ({ installed, available: false })
+
+    await expect(manager.chat({
+      provider: 'ollama',
+      model: 'qwen2.5-coder:1.5b',
+      messages: [{ role: 'user', content: 'Hello' }]
+    })).rejects.toThrow(message)
+  })
+
+  it('preserves an Ollama HTTP diagnostic such as a missing model response', async () => {
+    const manager = new AIManager(
+      new CredentialManager(),
+      new WorkspaceIndexer(),
+      TEST_HARDWARE,
+      {
+        fetch: (async () => new Response(
+          JSON.stringify({ error: 'model not found' }),
+          { status: 404 }
+        )) as typeof fetch
+      }
+    )
+
+    await expect(manager.chat({
+      provider: 'ollama',
+      model: 'missing:latest',
+      messages: [{ role: 'user', content: 'Hello' }]
+    })).rejects.toThrow('AI provider returned 404: {"error":"model not found"}')
+  })
 })
 
 describe('AIManager cloud providers', () => {
@@ -198,6 +246,44 @@ describe('AIManager cloud providers', () => {
     { role: 'assistant' as const, content: 'Which function?' },
     { role: 'user' as const, content: 'The selected one.' }
   ]
+
+  it('sends ranked multi-file workspace context while excluding unrelated secrets', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'omnicode-ai-context-'))
+    try {
+      await fs.writeFile(path.join(root, 'auth.ts'), "import { SESSION_TTL_MINUTES } from './config'\nimport { USER_TABLE } from './database'\nexport function createLoginSession() { return `${USER_TABLE}:${SESSION_TTL_MINUTES}` }\n")
+      await fs.writeFile(path.join(root, 'config.ts'), 'export const SESSION_TTL_MINUTES = 47\n')
+      await fs.writeFile(path.join(root, 'database.ts'), "export const USER_TABLE = 'nebula_accounts'\n")
+      await fs.writeFile(path.join(root, 'unrelated.ts'), 'export const WEATHER_THEME = true\n')
+      await fs.writeFile(path.join(root, '.env'), 'OMNICODE_TEST_SECRET=never-send-this\n')
+      const requests: CapturedCloudRequest[] = []
+      const manager = cloudManager({ choices: [{ message: { content: 'Context answer' } }] }, requests, [])
+      await manager.index(root)
+
+      const result = await manager.chat({
+        provider: 'openai',
+        model: 'gpt-5',
+        workspacePath: root,
+        attachWorkspaceContext: true,
+        messages: [{
+          role: 'user',
+          content: 'Explain createLoginSession using SESSION_TTL_MINUTES and USER_TABLE.'
+        }]
+      })
+
+      expect(result.contextFiles.map((file) => path.basename(file))).toEqual(expect.arrayContaining([
+        'auth.ts', 'config.ts', 'database.ts'
+      ]))
+      const outbound = requests[0]?.body.messages as Array<{ role: string; content: string }>
+      expect(outbound[0]?.role).toBe('system')
+      expect(outbound[0]?.content).toContain('--- auth.ts ---')
+      expect(outbound[0]?.content).toContain('--- config.ts ---')
+      expect(outbound[0]?.content).toContain('--- database.ts ---')
+      expect(outbound[0]?.content).not.toContain('OMNICODE_TEST_SECRET')
+      expect(outbound[0]?.content).not.toContain('WEATHER_THEME')
+    } finally {
+      await fs.rm(root, { recursive: true, force: true })
+    }
+  })
 
   it.each([
     { provider: 'openai' as const, header: 'authorization', prefix: 'Bearer ', response: { choices: [{ message: { content: 'Saved key works' } }] } },

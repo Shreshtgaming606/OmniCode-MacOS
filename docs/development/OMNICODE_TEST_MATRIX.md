@@ -87,7 +87,8 @@ substitute for a real integration test where one is required.
 | Gemini | Real minimal request | Exact response reaches packaged app | Pass | Packaged E2E | Existing Keychain credential authenticated; exact `OmniCode Cloud AI Test Successful` response received; no renderer errors |
 | Providers | Connection endpoints | Lightweight official endpoint, headers, auth/rate/network states | Pass | Unit | OpenAI, Anthropic, and Google request shapes and state mapping covered |
 | Providers | Status UI | Stored vs authenticated/connected | Pass | Packaged E2E | Stored/not-tested after restart, Connected for valid Gemini, Authentication failed for invalid OpenAI; Save/Test/Delete exercised |
-| Ollama | Installed/service states | Distinguish absent, stopped, available | Covered | Unit | Current-host comparison pending |
+| Ollama | Installed/service states | Distinguish absent, stopped, available | Pass | Unit + packaged E2E | CLI/app absent and port 11434 closed on host; packaged API/UI accurately reported not installed; stopped/available branches unit-covered |
+| Ollama | Missing-service chat error | Fail accurately without a fake response or raw stack | Pass | Packaged E2E + unit | Rebuilt app reports installation guidance; installed-but-stopped and HTTP/model error variants covered |
 | Ollama | Model list | Real installed/running models | Blocked | Integration | Ollama service required |
 | Ollama | Pull/cancel/delete/default | Real small-model lifecycle | Blocked | E2E | Ollama service/model required |
 | Ollama | Real inference | Exact response and coding question | Blocked | E2E | Ollama service/model required |
@@ -96,15 +97,16 @@ substitute for a real integration test where one is required.
 | AI chat | Markdown/code blocks | Render assistant response appropriately | Not run | E2E | Current implementation uses preformatted text |
 | AI chat | Streaming/stop | Generation updates and cancellation | Not implemented | Inspection | No UI/backend support exists |
 | Context | Current/open/selected files | Inspect exact outbound request | Not run | Integration | Scheduled |
-| Context | Workspace retrieval | Multi-file relevance and actual payload | Covered | Unit | Real fixture E2E pending |
+| Context | Workspace retrieval | Multi-file relevance and actual payload | Pass | Unit + packaged live E2E | Exact outbound system context inspected in unit test; real Gemini derived undisclosed TTL/table/prefix across five retrieved files after consent |
 | Context | Terminal/problems/Git | Include only explicitly selected data | Not run | Integration | Scheduled |
-| Indexer | Initial/changed/new/deleted/renamed | Maintain current index | Partial | Unit | Change lifecycle pending |
+| Indexer | Initial/changed/new/deleted/renamed | Maintain current index | Pass | Unit + packaged E2E | Watcher-driven update/create/rename/delete refresh passed; stale tokens and paths disappeared |
 | Indexer | Ignore/binary/large | Exclude sensitive/binary/huge files | Pass | Unit | Large-project performance pending |
 | Inline AI | Proposal/accept/reject/save | Real selected-code workflow | Blocked | E2E | Working AI backend required |
-| Agent | Inspect/plan/propose files | Disposable multi-file task | Blocked | E2E | Working AI backend required |
-| Agent | Command permission | Approval and backend enforcement | Not run | Security integration | Scheduled with simulated requests |
-| Diff | File/hunk accept/reject/all | Filesystem matches decisions | Pass | Unit | Renderer E2E pending |
-| Diff | Create/delete/undo | Restore exact filesystem state | Pass | Unit | Renderer E2E pending |
+| Agent | Inspect/plan/propose files | Disposable multi-file task | Pass | Packaged live E2E | Two transient 503 attempts stopped safely with no writes; later retry read multiple files, proposed one derived file, opened review, accepted, and undid it |
+| Agent | Plan parsing/path safety | Reject traversal, malformed, incomplete, and oversized plans | Pass | Unit | Relative paths only; 50-file, 20-step, and 10-command limits verified |
+| Agent | Command permission | Approval and backend enforcement | Partial | Unit + packaged security | Main process blocked `sudo` and wrong workspace; dangerous command matrix passes; allowed-command native confirmation acceptance remains manual |
+| Diff | File/hunk accept/reject/all | Filesystem matches decisions | Pass | Unit + packaged E2E | Real three-file transaction stayed staged until accept; reject preserved disk |
+| Diff | Create/delete/undo | Restore exact filesystem state | Pass | Unit + packaged E2E | Modify/create/delete acceptance and full snapshot undo matched disk |
 | Settings | Workspace JSON | Validate/read/write and corrupt input | Pass | Unit | UI/restart pending |
 | Settings | User preferences | Theme/autosave/permission restart | Partial | Packaged E2E | Settings opens from workbench; persistence controls remain |
 | Settings | AI model/default | Persist selected/default local model | Covered | Unit | Real restart pending |
@@ -113,7 +115,7 @@ substitute for a real integration test where one is required.
 | Layout | Persistence | Restore panel dimensions | Not implemented | Inspection | No persistence code found |
 | Security | Renderer sandbox/IPC sender | Reject untrusted calls/navigation | Pass | Automated/smoke | Further adversarial tests pending |
 | Security | Workspace boundary | Reject arbitrary external paths | Pass | Unit | Agent/terminal special cases pending |
-| Security | Dangerous commands | Backend approval enforcement | Not run | Security integration | Scheduled |
+| Security | Dangerous commands | Backend approval enforcement | Partial | Unit + packaged security | Main-process policy blocks privileged/destructive/Keychain/nested-shell patterns; native approval acceptance remains manual |
 | Failure | Offline/provider/rate-limit/timeout | Graceful accurate errors | Partial | Unit + packaged E2E | Auth failure and a real transient Gemini 503 surfaced honestly; offline and timeout E2E remain |
 | Failure | Permission/read-only/moved files | Graceful accurate errors | Partial | Unit | Real filesystem E2E pending |
 | Performance | Startup/idle | Time, CPU, memory | Not run | Measurement | Scheduled |

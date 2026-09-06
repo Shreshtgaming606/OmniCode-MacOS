@@ -39,7 +39,10 @@ lost. Secrets, tokens, and authorization headers must never be included here.
   `src/renderer/src/components/AIChat.tsx`, `src/main/services/credential-manager.ts`.
 - Current status: 🟡 Partially resolved — Gemini is verified end to end. OpenAI
   and Claude successful live requests are BLOCKED — USER CONFIGURATION REQUIRED.
-  No user credential was overwritten or printed.
+  Gemini also completed the live multi-file Chat context test. Two Agent planning
+  attempts received an honest transient HTTP 503 high-demand response; a bounded
+  later retry succeeded through propose/review/accept/undo. No user credential
+  was overwritten or printed.
 
 ## OMI-003 — Local inference is unverified on the current host
 
@@ -47,13 +50,15 @@ lost. Secrets, tokens, and authorization headers must never be included here.
 - Reproduction: Start Ollama, select an installed model, and send the exact test
   prompt through OmniCode.
 - Expected: The selected model answers and the UI exits its loading state.
-- Actual: API/request/parser code is covered, but no real inference has been
-  observed in this audit.
+- Actual: API/request/parser code is covered. Current-host CLI and app-bundle
+  checks are absent, port 11434 refuses connections, and the rebuilt app
+  correctly reports Not Installed; no real inference can therefore run.
 - Suspected cause: Ollama service/model availability is external host state.
 - Relevant files: `src/main/services/ai-manager.ts`,
   `src/renderer/src/components/AIChat.tsx`, `src/renderer/src/components/ModelsView.tsx`.
-- Current status: 🔵 Pending host inspection; may become BLOCKED — USER
-  CONFIGURATION REQUIRED.
+- Current status: 🔵 BLOCKED — OLLAMA INSTALLATION AND AN INSTALLED MODEL
+  REQUIRED. Absence detection, disabled model actions, failed-chat behavior,
+  and actionable diagnostics are verified in the rebuilt package.
 
 ## OMI-004 — Authenticated GitHub remote operations are unverified
 
@@ -225,3 +230,65 @@ lost. Secrets, tokens, and authorization headers must never be included here.
 - Current status: ✅ Resolved — URL passwords, token-only HTTPS credentials,
   sensitive query parameters, and recognizable GitHub token forms are redacted;
   regression coverage confirms the original values are absent.
+
+## OMI-017 — Offline Ollama chat exposed a low-level fetch error — Resolved
+
+- Severity: Medium
+- Reproduction: Select Local AI and send a prompt when Ollama is absent or its
+  service is stopped.
+- Expected: OmniCode identifies whether installation or service startup is
+  needed and does not claim the prompt succeeded.
+- Actual: The packaged app previously surfaced `TypeError: fetch failed`.
+- Suspected cause: The Ollama chat adapter passed Node's raw transport failure
+  through IPC without mapping it to the detected local-service state.
+- Relevant files: `src/main/services/ai-manager.ts`,
+  `src/main/services/ai-manager.test.ts`, `scripts/audit-ollama.mjs`.
+- Current status: ✅ Resolved — the adapter now reports either Not Installed or
+  Installed but Service Unavailable, while preserving real Ollama HTTP/model
+  diagnostics. The rebuilt packaged absence workflow passed with no renderer
+  exceptions.
+
+## OMI-018 — Workspace AI index became stale after file changes — Resolved
+
+- Severity: High
+- Reproduction: Open/index a workspace, then update, create, rename, or delete a
+  file and request matching workspace context without manually reindexing.
+- Expected: Retrieval reflects the current filesystem.
+- Actual: The watcher refreshed Explorer only; AI context retained the opening
+  snapshot until the user explicitly ran Index Workspace.
+- Suspected cause: No index refresh was scheduled from `workspace:changed`.
+- Relevant files: `src/renderer/src/App.tsx`,
+  `src/main/services/workspace-indexer.ts`, `scripts/audit-ai-context.mjs`.
+- Current status: ✅ Resolved — watcher events now debounce a bounded reindex;
+  packaged update/create/rename/delete tests all returned current paths/content.
+
+## OMI-019 — README matched unrelated context queries — Resolved
+
+- Severity: Medium
+- Reproduction: Query a freshly indexed workspace for a unique token absent from
+  every file while a README or supported manifest exists.
+- Expected: No context file is returned.
+- Actual: README/manifests received an unconditional ranking bonus and therefore
+  passed the positive-score filter without a token match.
+- Suspected cause: The metadata tie-break bonus ran before checking base score.
+- Relevant files: `src/main/services/workspace-indexer.ts`,
+  `src/main/services/workspace-indexer.test.ts`.
+- Current status: ✅ Resolved — the bonus now applies only to files with a real
+  query match; unit and rebuilt packaged tests pass.
+
+## OMI-020 — Agent command safety lived only in React — Resolved
+
+- Severity: Critical
+- Reproduction: Inspect the Agent command path; the renderer filtered text and
+  used `window.confirm`, then forwarded the command to a normal terminal.
+- Expected: Agent-specific command policy and approval have a main-process
+  enforcement point independent of the WebView handler.
+- Actual: No Agent command IPC boundary existed.
+- Suspected cause: Agent execution reused the terminal flow without a privileged
+  approval service.
+- Relevant files: `src/main/services/agent-command-policy.ts`,
+  `src/main/index.ts`, `src/preload/index.ts`, `src/renderer/src/App.tsx`.
+- Current status: ✅ Resolved — command validation and native confirmation now
+  run in the main process. Packaged calls blocked `sudo` and wrong-workspace
+  requests; unit coverage blocks destructive, privileged, Keychain-read,
+  download-pipe, global-install, and nested-shell patterns.

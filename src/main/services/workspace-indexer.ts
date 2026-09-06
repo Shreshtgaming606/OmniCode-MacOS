@@ -73,7 +73,7 @@ export function rankIndexedFile(file: IndexedFile, queryTokens: string[]): numbe
     if (symbolTokens.has(token)) score += 6
     if (file.tokens.has(token)) score += 1
   }
-  if (/readme|package\.json|cargo\.toml|omnicode\.json/i.test(file.relativePath)) score += 0.5
+  if (score > 0 && /readme|package\.json|cargo\.toml|omnicode\.json/i.test(file.relativePath)) score += 0.5
   return score
 }
 

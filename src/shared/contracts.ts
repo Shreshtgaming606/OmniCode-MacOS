@@ -455,6 +455,9 @@ export interface OmniCodeAPI {
     index(root: string): Promise<WorkspaceIndexStatus>
     contextPreview(root: string, query: string): Promise<string[]>
   }
+  agent: {
+    approveCommand(workspaceRoot: string, command: string, reason: string): Promise<boolean>
+  }
   settings: {
     read(root: string): Promise<WorkspaceSettings>
     write(root: string, settings: WorkspaceSettings): Promise<void>

@@ -121,7 +121,7 @@ export function AIChat({
       attachGit && gitChanges ? `Git changes (${gitChanges.length.toLocaleString()} characters)` : '',
       selectedFiles.length ? `selected files (${selectedFiles.join(', ')})` : ''
     ].filter(Boolean)
-    if (provider !== 'ollama' && contextLabels.length && !window.confirm(
+    if (provider !== 'ollama' && permission === 'ask' && contextLabels.length && !window.confirm(
       `Send this context to ${provider}?\n\n• ${contextLabels.join('\n• ')}\n\nOnly the listed context and your conversation will be sent.`
     )) return
     const userMessage: AIMessage = { role: 'user', content: prompt.trim() }

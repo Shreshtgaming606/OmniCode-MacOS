@@ -76,20 +76,6 @@ const LANGUAGE_RUNTIME: Record<string, string> = {
   shell: 'zsh', bash: 'bash', zsh: 'zsh', fish: 'fish', dockerfile: 'docker', makefile: 'make', gradle: 'gradle'
 }
 
-function blockedAgentCommand(command: string): string | null {
-  const checks: Array<[RegExp, string]> = [
-    [/(^|[;&|]\s*)sudo\b/i, 'sudo commands must be run manually in a terminal.'],
-    [/(^|[;&|]\s*)rm\b[^\n]*(?:\s-[^\s]*r|\s--recursive|\s-[^\s]*f|\s--force)/i, 'recursive or forced deletion is never launched by the AI agent.'],
-    [/(^|[;&|]\s*)(?:diskutil|mkfs(?:\.[a-z0-9]+)?|dd|csrutil|shutdown|reboot|launchctl)\b/i, 'system and disk administration commands are blocked.'],
-    [/(^|[;&|]\s*)defaults\s+write\b/i, 'macOS settings changes are blocked.'],
-    [/(^|[;&|]\s*)(?:chmod|chown)\b[^\n]*\s-R\b/i, 'recursive permission changes are blocked.'],
-    [/(?:curl|wget)\b[^\n|]*\|\s*(?:sh|bash|zsh)\b/i, 'download-and-execute pipelines are blocked.'],
-    [/(^|[;&|]\s*)(?:brew\s+install|mas\s+install|npm\s+(?:i|install)\s+(?:-g|--global)|pip3?\s+install\b)/i, 'system-level or global installation commands must be run manually.'],
-    [/(?:^|\s)(?:>|>>|tee\s+)\s*\/(?:System|Library|etc|usr|bin|sbin)\b/i, 'writes to system locations are blocked.']
-  ]
-  return checks.find(([pattern]) => pattern.test(command))?.[1] ?? null
-}
-
 function ActivityButton({ id, current, label, badge, onClick, children }: {
   id: Activity | 'ai' | 'settings'
   current?: string
@@ -156,6 +142,7 @@ export function App() {
   const autocompleteInFlight = useRef<{ key: string; promise: Promise<string> } | null>(null)
   const pendingLocation = useRef<{ line: number; column: number } | null>(null)
   const refreshTimer = useRef<number | null>(null)
+  const indexRefreshTimer = useRef<number | null>(null)
   const allowUnloadRef = useRef(false)
   const startupInitializedRef = useRef(false)
   const externalOpenReceivedRef = useRef(false)
@@ -572,13 +559,11 @@ export function App() {
 
   const runAgentCommand = (command: string, reason: string): void => {
     if (!workspacePath) return
-    const blockedReason = blockedAgentCommand(command)
-    if (blockedReason) {
-      setToast({ message: `Command blocked: ${blockedReason}`, kind: 'error' })
-      return
-    }
-    if (!window.confirm(`Run this command in the workspace terminal?\n\n${command}\n\nReason: ${reason}\n\nThe command will run with your normal macOS user permissions.`)) return
-    makeRunRequest('AI Agent command', '/bin/zsh', ['-lc', command], workspacePath)
+    void window.omnicode.agent.approveCommand(workspacePath, command, reason).then((approved) => {
+      if (approved) makeRunRequest('AI Agent command', '/bin/zsh', ['-lc', command], workspacePath)
+    }).catch((cause) => {
+      setToast({ message: cause instanceof Error ? cause.message : String(cause), kind: 'error' })
+    })
   }
 
   const handleProposalChange = useCallback((proposal: DiffProposal): void => {
@@ -683,33 +668,46 @@ export function App() {
   }
   useEffect(() => window.omnicode.server.onState(setServerState), [])
   useEffect(() => window.omnicode.server.onLog((line) => setOutputs((current) => [...current.slice(-2_000), `[Local Server] ${line}`])), [])
-  useEffect(() => window.omnicode.workspace.onChanged((changedPath) => {
-    if (refreshTimer.current) window.clearTimeout(refreshTimer.current)
-    refreshTimer.current = window.setTimeout(() => void refreshTree(), 300)
-    const open = documentsRef.current.find((document) => document.path === changedPath)
-    if (!open) return
-    void window.omnicode.workspace.readFile(changedPath).then((disk) => {
-      if (Math.abs(disk.modifiedAt - open.modifiedAt) <= 1) return
-      if (open.content !== open.savedContent) {
-        setToast({ message: `${fileName(changedPath)} changed on disk. Save is paused until you review the conflict.`, kind: 'error' })
-        return
+  useEffect(() => {
+    const unsubscribe = window.omnicode.workspace.onChanged((changedPath) => {
+      if (refreshTimer.current) window.clearTimeout(refreshTimer.current)
+      refreshTimer.current = window.setTimeout(() => void refreshTree(), 300)
+      if (indexRefreshTimer.current) window.clearTimeout(indexRefreshTimer.current)
+      if (workspacePath) {
+        indexRefreshTimer.current = window.setTimeout(() => {
+          void window.omnicode.ai.index(workspacePath).catch(() => undefined)
+        }, 700)
       }
-      setDocuments((current) => current.map((document) => document.path === changedPath && document.content === document.savedContent
-        ? { ...disk, savedContent: disk.content }
-        : document))
-      setToast({ message: `Reloaded ${fileName(changedPath)} after an external change.`, kind: 'info' })
-    }).catch((cause) => {
-      const message = cause instanceof Error ? cause.message : String(cause)
-      const latest = documentsRef.current.find((document) => document.path === changedPath)
-      if (/ENOENT|no such file/i.test(message) && latest?.content === latest?.savedContent) {
-        setDocuments((current) => current.filter((document) => document.path !== changedPath))
-        setActivePath((current) => current === changedPath ? null : current)
-        setToast({ message: `Closed ${fileName(changedPath)} after it was removed on disk.`, kind: 'info' })
-      } else if (latest) {
-        setToast({ message: `${fileName(changedPath)} could not be reloaded: ${message}`, kind: 'error' })
-      }
+      const open = documentsRef.current.find((document) => document.path === changedPath)
+      if (!open) return
+      void window.omnicode.workspace.readFile(changedPath).then((disk) => {
+        if (Math.abs(disk.modifiedAt - open.modifiedAt) <= 1) return
+        if (open.content !== open.savedContent) {
+          setToast({ message: `${fileName(changedPath)} changed on disk. Save is paused until you review the conflict.`, kind: 'error' })
+          return
+        }
+        setDocuments((current) => current.map((document) => document.path === changedPath && document.content === document.savedContent
+          ? { ...disk, savedContent: disk.content }
+          : document))
+        setToast({ message: `Reloaded ${fileName(changedPath)} after an external change.`, kind: 'info' })
+      }).catch((cause) => {
+        const message = cause instanceof Error ? cause.message : String(cause)
+        const latest = documentsRef.current.find((document) => document.path === changedPath)
+        if (/ENOENT|no such file/i.test(message) && latest?.content === latest?.savedContent) {
+          setDocuments((current) => current.filter((document) => document.path !== changedPath))
+          setActivePath((current) => current === changedPath ? null : current)
+          setToast({ message: `Closed ${fileName(changedPath)} after it was removed on disk.`, kind: 'info' })
+        } else if (latest) {
+          setToast({ message: `${fileName(changedPath)} could not be reloaded: ${message}`, kind: 'error' })
+        }
+      })
     })
-  }), [refreshTree])
+    return () => {
+      unsubscribe()
+      if (refreshTimer.current) window.clearTimeout(refreshTimer.current)
+      if (indexRefreshTimer.current) window.clearTimeout(indexRefreshTimer.current)
+    }
+  }, [refreshTree, workspacePath])
   useEffect(() => {
     if (!autosave) return
     const dirtyDocuments = documents.filter((document) => document.content !== document.savedContent)

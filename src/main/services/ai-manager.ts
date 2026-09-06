@@ -820,10 +820,19 @@ export class AIManager {
 
   private async send(provider: AIProviderId, model: string, messages: AIMessage[]): Promise<string> {
     if (provider === 'ollama') {
-      const response = await fetchJson<{ message?: { content?: string } }>(this.#fetch, `${this.#ollamaBaseUrl}/api/chat`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model, messages, stream: false })
-      })
-      return response.message?.content ?? ''
+      try {
+        const response = await fetchJson<{ message?: { content?: string } }>(this.#fetch, `${this.#ollamaBaseUrl}/api/chat`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model, messages, stream: false })
+        })
+        return response.message?.content ?? ''
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith('AI provider returned ')) throw error
+        const status = await this.ollamaStatus().catch(() => ({ installed: false, available: false }))
+        if (status.installed) {
+          throw new Error('Ollama is installed, but its local service is unavailable. Start Ollama and try again.')
+        }
+        throw new Error('Ollama is not installed. Install it from Setup or Tools & Runtimes before using Local AI.')
+      }
     }
 
     let key: string

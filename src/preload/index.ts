@@ -116,6 +116,9 @@ const api: OmniCodeAPI = {
     index: (root) => ipcRenderer.invoke('ai:index', root),
     contextPreview: (root, query) => ipcRenderer.invoke('ai:context-preview', root, query)
   },
+  agent: {
+    approveCommand: (workspaceRoot, command, reason) => ipcRenderer.invoke('agent:approve-command', workspaceRoot, command, reason)
+  },
   settings: {
     read: (root) => ipcRenderer.invoke('settings:read', root),
     write: (root, settings) => ipcRenderer.invoke('settings:write', root, settings)

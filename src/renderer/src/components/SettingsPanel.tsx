@@ -186,11 +186,11 @@ export function SettingsPanel({
               catch (cause) { setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause)) }
             }}>Save Workspace Settings</button>
           </section>
-          <section id="permissions"><h2>AI Permissions</h2><p>Destructive, system, sudo, Keychain-read, and outside-workspace actions always require approval.</p>
+          <section id="permissions"><h2>AI Permissions</h2><p>Every AI file change stays behind diff review. Agent commands are filtered in the main process and require native confirmation; dangerous, privileged, and Keychain-read commands are blocked.</p>
             <div className="permission-options">{[
-              ['ask', 'Ask Every Time', 'Review file and command actions individually.'],
-              ['workspace', 'Workspace Access', 'Allow routine reads and writes inside the open workspace.'],
-              ['agent', 'Agent Mode', 'Allow iterative work inside the workspace; dangerous operations still ask.']
+              ['ask', 'Ask Every Time', 'Confirm cloud context for both Chat and Agent requests.'],
+              ['workspace', 'Workspace Access', 'Allow chosen Chat context; Agent context still confirms each task.'],
+              ['agent', 'Agent Mode', 'Allow chosen Chat and Agent context; edits and commands still require review.']
             ].map(([id, name, detail]) => <button key={id} className={permission === id ? 'active' : ''} onClick={() => onPermission(id as typeof permission)}><Shield /><span><strong>{name}</strong><small>{detail}</small></span>{permission === id && <CheckCircle2 />}</button>)}</div>
           </section>
         </main>

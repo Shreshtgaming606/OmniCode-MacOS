@@ -48,7 +48,7 @@ function cleanJSON(value: string): string {
   return unfenced.slice(start, end + 1)
 }
 
-function relativeAgentPath(value: unknown): string {
+export function relativeAgentPath(value: unknown): string {
   if (typeof value !== 'string') throw new Error('An agent change is missing its file path.')
   const normalized = value.trim().replaceAll('\\', '/')
   if (!normalized || normalized.startsWith('/') || normalized.split('/').includes('..')) {
@@ -57,7 +57,7 @@ function relativeAgentPath(value: unknown): string {
   return normalized
 }
 
-function parseAgentPlan(value: string): AgentPlan {
+export function parseAgentPlan(value: string): AgentPlan {
   const parsed = JSON.parse(cleanJSON(value)) as Record<string, unknown>
   const rawPlan = Array.isArray(parsed.plan) ? parsed.plan : []
   const rawChanges = Array.isArray(parsed.changes) ? parsed.changes : []
@@ -142,7 +142,7 @@ export function AgentMode({
           problems ? `editor problems: ${Math.min(problems.length, 8_000).toLocaleString()} characters` : '',
           gitChanges ? `Git changes: ${Math.min(gitChanges.length, 8_000).toLocaleString()} characters` : ''
         ].filter(Boolean)
-        if (!window.confirm(
+        if (permission !== 'agent' && !window.confirm(
           `Send this context to ${provider} for the Agent task?\n\n• ${contextDetails.join('\n• ')}\n\nNothing is written until you accept the proposed diff. Commands always require a separate click and confirmation.`
         )) return
       }
@@ -192,7 +192,7 @@ export function AgentMode({
 
   const busy = phase !== 'idle'
   return <div className="agent-mode">
-    <div className="agent-permission"><ShieldCheck /><span><strong>{permissionName(permission)}</strong><small>All edits are staged in a review and commands require a separate click.</small></span></div>
+    <div className="agent-permission"><ShieldCheck /><span><strong>{permissionName(permission)}</strong><small>All edits are staged in a review and commands require a separate click plus native confirmation.</small></span></div>
     {!workspacePath ? <div className="agent-empty"><Bot /><strong>Open a workspace to use Agent Mode</strong><p>The agent is deliberately limited to the folder you choose.</p></div> : <>
       <div className="agent-task">
         <label htmlFor="agent-task-input">Describe a workspace task</label>
