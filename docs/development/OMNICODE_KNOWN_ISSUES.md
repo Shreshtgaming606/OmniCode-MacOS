@@ -170,3 +170,19 @@ lost. Secrets, tokens, and authorization headers must never be included here.
 - Current status: ✅ Resolved — Run commands now print
   `[Process exited with code N]`; unit tests cover success/failure and packaged UI
   execution confirmed code 0.
+
+## OMI-014 — Package development servers reported success before readiness — Resolved
+
+- Severity: High
+- Reproduction: Configure an npm `dev` script that immediately exits with code
+  7, then start it from OmniCode.
+- Expected: Startup fails with the real exit reason and the UI remains stopped.
+- Actual: OmniCode returned `running: true` as soon as npm spawned, even though
+  the child exited and no localhost endpoint existed.
+- Suspected cause: `startProject` waited only for the child-process `spawn` event.
+- Relevant files: `src/main/services/dev-server-manager.ts`,
+  `src/main/services/dev-server-manager.test.ts`,
+  `scripts/audit-server-npm.mjs`.
+- Current status: ✅ Resolved — startup now requires a detected, reachable local
+  port; premature exit, timeout, and explicit port conflict are failures. Real
+  failing and successful npm fixtures passed in the rebuilt packaged app.

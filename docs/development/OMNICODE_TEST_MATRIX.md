@@ -62,13 +62,13 @@ substitute for a real integration test where one is required.
 | Run | Rust | Real Cargo build/run | Blocked | Host integration | BLOCKED — USER CONFIGURATION REQUIRED: rustc/Cargo not installed |
 | Run | Go | Real build/run | Blocked | Host integration | BLOCKED — USER CONFIGURATION REQUIRED: Go not installed |
 | Run | Error reporting | stdout, stderr, exit code, missing tool | Pass | Packaged E2E + unit | Run UI showed stdout and `[Process exited with code 0]`; deliberate failures nonzero |
-| npm | Script detection | Read package scripts and choose runner | Covered | Unit/code | Real fixture pending |
-| npm | Install/run/server | Real lifecycle with approval boundary | Not run | E2E | Scheduled |
-| Server | Static start | Start valid localhost port | Pass | Packaged smoke | HTTP README returned 200 |
-| Server | Assets/nested paths | HTML/CSS/JS/relative resources | Not run | Integration | Scheduled |
+| npm | Script detection | Read package scripts and choose runner | Pass | Packaged integration + unit | Disposable manifest exposed real `npm run` commands |
+| npm | Install/run/server | Real lifecycle with approval boundary | Pass | Packaged E2E | `npm run verify` and dependency-free server passed; no `node_modules` or automatic install was created |
+| Server | Static start | Start valid localhost port | Pass | Packaged E2E | Auto port returned reachable HTTP server and Run UI reflected state |
+| Server | Assets/nested paths | HTML/CSS/JS/relative resources | Pass | Packaged integration | Real HTML, CSS, JS, and nested file bytes served successfully |
 | Server | Secret denial | Deny `.git` and `.env` | Pass | Packaged smoke | Both returned 403 |
-| Server | Stop/restart/port release | Lifecycle correctness | Partial | Smoke/unit | Explicit port release/conflict pending |
-| Server | Live reload | HTML/CSS/JS browser update | Not run | E2E | Scheduled |
+| Server | Stop/restart/port release | Lifecycle correctness | Pass | Packaged integration + unit | Static/package restart passed, stopped ports rebound, explicit conflict was useful |
+| Server | Live reload | HTML/CSS/JS browser update | Partial | Packaged integration | Injected client and real SSE reload after write passed; actual browser page refresh remains manual |
 | Git | Repository detection/status | Real disposable repository | Covered | Unit | Real integration pending |
 | Git | Stage/unstage/commit/diff | Actual state matches UI | Covered | Unit | Real integration pending |
 | Git | Init/branches | Initialize, create, switch, delete | Covered | Unit | Real integration pending |

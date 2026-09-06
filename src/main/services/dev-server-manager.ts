@@ -1,5 +1,6 @@
 import { createReadStream, promises as fs } from 'node:fs'
 import http, { type Server, type ServerResponse } from 'node:http'
+import { createConnection, createServer as createNetServer } from 'node:net'
 import path from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
 import chokidar, { type FSWatcher } from 'chokidar'
@@ -10,12 +11,65 @@ import { isSensitiveWorkspacePath } from './sensitive-paths'
 import { resolveShellEnvironment } from './shell-environment'
 
 const LIVE_RELOAD_CLIENT = `<script>(()=>{const e=new EventSource('/__omnicode_events');e.addEventListener('reload',()=>location.reload());})();</script>`
+const PROJECT_START_TIMEOUT_MS = 30_000
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp',
   '.ico': 'image/x-icon', '.woff': 'font/woff', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8'
+}
+
+interface LocalServerCandidate {
+  host: string
+  port: number
+  url: string
+}
+
+function cleanTerminalOutput(value: string): string {
+  return value.replaceAll(/\u001b\[[0-?]*[ -/]*[@-~]/gu, '')
+}
+
+function localServerCandidates(value: string): LocalServerCandidate[] {
+  const output = cleanTerminalOutput(value)
+  const candidates = new Map<number, LocalServerCandidate>()
+  for (const match of output.matchAll(/(https?):\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\]):(\d{1,5})/giu)) {
+    const port = Number(match[3])
+    if (!Number.isInteger(port) || port < 1 || port > 65_535) continue
+    const host = match[2].startsWith('[::') ? '::1' : '127.0.0.1'
+    candidates.set(port, { host, port, url: `${match[1].toLowerCase()}://localhost:${port}` })
+  }
+  for (const match of output.matchAll(/(?:listen(?:ing)?|server|started|ready)[^\r\n]{0,60}?(?:port\s*)?(\d{2,5})/giu)) {
+    const port = Number(match[1])
+    if (!Number.isInteger(port) || port < 1 || port > 65_535 || candidates.has(port)) continue
+    candidates.set(port, { host: '127.0.0.1', port, url: `http://localhost:${port}` })
+  }
+  return [...candidates.values()]
+}
+
+async function canConnect(candidate: LocalServerCandidate): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = createConnection({ host: candidate.host, port: candidate.port })
+    let settled = false
+    const finish = (connected: boolean): void => {
+      if (settled) return
+      settled = true
+      socket.destroy()
+      resolve(connected)
+    }
+    socket.setTimeout(350)
+    socket.once('connect', () => finish(true))
+    socket.once('timeout', () => finish(false))
+    socket.once('error', () => finish(false))
+  })
+}
+
+async function isPortAvailable(port: number): Promise<boolean> {
+  const probe = createNetServer()
+  return new Promise((resolve) => {
+    probe.once('error', () => resolve(false))
+    probe.listen(port, '127.0.0.1', () => probe.close(() => resolve(true)))
+  })
 }
 
 export class DevServerManager {
@@ -122,10 +176,17 @@ export class DevServerManager {
       }
     })
 
-    await new Promise<void>((resolve, reject) => {
-      this.server?.once('error', reject)
-      this.server?.listen(requestedPort, '127.0.0.1', () => resolve())
-    })
+    try {
+      await new Promise<void>((resolve, reject) => {
+        this.server?.once('error', reject)
+        this.server?.listen(requestedPort, '127.0.0.1', () => resolve())
+      })
+    } catch (cause) {
+      this.server = null
+      const code = cause && typeof cause === 'object' && 'code' in cause ? String(cause.code) : ''
+      if (code === 'EADDRINUSE') throw new Error(`Port ${requestedPort} is already in use. Choose Auto or another port.`)
+      throw cause
+    }
     const address = this.server.address()
     if (!address || typeof address === 'string') throw new Error('Could not determine the local server port.')
     this.currentState = { running: true, port: address.port, url: `http://localhost:${address.port}`, root: absoluteRoot, mode: 'static', name: 'Static server' }
@@ -144,7 +205,11 @@ export class DevServerManager {
   async startProject(root: string, script: string, requestedPort?: number): Promise<ServerState> {
     await this.stop()
     if (requestedPort !== undefined && (!Number.isInteger(requestedPort) || requestedPort < 1 || requestedPort > 65_535)) throw new Error('Choose a port between 1 and 65535.')
-    const absoluteRoot = path.resolve(root)
+    if (requestedPort && !(await isPortAvailable(requestedPort))) {
+      throw new Error(`Port ${requestedPort} is already in use. Choose Auto or another port.`)
+    }
+    const absoluteRoot = await fs.realpath(path.resolve(root))
+    if (!(await fs.stat(absoluteRoot)).isDirectory()) throw new Error('Choose a project folder to serve.')
     const options = await this.detect(absoluteRoot)
     const selected = options.find((option) => option.kind === 'package' && option.script === script)
     if (!selected) throw new Error('That development-server script is not defined by this workspace.')
@@ -160,55 +225,83 @@ export class DevServerManager {
       detached: true
     })
     this.projectProcess = child
-    let settled = false
     let outputBuffer = ''
-    const consume = (chunk: string): void => {
-      outputBuffer += chunk
-      const lines = outputBuffer.split(/\r?\n/)
-      outputBuffer = lines.pop() ?? ''
-      for (const line of lines) {
-        this.onLogLine(line)
-        const match = line.match(/https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::\]):?(\d+)?[^\s\u001b]*/i)
-        if (match) {
-          const discoveredPort = Number(match[1] || requestedPort || 3000)
-          const url = `http://localhost:${discoveredPort}`
-          this.currentState = { ...this.currentState, running: true, port: discoveredPort, url }
-          this.onStateChanged(this.state())
-        }
-      }
-    }
-    child.stdout?.setEncoding('utf8'); child.stderr?.setEncoding('utf8')
-    child.stdout?.on('data', consume); child.stderr?.on('data', consume)
-    child.on('error', (error) => {
-      this.currentState = { running: false, root: absoluteRoot, mode: 'project', name: selected.name, script, error: error.message }
-      this.projectProcess = null
-      this.onStateChanged(this.state())
-    })
-    child.on('exit', (code, signal) => {
-      this.projectProcess = null
-      if (settled) {
-        this.currentState = { running: false, root: absoluteRoot, mode: 'project', name: selected.name, script, error: code && code !== 0 ? `Development server exited with code ${code}.` : undefined }
-        this.onLogLine(`[process exited ${signal ? `with ${signal}` : `with code ${code ?? 0}`}]`)
-        this.onStateChanged(this.state())
-      }
-    })
-    await new Promise<void>((resolve, reject) => {
-      child.once('spawn', resolve)
-      child.once('error', reject)
-    })
-    settled = true
-    const port = requestedPort || undefined
-    this.currentState = {
-      running: true,
-      port,
-      url: port ? `http://localhost:${port}` : undefined,
+    let startupFailure: Error | undefined
+    const candidates = new Map<number, LocalServerCandidate>()
+    if (requestedPort) candidates.set(requestedPort, { host: '127.0.0.1', port: requestedPort, url: `http://localhost:${requestedPort}` })
+    const baseState: ServerState = {
+      running: false,
       root: absoluteRoot,
       mode: 'project',
       name: selected.name,
       script
     }
+    this.currentState = baseState
     this.onStateChanged(this.state())
-    return this.state()
+    const consume = (chunk: string): void => {
+      outputBuffer += chunk
+      for (const candidate of localServerCandidates(chunk)) candidates.set(candidate.port, candidate)
+      const lines = outputBuffer.split(/\r?\n/)
+      outputBuffer = lines.pop() ?? ''
+      for (const line of lines) {
+        this.onLogLine(line)
+        for (const candidate of localServerCandidates(line)) candidates.set(candidate.port, candidate)
+      }
+    }
+    child.stdout?.setEncoding('utf8'); child.stderr?.setEncoding('utf8')
+    child.stdout?.on('data', consume); child.stderr?.on('data', consume)
+    child.on('error', (error) => {
+      startupFailure = error
+      if (this.projectProcess === child) {
+        this.currentState = { ...baseState, error: error.message }
+        this.projectProcess = null
+        this.onStateChanged(this.state())
+      }
+    })
+    child.on('exit', (code, signal) => {
+      if (outputBuffer.trim()) this.onLogLine(outputBuffer)
+      const exitDescription = signal ? `with ${signal}` : `with code ${code ?? 0}`
+      startupFailure = new Error(`Development server exited ${exitDescription} before it became reachable.`)
+      if (this.projectProcess === child) {
+        this.projectProcess = null
+        this.currentState = { ...baseState, error: code && code !== 0 ? `Development server exited with code ${code}.` : 'Development server stopped.' }
+        this.onLogLine(`[process exited ${exitDescription}]`)
+        this.onStateChanged(this.state())
+      }
+    })
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        child.once('spawn', resolve)
+        child.once('error', reject)
+      })
+      const deadline = Date.now() + PROJECT_START_TIMEOUT_MS
+      let ready: LocalServerCandidate | undefined
+      while (!ready && Date.now() < deadline) {
+        if (startupFailure) throw startupFailure
+        for (const candidate of candidates.values()) {
+          if (await canConnect(candidate)) {
+            ready = candidate
+            break
+          }
+        }
+        if (!ready) await new Promise((resolve) => setTimeout(resolve, 100))
+      }
+      if (!ready) throw new Error('Development server did not open a localhost port within 30 seconds. Check the server output and project dependencies.')
+      if (startupFailure) throw startupFailure
+      this.currentState = { ...baseState, running: true, port: ready.port, url: ready.url }
+      this.onStateChanged(this.state())
+      return this.state()
+    } catch (cause) {
+      if (this.projectProcess === child) {
+        this.projectProcess = null
+        await this.terminateProjectProcess(child)
+      }
+      const message = cause instanceof Error ? cause.message : 'Development server could not start.'
+      this.currentState = { ...baseState, error: message }
+      this.onStateChanged(this.state())
+      throw new Error(message)
+    }
   }
 
   async stop(): Promise<ServerState> {
@@ -218,15 +311,9 @@ export class DevServerManager {
     this.watcher = null
     if (this.server) await new Promise<void>((resolve) => this.server?.close(() => resolve()))
     this.server = null
-    if (this.projectProcess?.pid) {
-      const pid = this.projectProcess.pid
-      try { process.kill(-pid, 'SIGTERM') } catch { this.projectProcess.kill('SIGTERM') }
-      await new Promise((resolve) => setTimeout(resolve, 250))
-      if (this.projectProcess) {
-        try { process.kill(-pid, 'SIGKILL') } catch { this.projectProcess.kill('SIGKILL') }
-      }
-    }
+    const projectProcess = this.projectProcess
     this.projectProcess = null
+    if (projectProcess) await this.terminateProjectProcess(projectProcess)
     this.currentState = { running: false }
     this.onStateChanged(this.state())
     return this.state()
@@ -239,5 +326,18 @@ export class DevServerManager {
 
   private broadcastReload(): void {
     for (const client of this.clients) client.write('event: reload\ndata: now\n\n')
+  }
+
+  private async terminateProjectProcess(child: ChildProcess): Promise<void> {
+    if (!child.pid || child.exitCode !== null || child.signalCode !== null) return
+    const pid = child.pid
+    try { process.kill(-pid, 'SIGTERM') } catch { child.kill('SIGTERM') }
+    await Promise.race([
+      new Promise<void>((resolve) => child.once('exit', () => resolve())),
+      new Promise<void>((resolve) => setTimeout(resolve, 750))
+    ])
+    if (child.exitCode === null && child.signalCode === null) {
+      try { process.kill(-pid, 'SIGKILL') } catch { child.kill('SIGKILL') }
+    }
   }
 }

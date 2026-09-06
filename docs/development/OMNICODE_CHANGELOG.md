@@ -32,6 +32,12 @@ stabilization phase.
 - Added real packaged run/compile coverage: Python, JavaScript, C, C++, Swift,
   and Java passed; deliberate Python, Node, Clang, and missing-TypeScript-runtime
   failures returned nonzero with useful diagnostics.
+- Fixed package development servers falsely reporting success immediately after
+  npm spawned. Startup now waits for a real reachable localhost port and reports
+  premature exit, timeout, and occupied ports accurately.
+- Added real packaged static-server and npm-project coverage for HTML/CSS/JS,
+  nested assets, live-reload events, port conflicts, restart/release, package
+  detection, Run-view scripts, server logs, and process-tree shutdown.
 
 ## Baseline inherited from OmniCode 0.1.1
 
