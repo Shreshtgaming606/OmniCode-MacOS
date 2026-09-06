@@ -35,8 +35,8 @@ export function SearchView({ root, onOpen }: { root: string; onOpen(path: string
       setLoading(true); setError(''); setNotice('')
       try {
         const result = await window.omnicode.workspace.replaceAll(root, query, replacement, { caseSensitive, wholeWord, regex, include, exclude })
-        setNotice(`Replaced ${result.replacements} occurrence${result.replacements === 1 ? '' : 's'} in ${result.filesChanged} file${result.filesChanged === 1 ? '' : 's'}.`)
         await search()
+        setNotice(`Replaced ${result.replacements} occurrence${result.replacements === 1 ? '' : 's'} in ${result.filesChanged} file${result.filesChanged === 1 ? '' : 's'}.`)
       } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
       finally { setLoading(false) }
     }}>Replace All</button></div>}

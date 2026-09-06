@@ -28,18 +28,18 @@ substitute for a real integration test where one is required.
 | Filesystem | Outside workspace | Reject unauthorized read/write | Pass | Packaged integration + unit | `/etc/passwd` read rejected through production preload/backend |
 | Filesystem | Drag/drop | File and directory authorization | Not run | Manual | Scheduled |
 | Filesystem | Reveal/Open With | Finder integration | Not run | Manual | Scheduled |
-| Editor | Multiple tabs | Open, switch, and close files | Not run | E2E | Scheduled |
+| Editor | Multiple tabs | Open, switch, and close files | Pass | Packaged E2E | Three language tabs opened via Quick Open, switched, and closed with native `⌘W` |
 | Editor | Languages | Map HTML/CSS/JS/TS/Python/Java/C/C++/Swift/Rust/Go/JSON/Markdown | Pass | Unit | Seven mapping/registry tests |
-| Editor | Core editing | Type, selection, copy/paste, undo/redo | Partial | Packaged E2E | Select-all and real text insertion passed; clipboard and undo/redo remain |
-| Editor | Find/replace | Find, replace, find-all | Partial | Packaged E2E | Cmd+F opened Monaco find; replace/find-all remain |
-| Editor | Visual features | Lines, indentation, brackets, folding, minimap | Not run | Manual/E2E | Scheduled |
+| Editor | Core editing | Type, selection, copy/paste, undo/redo | Partial | Packaged E2E | Select-all, text insertion, model-level native Undo/Redo, and exact Save bytes passed; system clipboard remains manual to avoid overwriting user data |
+| Editor | Find/replace | Find, replace, find-all | Partial | Packaged E2E | Native `⌘F` opened Monaco Find; workspace search and confirmed multi-file Replace All passed; Monaco inline Replace remains manual |
+| Editor | Visual features | Lines, indentation, brackets, folding, minimap | Pass | Packaged E2E | Auto-indent/bracket completion, line numbers, syntax tokens, folding control, minimap, and TypeScript state rendered |
 | Editor | Dirty state | Indicator, save, close prompt | Partial | Packaged E2E | Dirty indicator and clean-after-save passed; unsaved close prompt remains |
-| Editor | Resize | Editor relayout after panel/window changes | Not run | Manual/E2E | Scheduled |
-| Shortcuts | File/edit | ⌘S, ⌘O, ⌘F, ⌘W, ⌘Z, ⌘⇧Z | Partial | Packaged E2E/manual | Cmd+F passed; native menu accelerators require unlocked interactive automation/manual pass |
-| Shortcuts | Navigation | ⌘P and ⌘⇧P | Not run | Manual/E2E | Scheduled |
-| Shortcuts | Settings/terminal/AI | ⌘,, ⌘`, ⌃⇧`, ⌘I | Not run | Manual/E2E | Scheduled |
-| Search | Workspace search | ripgrep and fallback results | Covered | Unit | Real UI pending |
-| Search | Replace all | Scoped replacement | Covered | Unit | Real UI pending |
+| Editor | Resize | Editor relayout after panel/window changes | Pass | Packaged E2E | Explorer, AI, and bottom-panel min/max pointer drags committed without renderer errors |
+| Shortcuts | File/edit | ⌘S, ⌘O, ⌘F, ⌘W, ⌘Z, ⌘⇧Z | Partial | Packaged E2E/manual | Real native `⌘S`, `⌘F`, `⌘W`, `⌘Z`, and `⌘⇧Z` passed; `⌘O` native picker remains manual |
+| Shortcuts | Navigation | ⌘P and ⌘⇧P | Pass | Packaged E2E | Real macOS System Events keystrokes opened Quick Open and Command Palette |
+| Shortcuts | Settings/terminal/AI | ⌘,, ⌘`, ⌃⇧`, ⌘I | Partial | Packaged E2E | Real Command-comma, Command-backtick, and `⌘I` passed; new-terminal Control-Shift-backtick remains manual |
+| Search | Workspace search | ripgrep and fallback results | Pass | Packaged E2E + unit | Real Search sidebar returned two exact results; unit fallback remains covered |
+| Search | Replace all | Scoped replacement | Pass | Packaged E2E + unit | Confirmed UI operation changed both real files and retained its success notice |
 | Search | Ignore/include/exclude | `.gitignore`, `.omnicodeignore`, globs | Covered | Unit | Large real fixture pending |
 | Terminal | zsh | Start real login shell | Pass | Packaged smoke | `/bin/zsh` launched |
 | Terminal | Working directory | `pwd` equals workspace | Pass | Packaged integration | Real PTY printed exact authorized workspace cwd |
@@ -107,11 +107,12 @@ substitute for a real integration test where one is required.
 | Agent | Command permission | Approval and backend enforcement | Partial | Unit + packaged security | Main process blocked `sudo` and wrong workspace; dangerous command matrix passes; allowed-command native confirmation acceptance remains manual |
 | Diff | File/hunk accept/reject/all | Filesystem matches decisions | Pass | Unit + packaged E2E | Real three-file transaction stayed staged until accept; reject preserved disk |
 | Diff | Create/delete/undo | Restore exact filesystem state | Pass | Unit + packaged E2E | Modify/create/delete acceptance and full snapshot undo matched disk |
-| Settings | Workspace JSON | Validate/read/write and corrupt input | Pass | Unit | UI/restart pending |
-| Settings | User preferences | Theme/autosave/permission restart | Partial | Packaged E2E | Settings opens from workbench; persistence controls remain |
+| Settings | Workspace JSON | Validate/read/write and corrupt input | Pass | Unit + packaged E2E | Valid round-trip, atomic mode `0600`, invalid-port no-overwrite, malformed JSON error, restore, and cleanup passed |
+| Settings | User preferences | Theme/autosave/permission restart | Pass | Packaged E2E | Theme, autosave, permission, autocomplete enablement/provider/model all survived full app restart; audit snapshot restored |
+| Settings | Corrupt renderer preferences | Safe fallbacks instead of unsupported states | Pass | Unit | Invalid theme→system, permission→ask, provider→Ollama, malformed/oversized model→empty |
 | Settings | AI model/default | Persist selected/default local model | Covered | Unit | Real restart pending |
-| Themes | Dark/light/system | Contrast and component states | Not run | Visual/manual | Scheduled |
-| Layout | Resizing | Sidebars/panel/window min/max | Partial | Setup smoke | Workbench panels pending |
+| Themes | Dark/light/system | Contrast and component states | Pass | Packaged E2E | All modes switched; light ratios muted 4.72/accent 4.51/warning 4.70, dark 5.42/5.08/7.17; 2px focus and 0.45 disabled states passed |
+| Layout | Resizing | Sidebars/panel/window min/max | Pass | Packaged E2E | Sidebar 200–480, AI 300–640, panel 140–60% viewport; hide/show controls and editor relayout passed |
 | Layout | Persistence | Restore panel dimensions | Not implemented | Inspection | No persistence code found |
 | Security | Renderer sandbox/IPC sender | Reject untrusted calls/navigation | Pass | Automated/smoke | Further adversarial tests pending |
 | Security | Workspace boundary | Reject arbitrary external paths | Pass | Unit | Agent/terminal special cases pending |

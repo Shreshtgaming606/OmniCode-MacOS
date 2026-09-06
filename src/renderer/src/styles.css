@@ -15,12 +15,12 @@
   --border-strong: rgba(0, 0, 0, .2);
   --text: #202124;
   --text-secondary: #62666d;
-  --text-muted: #888c93;
-  --accent: #087cd8;
+  --text-muted: #6a6f77;
+  --accent: #0874c9;
   --accent-hover: #0068bd;
   --accent-fg: #fff;
   --danger: #d13438;
-  --warning: #bf7400;
+  --warning: #a25f00;
   --success: #168342;
   --shadow: 0 16px 52px rgba(0, 0, 0, .25);
   --mono: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
@@ -42,7 +42,7 @@
   --border-strong: rgba(255, 255, 255, .2);
   --text: #d8d9dc;
   --text-secondary: #a3a6ad;
-  --text-muted: #777b84;
+  --text-muted: #969aa3;
   --accent: #3d98f2;
   --accent-hover: #62acf5;
   --accent-fg: #fff;
@@ -69,7 +69,7 @@
     --border-strong: rgba(255, 255, 255, .2);
     --text: #d8d9dc;
     --text-secondary: #a3a6ad;
-    --text-muted: #777b84;
+    --text-muted: #969aa3;
     --accent: #3d98f2;
     --accent-hover: #62acf5;
     --accent-fg: #fff;

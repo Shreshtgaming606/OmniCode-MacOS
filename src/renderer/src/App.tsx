@@ -21,6 +21,7 @@ import { SourceControlView } from './components/SourceControlView'
 import { TerminalPanel, type TerminalRunRequest } from './components/TerminalPanel'
 import { ToolsView } from './components/ToolsView'
 import { fileName, flattenFiles, languageDefinitionForPath, languageForPath } from './lib/languages'
+import { storedAgentPermission, storedAIProvider, storedModelName, storedTheme } from './lib/preferences'
 
 type Activity = 'explorer' | 'search' | 'source' | 'run' | 'models' | 'tools'
 type PanelTab = 'terminal' | 'output' | 'problems' | 'debug'
@@ -54,11 +55,6 @@ function cleanInlineCompletion(value: string): string {
     .replace(/\n?```\s*$/, '')
     .replace(/^Here(?:'s| is) (?:the )?(?:completion|code):?\s*/i, '')
     .slice(0, 4_000)
-}
-
-function savedProvider(key: string, fallback: AIProviderId): AIProviderId {
-  const value = localStorage.getItem(key)
-  return value === 'ollama' || value === 'openai' || value === 'anthropic' || value === 'google' ? value : fallback
 }
 
 function isPathAtOrBelow(candidate: string, parent: string): boolean {
@@ -98,17 +94,17 @@ export function App() {
   const [aiVisible, setAiVisible] = useState(true)
   const [panelVisible, setPanelVisible] = useState(true)
   const [panelTab, setPanelTab] = useState<PanelTab>('terminal')
-  const [theme, setTheme] = useState<ThemePreference>(() => (localStorage.getItem('omnicode.theme') as ThemePreference) || 'system')
+  const [theme, setTheme] = useState<ThemePreference>(() => storedTheme(localStorage))
   const [systemDark, setSystemDark] = useState(() => matchMedia('(prefers-color-scheme: dark)').matches)
   const [autosave, setAutosave] = useState(() => localStorage.getItem('omnicode.autosave') === 'true')
   const [aiAutocomplete, setAiAutocomplete] = useState(() => localStorage.getItem('omnicode.aiAutocomplete') === 'true')
-  const [autocompleteProvider, setAutocompleteProvider] = useState<AIProviderId>(() => savedProvider('omnicode.autocompleteProvider', 'ollama'))
-  const [autocompleteModel, setAutocompleteModel] = useState(() => localStorage.getItem('omnicode.autocompleteModel') ?? '')
+  const [autocompleteProvider, setAutocompleteProvider] = useState<AIProviderId>(() => storedAIProvider(localStorage, 'omnicode.autocompleteProvider', 'ollama'))
+  const [autocompleteModel, setAutocompleteModel] = useState(() => storedModelName(localStorage))
   const [workspaceSettings, setWorkspaceSettings] = useState<WorkspaceSettings>({})
   const [workspaceChatProvider, setWorkspaceChatProvider] = useState<AIProviderId>('ollama')
   const [workspaceChatModel, setWorkspaceChatModel] = useState('')
   const [editorTabSize, setEditorTabSize] = useState(2)
-  const [permission, setPermission] = useState<'ask' | 'workspace' | 'agent'>(() => (localStorage.getItem('omnicode.permission') as 'ask' | 'workspace' | 'agent') || 'ask')
+  const [permission, setPermission] = useState<'ask' | 'workspace' | 'agent'>(() => storedAgentPermission(localStorage))
   const [showSettings, setShowSettings] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
   const [showOnboarding, setShowOnboarding] = useState(() => localStorage.getItem('omnicode.onboardingComplete') !== 'true')
@@ -430,6 +426,16 @@ export function App() {
     const range = hasSelection ? selection : model.getFullModelRange()
     setInlineEdit({ phase: 'prompt', instruction: '', original: model.getValueInRange(range), proposal: '', range })
   }, [activeDocument])
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (!event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || event.key.toLowerCase() !== 'i') return
+      event.preventDefault()
+      handleInlineAI()
+    }
+    window.addEventListener('keydown', handleKeyDown, true)
+    return () => window.removeEventListener('keydown', handleKeyDown, true)
+  }, [handleInlineAI])
 
   const submitInlineAI = async (): Promise<void> => {
     if (!inlineEdit || !activeDocument) return
@@ -755,6 +761,16 @@ export function App() {
       'run-current': () => void runCurrent(), 'server-start': () => void startServer(), 'server-restart': () => void startServer(true),
       'server-stop': () => void window.omnicode.server.stop(), 'inline-ai': handleInlineAI,
       'index-workspace': () => workspacePath && void window.omnicode.ai.index(workspacePath), 'editor-find': () => editorRef.current?.trigger('menu', 'actions.find', null),
+      'editor-undo': () => {
+        const active = document.activeElement
+        if (active?.closest('.monaco-editor')) void editorRef.current?.getModel()?.undo()
+        else if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) document.execCommand('undo')
+      },
+      'editor-redo': () => {
+        const active = document.activeElement
+        if (active?.closest('.monaco-editor')) void editorRef.current?.getModel()?.redo()
+        else if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) document.execCommand('redo')
+      },
       'go-to-line': () => editorRef.current?.trigger('menu', 'editor.action.gotoLine', null),
       'expand-selection': () => editorRef.current?.trigger('menu', 'editor.action.smartSelect.expand', null),
       'shrink-selection': () => editorRef.current?.trigger('menu', 'editor.action.smartSelect.shrink', null),

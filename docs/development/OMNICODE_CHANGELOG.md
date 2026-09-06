@@ -49,6 +49,31 @@ stabilization phase.
   bounded retry read config/database facts, proposed one derived file, opened
   Diff Review, stayed in-memory until acceptance, matched disk after acceptance,
   and disappeared after undo with zero renderer errors.
+- Added strict runtime validation for persisted renderer theme, Agent permission,
+  autocomplete provider, and model values so corrupt local storage falls back to
+  safe supported states.
+- Verified packaged settings persistence across a full app restart for theme,
+  autosave, permission tier, autocomplete state/provider/model, then restored the
+  isolated profile snapshot.
+- Verified workspace settings round-trip and atomic `0600` storage, rejection
+  without overwrite, precise malformed-JSON diagnostics, restart behavior, and
+  cleanup of the disposable metadata directory.
+- Fixed native Undo/Redo so the macOS Edit menu and `⌘Z`/`⌘Shift+Z` operate on
+  Monaco's text-model history while normal inputs retain DOM history.
+- Fixed Search Replace All clearing its own success notice during result refresh;
+  a packaged two-file replacement now reports and matches exact disk changes.
+- Added a Sonoma-safe `⌘I` fallback for Inline AI after proving the enabled menu
+  item worked but Electron dropped the advertised custom accelerator.
+- Raised low-contrast light/dark muted, accent, and warning tokens and verified
+  all normal-text ratios at or above 4.5:1 in the rebuilt package.
+- Added a packaged editor/shortcut/theme/layout audit covering native macOS
+  keystrokes, three tabs, Undo/Redo/Save, Search/Replace All, indentation and
+  bracket completion, line/syntax/folding/minimap rendering, Inline AI prompt,
+  all themes, focus/disabled states, bounded panel resizing, visibility toggles,
+  terminal toggle, cleanup, and zero renderer exceptions.
+- Re-ran the complete suite after these repairs: 235 tests passed, one native
+  Keychain test remained intentionally skipped from the normal run, and zero
+  tests failed across 23 files.
 
 ## 2026-09-05
 

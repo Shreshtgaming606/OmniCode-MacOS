@@ -39,7 +39,9 @@ export function installApplicationMenu(getWindow: () => BrowserWindow | null): v
     {
       label: 'Edit',
       submenu: [
-        { role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' },
+        { label: 'Undo', accelerator: 'CommandOrControl+Z', click: withWindow('editor-undo') },
+        { label: 'Redo', accelerator: 'CommandOrControl+Shift+Z', click: withWindow('editor-redo') },
+        { type: 'separator' }, { role: 'cut' }, { role: 'copy' },
         { role: 'paste' }, { role: 'pasteAndMatchStyle' }, { role: 'delete' }, { role: 'selectAll' },
         { type: 'separator' }, { label: 'Find', accelerator: 'CommandOrControl+F', click: withWindow('editor-find') },
         { label: 'Find in Workspace', accelerator: 'CommandOrControl+Shift+F', click: withWindow('workspace-search') }

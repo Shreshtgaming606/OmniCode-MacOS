@@ -292,3 +292,73 @@ lost. Secrets, tokens, and authorization headers must never be included here.
   run in the main process. Packaged calls blocked `sudo` and wrong-workspace
   requests; unit coverage blocks destructive, privileged, Keychain-read,
   download-pipe, global-install, and nested-shell patterns.
+
+## OMI-021 — Corrupt renderer preferences were trusted as valid — Resolved
+
+- Severity: Medium
+- Reproduction: Put an unsupported string in the theme, Agent permission,
+  autocomplete provider, or model local-storage entry and restart OmniCode.
+- Expected: OmniCode falls back to a safe supported value.
+- Actual: Theme and permission strings were cast to TypeScript unions without
+  runtime validation; malformed model values were also accepted.
+- Suspected cause: Preference initialization relied on compile-time assertions
+  for persistent external data.
+- Relevant files: `src/renderer/src/lib/preferences.ts`,
+  `src/renderer/src/lib/preferences.test.ts`, `src/renderer/src/App.tsx`.
+- Current status: ✅ Resolved — stored enums and model names are validated and
+  safely defaulted. Unit tests cover invalid/multiline/oversized data; valid UI
+  preferences passed a full packaged restart.
+
+## OMI-022 — Replace All success notice disappeared — Resolved
+
+- Severity: Low
+- Reproduction: Run a successful multi-file Replace All from the Search sidebar.
+- Expected: The UI reports the replacement/file count after results refresh.
+- Actual: Both files changed, but `search()` immediately cleared the notice.
+- Suspected cause: The notice was set before awaiting the refresh routine.
+- Relevant files: `src/renderer/src/components/SearchView.tsx`,
+  `scripts/audit-editor-shortcuts-layout.mjs`.
+- Current status: ✅ Resolved — the notice is set after refresh; packaged UI and
+  exact disk contents passed.
+
+## OMI-023 — Native Undo/Redo did not target Monaco history — Resolved
+
+- Severity: High
+- Reproduction: Edit a Monaco document and press `⌘Z` or `⌘Shift+Z`.
+- Expected: The document model, dirty state, and subsequent Save reflect the
+  undo/redo operation.
+- Actual: Electron's generic DOM undo role did not operate on Monaco's model.
+- Suspected cause: Monaco 0.56 owns a separate text-model history and its native
+  edit context resembles an ordinary page editor.
+- Relevant files: `src/main/menu.ts`, `src/renderer/src/App.tsx`,
+  `scripts/audit-editor-shortcuts-layout.mjs`.
+- Current status: ✅ Resolved — native menu commands route Monaco focus to the
+  text model's `undo()`/`redo()` and retain DOM undo for normal text fields;
+  packaged native-key and exact-disk tests passed.
+
+## OMI-024 — Advertised Inline AI shortcut was dropped on Sonoma — Resolved
+
+- Severity: Medium
+- Reproduction: Select code and press `⌘I` in the packaged app.
+- Expected: The Inline AI prompt opens with the selection.
+- Actual: Clicking the enabled AI menu item worked, but the custom accelerator
+  did not consistently dispatch from macOS to Electron.
+- Suspected cause: Native custom accelerator routing conflict on the tested
+  Sonoma/WebView combination.
+- Relevant files: `src/renderer/src/App.tsx`, `src/main/menu.ts`,
+  `scripts/audit-editor-shortcuts-layout.mjs`.
+- Current status: ✅ Resolved — a capture-phase renderer fallback handles the
+  exact unmodified `⌘I` chord; the packaged native keystroke opened the prompt.
+
+## OMI-025 — Theme secondary colors failed normal-text contrast — Resolved
+
+- Severity: Medium
+- Reproduction: Measure muted/accent/warning tokens on sidebar backgrounds.
+- Expected: Normal text reaches at least WCAG AA 4.5:1 contrast.
+- Actual: Muted text measured 3.15:1 light and 3.61:1 dark; light accent and
+  warning also fell below 4.5:1.
+- Suspected cause: Tokens were chosen visually without ratio validation.
+- Relevant files: `src/renderer/src/styles.css`,
+  `scripts/audit-editor-shortcuts-layout.mjs`.
+- Current status: ✅ Resolved — packaged computed styles measure light
+  4.72/4.51/4.70 and dark 5.42/5.08/7.17 for muted/accent/warning.
