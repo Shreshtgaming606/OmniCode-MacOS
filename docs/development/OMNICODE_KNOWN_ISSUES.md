@@ -362,3 +362,19 @@ lost. Secrets, tokens, and authorization headers must never be included here.
   `scripts/audit-editor-shortcuts-layout.mjs`.
 - Current status: ✅ Resolved — packaged computed styles measure light
   4.72/4.51/4.70 and dark 5.42/5.08/7.17 for muted/accent/warning.
+
+## OMI-026 — Reveal in Finder did not select the requested item — Resolved
+
+- Severity: Medium
+- Reproduction: Use the Explorer's Reveal in Finder action for a nested file on
+  the tested Sonoma host.
+- Expected: Finder opens the containing folder and selects the exact file.
+- Actual: Electron's helper opened the folder but did not reliably retain the
+  requested selection.
+- Suspected cause: Platform-specific `shell.showItemInFolder` behavior in the
+  packaged Electron runtime.
+- Relevant files: `src/main/services/filesystem-manager.ts`,
+  `src/renderer/src/App.tsx`, `scripts/audit-finder-integration.mjs`.
+- Current status: ✅ Resolved — the authorized path is passed to macOS
+  `/usr/bin/open -R`; the packaged Explorer action selected the exact canonical
+  path. Related context-action rejections now reach visible error reporting.

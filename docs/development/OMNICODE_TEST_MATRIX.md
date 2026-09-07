@@ -11,23 +11,23 @@ substitute for a real integration test where one is required.
 | Startup | Fresh profile | Launch packaged app into setup | Pass | Automated smoke | Intel Sonoma; no renderer exceptions |
 | Startup | Workbench | Complete setup and render main window | Pass | Automated smoke | No white/infinite loading state |
 | Startup | Window lifecycle | Minimize, zoom/full-screen, close, reopen | Pass | Packaged macOS E2E | Real resize, minimize/restore, Zoom/unzoom, full-screen enter/exit, close, renderer teardown, `open -a` reopen, and renderer recreation passed |
-| Startup | Menu | Open each native menu and invoke core commands | Not run | Manual/E2E | Scheduled |
+| Startup | Menu | Open each native menu and invoke core commands | Pass | Packaged macOS E2E | All 11 app menus opened, 48 expected items verified, representative renderer command invoked twice; core accelerator commands are covered by packaged shortcut audits |
 | Startup | Console | Capture renderer/unhandled startup errors | Pass | Automated smoke | No meaningful errors captured |
 | Filesystem | Open folder | Authorize and display real temporary workspace | Pass | Automated smoke | Tree returned two entries |
-| Filesystem | Open file | Open real file from cold launch | Pass | Automated smoke | Offline Monaco loaded |
+| Filesystem | Open file | Open real file from cold launch | Pass | Packaged E2E + smoke | Cold launch and real `⌘O` native sheet loaded exact disposable file content into offline Monaco |
 | Filesystem | Create file/folder | Verify nested real filesystem changes | Pass | Packaged integration | Real nested directory and Unicode file created through preload/backend |
 | Filesystem | Rename file/folder | Spaces, punctuation, Unicode | Pass | Packaged integration + unit | Real file renamed; remaining context-menu UI paths pending |
 | Filesystem | Move file/folder | Nested paths and invalid cycles | Pass | Packaged integration + unit | Real nested file moved; invalid cycles covered by unit test |
 | Filesystem | Duplicate file/folder | Verify contents and destination | Pass | Packaged integration + unit | Real duplicate content verified on disk |
 | Filesystem | Trash file/folder | Verify scoped deletion | Pass | Packaged integration + unit | Disposable file and audit directory moved to macOS Trash through OmniCode |
 | Filesystem | Save | Persist editor content and clear dirty state | Pass | Packaged E2E | Monaco edit saved and exact disk bytes verified |
-| Filesystem | Save As | Persist to user-selected path | Not run | Manual/E2E | Native dialog required |
+| Filesystem | Save As | Persist to user-selected path | Pass | Packaged macOS E2E | Real `⌘⇧S` sheet wrote exact bytes under a space-containing name, retained source, and updated the active tab path |
 | Filesystem | Autosave | Delayed write and conflict behavior | Pass | Packaged E2E | Real Monaco edit auto-wrote exact bytes after the delay; dirty state cleared only after success; conflicting external revision was preserved |
 | Filesystem | External changes | Reload/close/conflict behavior | Pass | Packaged E2E | Clean write reloaded, clean delete closed its tab, and dirty competing write blocked Save without losing either version |
 | Filesystem | Recent workspaces | Persist/reopen and remove missing entries | Pass | Unit + smoke | Real restart E2E pending |
 | Filesystem | Outside workspace | Reject unauthorized read/write | Pass | Packaged integration + unit | `/etc/passwd` read rejected through production preload/backend |
-| Filesystem | Drag/drop | File and directory authorization | Not run | Manual | Scheduled |
-| Filesystem | Reveal/Open With | Finder integration | Not run | Manual | Scheduled |
+| Filesystem | Drag/drop | File and directory authorization | Pass | Packaged E2E | Chromium's OS drag path opened exact external Unicode file/content, authorized an external folder as workspace, moved a real Explorer file into a folder, restored the original workspace, and cleaned up |
+| Filesystem | Reveal/Open With | Finder integration | Pass | Packaged macOS E2E | Explorer actions selected the exact file in Finder and chose TextEdit through the native Open With sheet; exact document/content opened |
 | Editor | Multiple tabs | Open, switch, and close files | Pass | Packaged E2E | Three language tabs opened via Quick Open, switched, and closed with native `⌘W` |
 | Editor | Languages | Map HTML/CSS/JS/TS/Python/Java/C/C++/Swift/Rust/Go/JSON/Markdown | Pass | Unit | Seven mapping/registry tests |
 | Editor | Core editing | Type, selection, copy/paste, undo/redo | Partial | Packaged E2E | Select-all, text insertion, model-level native Undo/Redo, and exact Save bytes passed; system clipboard remains manual to avoid overwriting user data |
@@ -35,9 +35,9 @@ substitute for a real integration test where one is required.
 | Editor | Visual features | Lines, indentation, brackets, folding, minimap | Pass | Packaged E2E | Auto-indent/bracket completion, line numbers, syntax tokens, folding control, minimap, and TypeScript state rendered |
 | Editor | Dirty state | Indicator, save, close prompt | Pass | Packaged macOS E2E | Dirty/clean transitions and tab Cancel/Discard passed; native window sheet Cancel retained buffer, Discard preserved disk, and Save All wrote exact bytes before closing |
 | Editor | Resize | Editor relayout after panel/window changes | Pass | Packaged E2E | Explorer, AI, and bottom-panel min/max pointer drags committed without renderer errors |
-| Shortcuts | File/edit | ⌘S, ⌘O, ⌘F, ⌘W, ⌘Z, ⌘⇧Z | Partial | Packaged E2E/manual | Real native `⌘S`, `⌘F`, `⌘W`, `⌘Z`, and `⌘⇧Z` passed; `⌘O` native picker remains manual |
+| Shortcuts | File/edit | ⌘S, ⌘O, ⌘F, ⌘W, ⌘Z, ⌘⇧Z | Pass | Packaged macOS E2E | All listed native accelerators passed; `⌘O` selected an exact path through the real macOS sheet |
 | Shortcuts | Navigation | ⌘P and ⌘⇧P | Pass | Packaged E2E | Real macOS System Events keystrokes opened Quick Open and Command Palette |
-| Shortcuts | Settings/terminal/AI | ⌘,, ⌘`, ⌃⇧`, ⌘I | Partial | Packaged E2E | Real Command-comma, Command-backtick, and `⌘I` passed; new-terminal Control-Shift-backtick remains manual |
+| Shortcuts | Settings/terminal/AI | ⌘,, ⌘`, ⌃⇧`, ⌘I | Pass | Packaged macOS E2E | Settings, terminal toggle, new-terminal creation, and selected-code Inline AI all passed through real System Events keystrokes |
 | Search | Workspace search | ripgrep and fallback results | Pass | Packaged E2E + unit | Real Search sidebar returned two exact results; unit fallback remains covered |
 | Search | Replace all | Scoped replacement | Pass | Packaged E2E + unit | Confirmed UI operation changed both real files and retained its success notice |
 | Search | Ignore/include/exclude | `.gitignore`, `.omnicodeignore`, globs | Covered | Unit | Large real fixture pending |
@@ -45,9 +45,9 @@ substitute for a real integration test where one is required.
 | Terminal | Working directory | `pwd` equals workspace | Pass | Packaged integration | Real PTY printed exact authorized workspace cwd |
 | Terminal | Basic commands | `ls`, `echo`, `whoami`, environment | Pass | Packaged integration | Real zsh identity and environment markers passed |
 | Terminal | PATH | Intel/Apple Homebrew paths visible | Pass | Packaged integration + unit | Both standard Homebrew bin paths and real Node/Git lookup passed |
-| Terminal | Interactive | Ctrl+C, history, interactive process | Partial | Packaged integration | Real sleep interrupted with Ctrl+C; history UI remains |
-| Terminal | Sessions | Create/switch/close/restart/clear multiple terminals | Partial | Packaged integration | Multiple isolated sessions, restart, and kill passed; UI switch/clear remains |
-| Terminal | Resize/scroll/copy/paste | xterm behavior | Partial | Packaged integration | PTY resize and xterm mount passed; scroll/clipboard remain |
+| Terminal | Interactive | Ctrl+C, history, interactive process | Pass | Packaged E2E + integration | Real sleep interrupted; zsh Up-arrow history replayed the prior marker command and produced output again |
+| Terminal | Sessions | Create/switch/close/restart/clear multiple terminals | Pass | Packaged E2E + integration | Toolbar and native shortcut created sessions; tabs switched, split rendered, search/clear/restart/kill/close all reflected real state |
+| Terminal | Resize/scroll/copy/paste | xterm behavior | Partial | Packaged integration | PTY resize, xterm mount, search selection, and clear passed; long scrollback and system clipboard transfer remain |
 | Runtime | Detection | 33 allowlisted tools return installed/missing states | Pass | Packaged integration + unit | Requested tool states matched independent host command lookup |
 | Runtime | Missing tools | Clean state without crash or stack trace | Pass | Automated | Runtime tests and setup smoke |
 | Runtime | Fresh Mac shims | Detection does not trigger Apple installer | Pass | Unit | Regression coverage |

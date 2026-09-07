@@ -243,8 +243,13 @@ export class FileSystemManager {
     await shell.trashItem(safePath)
   }
 
-  revealInFinder(target: string): void {
-    shell.showItemInFolder(this.assertAuthorized(target))
+  async revealInFinder(target: string): Promise<void> {
+    const safePath = this.assertAuthorized(target)
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn('/usr/bin/open', ['-R', safePath], { stdio: 'ignore' })
+      child.on('error', reject)
+      child.on('close', (code) => code === 0 ? resolve() : reject(new Error(`macOS could not reveal the item in Finder (exit ${code}).`)))
+    })
   }
 
   copyPath(target: string): void {

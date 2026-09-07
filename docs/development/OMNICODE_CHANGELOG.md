@@ -87,6 +87,26 @@ stabilization phase.
   retained the window, dirty buffer, and disk baseline; Discard Changes closed
   without writing; Save All wrote exact bytes before closing. Reopen, preference
   restoration, fixture cleanup, and renderer-error checks also passed.
+- Verified native Save As and Open sheets: Save As wrote exact bytes under a
+  space-containing name, preserved the source, updated the tab path, and native
+  Open selected that exact file and loaded it into Monaco.
+- Fixed Reveal in Finder after the packaged Electron helper opened the folder
+  without reliably selecting the item. The authorized path now uses native
+  `open -R`; the real Explorer action selected the exact file. Reveal, copy-path,
+  default-open, and Open-With rejections now route to visible error handling.
+- Verified Explorer Open With through the real native application sheet. The
+  selected system TextEdit bundle opened the exact disposable filename/content,
+  then the app/document and Finder audit window were restored or closed.
+- Opened every native application menu, verified 11 top-level menus and 48
+  expected items, and exercised a renderer-bound toggle without changing the
+  final layout state.
+- Verified terminal history replay, output search/highlight, clear, the native
+  new-terminal shortcut, tab switching, split UI, restart, kill, and panel close
+  in the rebuilt package with zero renderer errors.
+- Verified packaged drag-and-drop for an external Unicode-named file, external
+  folder authorization/workspace switch, and Explorer row-to-folder move. Exact
+  content and disk movement passed, the original workspace was restored, and
+  disposable data was moved to Trash.
 
 ## 2026-09-05
 
