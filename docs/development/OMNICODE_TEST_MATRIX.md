@@ -10,7 +10,7 @@ substitute for a real integration test where one is required.
 | --- | --- | --- | --- | --- | --- |
 | Startup | Fresh profile | Launch packaged app into setup | Pass | Automated smoke | Intel Sonoma; no renderer exceptions |
 | Startup | Workbench | Complete setup and render main window | Pass | Automated smoke | No white/infinite loading state |
-| Startup | Window lifecycle | Minimize, zoom/full-screen, close, reopen | Not run | Manual | Scheduled |
+| Startup | Window lifecycle | Minimize, zoom/full-screen, close, reopen | Pass | Packaged macOS E2E | Real resize, minimize/restore, Zoom/unzoom, full-screen enter/exit, close, renderer teardown, `open -a` reopen, and renderer recreation passed |
 | Startup | Menu | Open each native menu and invoke core commands | Not run | Manual/E2E | Scheduled |
 | Startup | Console | Capture renderer/unhandled startup errors | Pass | Automated smoke | No meaningful errors captured |
 | Filesystem | Open folder | Authorize and display real temporary workspace | Pass | Automated smoke | Tree returned two entries |
@@ -22,8 +22,8 @@ substitute for a real integration test where one is required.
 | Filesystem | Trash file/folder | Verify scoped deletion | Pass | Packaged integration + unit | Disposable file and audit directory moved to macOS Trash through OmniCode |
 | Filesystem | Save | Persist editor content and clear dirty state | Pass | Packaged E2E | Monaco edit saved and exact disk bytes verified |
 | Filesystem | Save As | Persist to user-selected path | Not run | Manual/E2E | Native dialog required |
-| Filesystem | Autosave | Delayed write and conflict behavior | Not run | E2E | Scheduled |
-| Filesystem | External changes | Reload/close/conflict behavior | Covered | Code inspection | Real E2E pending |
+| Filesystem | Autosave | Delayed write and conflict behavior | Pass | Packaged E2E | Real Monaco edit auto-wrote exact bytes after the delay; dirty state cleared only after success; conflicting external revision was preserved |
+| Filesystem | External changes | Reload/close/conflict behavior | Pass | Packaged E2E | Clean write reloaded, clean delete closed its tab, and dirty competing write blocked Save without losing either version |
 | Filesystem | Recent workspaces | Persist/reopen and remove missing entries | Pass | Unit + smoke | Real restart E2E pending |
 | Filesystem | Outside workspace | Reject unauthorized read/write | Pass | Packaged integration + unit | `/etc/passwd` read rejected through production preload/backend |
 | Filesystem | Drag/drop | File and directory authorization | Not run | Manual | Scheduled |
@@ -33,7 +33,7 @@ substitute for a real integration test where one is required.
 | Editor | Core editing | Type, selection, copy/paste, undo/redo | Partial | Packaged E2E | Select-all, text insertion, model-level native Undo/Redo, and exact Save bytes passed; system clipboard remains manual to avoid overwriting user data |
 | Editor | Find/replace | Find, replace, find-all | Partial | Packaged E2E | Native `⌘F` opened Monaco Find; workspace search and confirmed multi-file Replace All passed; Monaco inline Replace remains manual |
 | Editor | Visual features | Lines, indentation, brackets, folding, minimap | Pass | Packaged E2E | Auto-indent/bracket completion, line numbers, syntax tokens, folding control, minimap, and TypeScript state rendered |
-| Editor | Dirty state | Indicator, save, close prompt | Partial | Packaged E2E | Dirty indicator and clean-after-save passed; unsaved close prompt remains |
+| Editor | Dirty state | Indicator, save, close prompt | Pass | Packaged macOS E2E | Dirty/clean transitions and tab Cancel/Discard passed; native window sheet Cancel retained buffer, Discard preserved disk, and Save All wrote exact bytes before closing |
 | Editor | Resize | Editor relayout after panel/window changes | Pass | Packaged E2E | Explorer, AI, and bottom-panel min/max pointer drags committed without renderer errors |
 | Shortcuts | File/edit | ⌘S, ⌘O, ⌘F, ⌘W, ⌘Z, ⌘⇧Z | Partial | Packaged E2E/manual | Real native `⌘S`, `⌘F`, `⌘W`, `⌘Z`, and `⌘⇧Z` passed; `⌘O` native picker remains manual |
 | Shortcuts | Navigation | ⌘P and ⌘⇧P | Pass | Packaged E2E | Real macOS System Events keystrokes opened Quick Open and Command Palette |
@@ -118,7 +118,7 @@ substitute for a real integration test where one is required.
 | Security | Workspace boundary | Reject arbitrary external paths | Pass | Unit | Agent/terminal special cases pending |
 | Security | Dangerous commands | Backend approval enforcement | Partial | Unit + packaged security | Main-process policy blocks privileged/destructive/Keychain/nested-shell patterns; native approval acceptance remains manual |
 | Failure | Offline/provider/rate-limit/timeout | Graceful accurate errors | Partial | Unit + packaged E2E | Auth failure and a real transient Gemini 503 surfaced honestly; offline and timeout E2E remain |
-| Failure | Permission/read-only/moved files | Graceful accurate errors | Partial | Unit | Real filesystem E2E pending |
+| Failure | Permission/read-only/moved files | Graceful accurate errors | Partial | Packaged E2E + unit | Real mode-`0555` save surfaced EACCES/permission guidance, preserved disk, and kept the buffer dirty; moved-workspace flow remains |
 | Performance | Startup/idle | Time, CPU, memory | Not run | Measurement | Scheduled |
 | Performance | Large workspace/index/search | Responsiveness and bounds | Not run | Measurement | Scheduled |
 | Performance | Cleanup/leaks | Listeners, PTYs, servers, AI operations | Not run | Soak | Scheduled |

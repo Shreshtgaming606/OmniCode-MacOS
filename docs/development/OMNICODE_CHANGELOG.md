@@ -74,6 +74,19 @@ stabilization phase.
 - Re-ran the complete suite after these repairs: 235 tests passed, one native
   Keychain test remained intentionally skipped from the normal run, and zero
   tests failed across 23 files.
+- Added a packaged file-lifecycle audit. Delayed autosave wrote exact bytes,
+  clean external writes reloaded, clean deletes closed their tabs, dirty
+  conflicts blocked overwrite without losing either version, unsaved-tab
+  Cancel/Discard behaved correctly, and a real permission-denied save retained
+  both disk data and the dirty buffer. The isolated preference and disposable
+  fixture were restored/removed with zero renderer errors.
+- Verified the packaged native window lifecycle through macOS accessibility:
+  resize, minimize/restore, Zoom/unzoom, full-screen enter/exit, close, renderer
+  teardown, Finder-style reopen, and renderer recreation all passed.
+- Verified the real native unsaved-changes sheet and all three choices. Cancel
+  retained the window, dirty buffer, and disk baseline; Discard Changes closed
+  without writing; Save All wrote exact bytes before closing. Reopen, preference
+  restoration, fixture cleanup, and renderer-error checks also passed.
 
 ## 2026-09-05
 
