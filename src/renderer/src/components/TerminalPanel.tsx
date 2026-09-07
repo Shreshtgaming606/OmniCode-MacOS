@@ -181,7 +181,10 @@ function TerminalViewport({
     const terminal = new XTerm({
       allowProposedApi: false,
       convertEol: false,
-      cursorBlink: true,
+      // A blinking xterm cursor continuously repaints both the renderer and GPU
+      // process even when the terminal is idle. A solid cursor preserves the
+      // input location without keeping an otherwise idle workbench busy.
+      cursorBlink: false,
       cursorStyle: 'block',
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
       fontSize: 12,

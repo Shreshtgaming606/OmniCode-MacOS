@@ -1,6 +1,6 @@
 # OmniCode Stabilization Test Matrix
 
-Last updated: 2026-09-06
+Last updated: 2026-09-07
 
 Results are changed to **Pass** only after the recorded behavior was observed.
 “Covered” means an existing automated test exercises the code path; it does not
@@ -40,7 +40,7 @@ substitute for a real integration test where one is required.
 | Shortcuts | Settings/terminal/AI | ⌘,, ⌘`, ⌃⇧`, ⌘I | Pass | Packaged macOS E2E | Settings, terminal toggle, new-terminal creation, and selected-code Inline AI all passed through real System Events keystrokes |
 | Search | Workspace search | ripgrep and fallback results | Pass | Packaged E2E + unit | Real Search sidebar returned two exact results; unit fallback remains covered |
 | Search | Replace all | Scoped replacement | Pass | Packaged E2E + unit | Confirmed UI operation changed both real files and retained its success notice |
-| Search | Ignore/include/exclude | `.gitignore`, `.omnicodeignore`, globs | Covered | Unit | Large real fixture pending |
+| Search | Ignore/include/exclude | `.gitignore`, `.omnicodeignore`, globs | Pass | Unit + packaged soak | A 1,203-file non-Git fixture returned exactly one valid match; ignored folders and explicit exclude stayed absent after fixing ripgrep ordering and `--no-require-git` |
 | Terminal | zsh | Start real login shell | Pass | Packaged smoke | `/bin/zsh` launched |
 | Terminal | Working directory | `pwd` equals workspace | Pass | Packaged integration | Real PTY printed exact authorized workspace cwd |
 | Terminal | Basic commands | `ls`, `echo`, `whoami`, environment | Pass | Packaged integration | Real zsh identity and environment markers passed |
@@ -93,14 +93,14 @@ substitute for a real integration test where one is required.
 | Ollama | Pull/cancel/delete/default | Real small-model lifecycle | Blocked | E2E | Ollama service/model required |
 | Ollama | Real inference | Exact response and coding question | Blocked | E2E | Ollama service/model required |
 | AI chat | Provider/model switching | Defaults and manual changes stay coherent | Pass | Renderer unit | Five regression tests |
-| AI chat | Conversation clear/errors | UI resets and surfaces failure | Partial | Unit/inspection | Real provider pending |
+| AI chat | Conversation clear/errors | UI resets and surfaces failure | Pass | Packaged live E2E + unit | Real Gemini responses reached UI; New Chat removed all messages; invalid auth and transient provider 503 produced accurate visible errors |
 | AI chat | Markdown/code blocks | Render assistant response appropriately | Not run | E2E | Current implementation uses preformatted text |
 | AI chat | Streaming/stop | Generation updates and cancellation | Not implemented | Inspection | No UI/backend support exists |
-| Context | Current/open/selected files | Inspect exact outbound request | Not run | Integration | Scheduled |
+| Context | Current/open/selected files | Inspect exact outbound request | Pass | Packaged live E2E | Consent listed exact current/open/native-picked paths and 22-character selection; Gemini verified unique tokens from every category |
 | Context | Workspace retrieval | Multi-file relevance and actual payload | Pass | Unit + packaged live E2E | Exact outbound system context inspected in unit test; real Gemini derived undisclosed TTL/table/prefix across five retrieved files after consent |
-| Context | Terminal/problems/Git | Include only explicitly selected data | Not run | Integration | Scheduled |
+| Context | Terminal/problems/Git | Include only explicitly selected data | Pass | Packaged live E2E | Consent reported nonzero terminal/problems/Git payloads; Gemini verified terminal marker, real TypeScript diagnostic, and changed Git filename in one request |
 | Indexer | Initial/changed/new/deleted/renamed | Maintain current index | Pass | Unit + packaged E2E | Watcher-driven update/create/rename/delete refresh passed; stale tokens and paths disappeared |
-| Indexer | Ignore/binary/large | Exclude sensitive/binary/huge files | Pass | Unit | Large-project performance pending |
+| Indexer | Ignore/binary/large | Exclude sensitive/binary/huge files | Pass | Unit + packaged soak | Indexed 1,203 allowed files in 1.53 s; ignored three directory roots and skipped the binary fixture while the renderer kept ticking |
 | Inline AI | Proposal/accept/reject/save | Real selected-code workflow | Blocked | E2E | Working AI backend required |
 | Agent | Inspect/plan/propose files | Disposable multi-file task | Pass | Packaged live E2E | Two transient 503 attempts stopped safely with no writes; later retry read multiple files, proposed one derived file, opened review, accepted, and undid it |
 | Agent | Plan parsing/path safety | Reject traversal, malformed, incomplete, and oversized plans | Pass | Unit | Relative paths only; 50-file, 20-step, and 10-command limits verified |
@@ -119,9 +119,9 @@ substitute for a real integration test where one is required.
 | Security | Dangerous commands | Backend approval enforcement | Partial | Unit + packaged security | Main-process policy blocks privileged/destructive/Keychain/nested-shell patterns; native approval acceptance remains manual |
 | Failure | Offline/provider/rate-limit/timeout | Graceful accurate errors | Partial | Unit + packaged E2E | Auth failure and a real transient Gemini 503 surfaced honestly; offline and timeout E2E remain |
 | Failure | Permission/read-only/moved files | Graceful accurate errors | Partial | Packaged E2E + unit | Real mode-`0555` save surfaced EACCES/permission guidance, preserved disk, and kept the buffer dirty; moved-workspace flow remains |
-| Performance | Startup/idle | Time, CPU, memory | Not run | Measurement | Scheduled |
-| Performance | Large workspace/index/search | Responsiveness and bounds | Not run | Measurement | Scheduled |
-| Performance | Cleanup/leaks | Listeners, PTYs, servers, AI operations | Not run | Soak | Scheduled |
+| Performance | Startup/idle | Time, CPU, memory | Pass | Packaged three-launch soak | Cold shell/workspace 10.5/11.2 s; warm at most 4.0/4.6 s; settled CPU 1.4–1.8%, RSS 371–376 MiB, graceful quit/helper cleanup under one second |
+| Performance | Large workspace/index/search | Responsiveness and bounds | Pass | Packaged measurement | 1,203 files: workspace open 415 ms, index 1.53 s, search 47 ms; renderer stayed responsive and results/ignores were exact |
+| Performance | Cleanup/leaks | Listeners, PTYs, servers, AI operations | Pass | Packaged soak | 8 PTYs and 3 servers created/stopped; server was not left running, app RSS settled 397→422 MiB, median idle CPU 0%, and no renderer error was captured |
 | Production | Build | Typecheck and electron-vite build | Pass | Automated | Baseline 0.1.1 |
 | Production | Intel app | Launch and core smoke on Sonoma | Pass | Automated smoke | Current host x86_64 |
 | Production | Apple Silicon app | Correct executable/native slices | Pass | Automated inspection | Hardware launch blocked |

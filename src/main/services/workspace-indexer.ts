@@ -83,10 +83,21 @@ export class WorkspaceIndexer {
   private ignoredCount = 0
   private indexedAt = 0
   private generation = 0
+  private activeIndex: { root: string; promise: Promise<WorkspaceIndexStatus> } | null = null
 
-  async index(root: string): Promise<WorkspaceIndexStatus> {
-    const generation = ++this.generation
+  index(root: string): Promise<WorkspaceIndexStatus> {
     const nextRoot = path.resolve(root)
+    if (this.activeIndex?.root === nextRoot) return this.activeIndex.promise
+
+    const generation = ++this.generation
+    const promise = this.performIndex(nextRoot, generation).finally(() => {
+      if (this.activeIndex?.promise === promise) this.activeIndex = null
+    })
+    this.activeIndex = { root: nextRoot, promise }
+    return promise
+  }
+
+  private async performIndex(nextRoot: string, generation: number): Promise<WorkspaceIndexStatus> {
     const nextFiles = new Map<string, IndexedFile>()
     let nextIgnoredCount = 0
     let indexedBytes = 0

@@ -140,4 +140,31 @@ describe('FileSystemManager workspace boundary', () => {
     expect(await fs.readlink(moved)).toBe(target)
     expect(await fs.readFile(target, 'utf8')).toBe('keep me')
   })
+
+  it('keeps default and ignore-file exclusions when an include glob is present', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'omnicode-fs-'))
+    temporaryDirectories.push(root)
+    await fs.mkdir(path.join(root, 'src'))
+    await fs.mkdir(path.join(root, 'node_modules'))
+    await fs.mkdir(path.join(root, 'git-ignored'))
+    await fs.mkdir(path.join(root, 'omnicode-ignored'))
+    await fs.writeFile(path.join(root, '.gitignore'), 'git-ignored/\n')
+    await fs.writeFile(path.join(root, '.omnicodeignore'), 'omnicode-ignored/\n')
+    for (const target of [
+      path.join(root, 'src', 'visible.ts'),
+      path.join(root, 'node_modules', 'hidden.ts'),
+      path.join(root, 'git-ignored', 'hidden.ts'),
+      path.join(root, 'omnicode-ignored', 'hidden.ts'),
+      path.join(root, 'excluded-visible.ts')
+    ]) await fs.writeFile(target, 'OMNICODE_SEARCH_FILTER_MARKER\n')
+
+    const manager = new FileSystemManager()
+    const canonicalRoot = manager.setWorkspace(root)
+    const matches = await manager.search(canonicalRoot, 'OMNICODE_SEARCH_FILTER_MARKER', {
+      include: '**/*.ts',
+      exclude: '**/excluded-*'
+    })
+
+    expect(matches.map((match) => path.relative(canonicalRoot, match.path))).toEqual(['src/visible.ts'])
+  })
 })

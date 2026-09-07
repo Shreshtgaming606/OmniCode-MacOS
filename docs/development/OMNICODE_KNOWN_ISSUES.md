@@ -1,6 +1,6 @@
 # OmniCode Known Issues
 
-Last updated: 2026-09-06
+Last updated: 2026-09-07
 
 Resolved issues remain in this file with a resolution so audit history is not
 lost. Secrets, tokens, and authorization headers must never be included here.
@@ -378,3 +378,58 @@ lost. Secrets, tokens, and authorization headers must never be included here.
 - Current status: ✅ Resolved — the authorized path is passed to macOS
   `/usr/bin/open -R`; the packaged Explorer action selected the exact canonical
   path. Related context-action rejections now reach visible error reporting.
+
+## OMI-027 — Accelerated search could re-include ignored files — Resolved
+
+- Severity: High
+- Reproduction: Search a non-Git workspace with `include: **/*.ts` while it
+  contains `.gitignore`, `node_modules`, `.omnicodeignore`, and an explicit
+  exclude glob.
+- Expected: Positive includes narrow candidate types without overriding default
+  or user ignore rules.
+- Actual: ripgrep returned files from `node_modules` and `.gitignore` paths.
+- Suspected cause: The positive glob was appended after negative globs (ripgrep's
+  last matching glob wins), and ripgrep required a Git repository before honoring
+  `.gitignore`.
+- Relevant files: `src/main/services/filesystem-manager.ts`,
+  `src/main/services/filesystem-manager.test.ts`,
+  `scripts/audit-performance-soak.mjs`.
+- Current status: ✅ Resolved — `--no-require-git` is used and all negative
+  globs are applied after the positive include. Unit coverage and the 1,203-file
+  packaged soak returned exactly the one permitted match.
+
+## OMI-028 — Concurrent workspace indexing returned stale status — Resolved
+
+- Severity: High
+- Reproduction: Open a large workspace (which starts automatic indexing) and
+  immediately run Index Workspace manually.
+- Expected: Both callers observe the completed index for that workspace.
+- Actual: The second request canceled the first, and one caller returned the
+  previous workspace's seven-file status while the new index continued.
+- Suspected cause: Generation cancellation returned the indexer's current status
+  instead of sharing an in-flight same-root operation.
+- Relevant files: `src/main/services/workspace-indexer.ts`,
+  `src/main/services/workspace-indexer.test.ts`,
+  `scripts/audit-performance-soak.mjs`.
+- Current status: ✅ Resolved — concurrent requests for the same canonical root
+  coalesce onto one indexing promise. Regression tests pass and the rebuilt app
+  reports all 1,203 allowed files.
+
+## OMI-029 — Visible idle terminal caused continuous renderer/GPU load — Resolved
+
+- Severity: Medium
+- Reproduction: Launch OmniCode with its default visible Terminal panel, wait
+  for startup, and compare cumulative renderer/GPU CPU time before and after
+  hiding the panel.
+- Expected: An idle workbench consumes little sustained CPU.
+- Actual: xterm's blinking cursor kept repainting; renderer plus GPU used about
+  10.5–10.6% of one CPU core. Hiding the panel reduced the same measurement to
+  about 0.2%.
+- Suspected cause: `cursorBlink: true` scheduled continuous xterm/GPU repainting
+  even when no terminal output or input occurred.
+- Relevant files: `src/renderer/src/components/TerminalPanel.tsx`,
+  `scripts/audit-startup-soak.mjs`.
+- Current status: ✅ Resolved — the terminal retains a visible solid cursor
+  without continuous animation. Three packaged launches settled at 1.4–1.8%
+  total app CPU with the panel visible, 371–376 MiB RSS, zero renderer errors,
+  and full helper-process cleanup after quit.

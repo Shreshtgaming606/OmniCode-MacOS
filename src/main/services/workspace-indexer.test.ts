@@ -95,4 +95,20 @@ describe('workspace retrieval', () => {
       await fs.rm(root, { recursive: true, force: true })
     }
   })
+
+  it('coalesces concurrent indexing requests for the same workspace', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'omnicode-index-'))
+    try {
+      await Promise.all(Array.from({ length: 150 }, (_, index) =>
+        fs.writeFile(path.join(root, `file-${index}.ts`), `export const marker_${index} = true`)
+      ))
+      const indexer = new WorkspaceIndexer()
+      const [automatic, manual] = await Promise.all([indexer.index(root), indexer.index(root)])
+      expect(automatic.fileCount).toBe(150)
+      expect(manual.fileCount).toBe(150)
+      expect(indexer.status().fileCount).toBe(150)
+    } finally {
+      await fs.rm(root, { recursive: true, force: true })
+    }
+  })
 })

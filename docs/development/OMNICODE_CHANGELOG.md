@@ -3,6 +3,30 @@
 This log records repairs and audit milestones made during the no-new-features
 stabilization phase.
 
+## 2026-09-07
+
+- Fixed accelerated workspace search so positive include globs cannot re-enable
+  default or explicit exclusions, and `.gitignore` works in non-Git folders.
+- Fixed automatic/manual same-workspace indexing races by coalescing concurrent
+  requests instead of returning stale status from a canceled generation.
+- Added regression tests for both failures and a packaged performance soak with
+  exact ignore/result checks.
+- Verified a 1,203-file packaged workspace opened in 415 ms, indexed in 1.53 s,
+  and searched in 47 ms while the renderer remained responsive. Eight PTYs and
+  three servers cleaned up, RSS settled from 397 to 422 MiB after restoration,
+  median idle CPU was 0%, and no renderer errors were captured.
+- Fixed the visible idle terminal consuming about 10.5% CPU through continuous
+  cursor repainting. A solid cursor preserves usability while removing the
+  animation; three packaged launch cycles settled at 1.4–1.8% total CPU and
+  371–376 MiB RSS with the terminal visible.
+- Verified three real package launch/quit cycles: cold shell/workspace readiness
+  in 10.5/11.2 s after rebuilding, warm readiness in at most 4.0/4.6 s, graceful
+  quit in under one second, complete helper-process cleanup, zero renderer
+  errors, and no serious stderr diagnostics.
+- Re-ran the complete suite after the performance repairs: 237 tests passed,
+  one native Keychain test remained intentionally skipped from the normal run,
+  TypeScript passed, and zero tests failed across 23 files.
+
 ## 2026-09-06
 
 - Repaired cloud-provider status so OmniCode no longer equates a stored API key
@@ -107,6 +131,12 @@ stabilization phase.
   folder authorization/workspace switch, and Explorer row-to-folder move. Exact
   content and disk movement passed, the original workspace was restored, and
   disposable data was moved to Trash.
+- Verified every implemented AI context control in one real packaged Gemini
+  request: current file, open files, selected code, terminal output, TypeScript
+  problems, Git changes, and a separately native-picked file. Consent listed
+  exact categories/paths and nonzero sizes; Gemini returned the exact seven-
+  context success marker. New Chat cleared the conversation and the original
+  permission/workspace were restored.
 
 ## 2026-09-05
 

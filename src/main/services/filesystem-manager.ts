@@ -280,8 +280,7 @@ export class FileSystemManager {
     const hasOmniCodeIgnore = await fs.access(path.join(safeRoot, '.omnicodeignore')).then(() => true).catch(() => false)
     return new Promise((resolve, reject) => {
       const args = [
-        '--json', '--line-number', '--column', '--hidden',
-        '--glob', '!.git/**', '--glob', '!node_modules/**', '--glob', '!dist/**', '--glob', '!build/**',
+        '--json', '--line-number', '--column', '--hidden', '--no-require-git',
         '--max-filesize', '8M'
       ]
       if (hasOmniCodeIgnore) args.push('--ignore-file', '.omnicodeignore')
@@ -290,6 +289,9 @@ export class FileSystemManager {
       else args.push('--ignore-case')
       if (options.wholeWord) args.push('--word-regexp')
       if (options.include?.trim()) args.push('--glob', options.include.trim())
+      // Negative globs must follow a positive include glob because ripgrep uses
+      // the last matching glob. Otherwise `**/*.ts` can re-include node_modules.
+      args.push('--glob', '!.git/**', '--glob', '!node_modules/**', '--glob', '!dist/**', '--glob', '!build/**')
       if (options.exclude?.trim()) {
         for (const pattern of options.exclude.split(',').map((item) => item.trim()).filter(Boolean)) args.push('--glob', `!${pattern}`)
       }
