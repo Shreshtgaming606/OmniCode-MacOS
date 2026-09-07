@@ -5,6 +5,40 @@ stabilization phase.
 
 ## 2026-09-07
 
+- Verified native system clipboard behavior in the packaged editor and terminal,
+  restoring the user's previous clipboard without logging it. Monaco inline
+  Replace All, exact saved bytes, 1,520-row terminal scrollback, and terminal
+  copy/paste all passed with zero renderer errors.
+- Verified the real native Agent command approval boundary. Cancel returned
+  false and made no filesystem change; Run Command returned true and only the
+  approved safe command executed in the authorized workspace PTY.
+- Verified default-browser launch and actual live reload: OmniCode opened Chrome
+  on its selected localhost port, and the same tab automatically changed to the
+  exact edited HTML title and heading before the server stopped and released the
+  port.
+- Replaced plain assistant `<pre>` output with safe Markdown rendering, inert
+  raw HTML, and HTTPS-only external-link handling. A real packaged Gemini reply
+  rendered a heading, list, inline code, and fenced JavaScript block; New Chat
+  cleared it and no renderer error occurred.
+- Updated the earlier live AI-context audit selectors for the repaired Markdown
+  DOM and added a repeatable packaged Markdown audit.
+- Verified terminal workspace switching end to end. Folder drop replaced the old
+  PTY, the new shell printed its exact canonical `pwd`, stale-session input was
+  ignored, and restoring the original workspace created another correctly rooted
+  session.
+- Verified an externally moved workspace during a dirty edit fails visibly
+  without clearing the buffer or changing the original disk bytes, then recovers
+  after the path/workspace is restored.
+- Added a credential-leakage audit across repository, isolated profile,
+  workspace, renderer local storage, output/toast/error/terminal text, and
+  Keychain presence booleans. It found no unexpected credential-shaped values,
+  explicitly permits only one known synthetic redaction fixture, and never reads
+  or prints a credential value.
+- Re-ran the complete suite after the Chat repair: 239 tests passed, one native
+  Keychain test remained intentionally skipped from the normal run, TypeScript
+  passed, the x64 production directory rebuilt, and zero tests failed across 24
+  files.
+
 - Fixed accelerated workspace search so positive include globs cannot re-enable
   default or explicit exclusions, and `.gitignore` works in non-Git folders.
 - Fixed automatic/manual same-workspace indexing races by coalescing concurrent

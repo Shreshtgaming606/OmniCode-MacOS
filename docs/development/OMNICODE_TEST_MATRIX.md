@@ -30,8 +30,8 @@ substitute for a real integration test where one is required.
 | Filesystem | Reveal/Open With | Finder integration | Pass | Packaged macOS E2E | Explorer actions selected the exact file in Finder and chose TextEdit through the native Open With sheet; exact document/content opened |
 | Editor | Multiple tabs | Open, switch, and close files | Pass | Packaged E2E | Three language tabs opened via Quick Open, switched, and closed with native `⌘W` |
 | Editor | Languages | Map HTML/CSS/JS/TS/Python/Java/C/C++/Swift/Rust/Go/JSON/Markdown | Pass | Unit | Seven mapping/registry tests |
-| Editor | Core editing | Type, selection, copy/paste, undo/redo | Partial | Packaged E2E | Select-all, text insertion, model-level native Undo/Redo, and exact Save bytes passed; system clipboard remains manual to avoid overwriting user data |
-| Editor | Find/replace | Find, replace, find-all | Partial | Packaged E2E | Native `⌘F` opened Monaco Find; workspace search and confirmed multi-file Replace All passed; Monaco inline Replace remains manual |
+| Editor | Core editing | Type, selection, copy/paste, undo/redo | Pass | Packaged macOS E2E | System clipboard copy/paste, select-all, insertion, model-level native Undo/Redo, and exact Save bytes passed; the user's prior clipboard was restored without logging it |
+| Editor | Find/replace | Find, replace, find-all | Pass | Packaged E2E | Native `⌘F` opened Monaco Find; real inline Replace All changed and saved exact bytes; workspace search/multi-file Replace All also passed |
 | Editor | Visual features | Lines, indentation, brackets, folding, minimap | Pass | Packaged E2E | Auto-indent/bracket completion, line numbers, syntax tokens, folding control, minimap, and TypeScript state rendered |
 | Editor | Dirty state | Indicator, save, close prompt | Pass | Packaged macOS E2E | Dirty/clean transitions and tab Cancel/Discard passed; native window sheet Cancel retained buffer, Discard preserved disk, and Save All wrote exact bytes before closing |
 | Editor | Resize | Editor relayout after panel/window changes | Pass | Packaged E2E | Explorer, AI, and bottom-panel min/max pointer drags committed without renderer errors |
@@ -47,7 +47,7 @@ substitute for a real integration test where one is required.
 | Terminal | PATH | Intel/Apple Homebrew paths visible | Pass | Packaged integration + unit | Both standard Homebrew bin paths and real Node/Git lookup passed |
 | Terminal | Interactive | Ctrl+C, history, interactive process | Pass | Packaged E2E + integration | Real sleep interrupted; zsh Up-arrow history replayed the prior marker command and produced output again |
 | Terminal | Sessions | Create/switch/close/restart/clear multiple terminals | Pass | Packaged E2E + integration | Toolbar and native shortcut created sessions; tabs switched, split rendered, search/clear/restart/kill/close all reflected real state |
-| Terminal | Resize/scroll/copy/paste | xterm behavior | Partial | Packaged integration | PTY resize, xterm mount, search selection, and clear passed; long scrollback and system clipboard transfer remain |
+| Terminal | Resize/scroll/copy/paste | xterm behavior | Pass | Packaged macOS E2E | PTY resize, xterm mount, 1,520-row scrollback navigation, search selection, clear, and exact system clipboard copy/paste passed; prior clipboard restored |
 | Runtime | Detection | 33 allowlisted tools return installed/missing states | Pass | Packaged integration + unit | Requested tool states matched independent host command lookup |
 | Runtime | Missing tools | Clean state without crash or stack trace | Pass | Automated | Runtime tests and setup smoke |
 | Runtime | Fresh Mac shims | Detection does not trigger Apple installer | Pass | Unit | Regression coverage |
@@ -68,7 +68,7 @@ substitute for a real integration test where one is required.
 | Server | Assets/nested paths | HTML/CSS/JS/relative resources | Pass | Packaged integration | Real HTML, CSS, JS, and nested file bytes served successfully |
 | Server | Secret denial | Deny `.git` and `.env` | Pass | Packaged smoke | Both returned 403 |
 | Server | Stop/restart/port release | Lifecycle correctness | Pass | Packaged integration + unit | Static/package restart passed, stopped ports rebound, explicit conflict was useful |
-| Server | Live reload | HTML/CSS/JS browser update | Partial | Packaged integration | Injected client and real SSE reload after write passed; actual browser page refresh remains manual |
+| Server | Live reload | HTML/CSS/JS browser update | Pass | Packaged app + real browser | A repeatable audit opened Chrome at OmniCode's real localhost URL; editing the served HTML automatically changed the same tab from the unique before title to the unique after title; stop released the selected port (latest run 55978) |
 | Git | Repository detection/status | Real disposable repository | Pass | Packaged E2E + unit | UI initialized repository and reflected clean/changed/staged states |
 | Git | Stage/unstage/commit/diff | Actual state matches UI | Pass | Packaged E2E | Real working diff reached Output; UI stage/unstage/commit matched disk and Git |
 | Git | Init/branches | Initialize, create, switch, delete | Pass | Packaged E2E | All branch controls passed in disposable repository |
@@ -77,7 +77,7 @@ substitute for a real integration test where one is required.
 | GitHub | Authentication | Existing SSH/HTTPS/gh state | Blocked | Host inspection | `gh` absent and no safe configured writable remote; USER CONFIGURATION REQUIRED for authenticated writes |
 | Keychain | Save/read/restart | All provider keys across manager instances | Pass | Native + packaged E2E | Isolated native test passed all providers; packaged temporary OpenAI key survived a full app restart and was actually used; user Google key untouched |
 | Keychain | Update/remove | Replace and delete all provider keys | Pass | Native integration | Disposable keychain |
-| Keychain | Secret leakage | Source/log/config/Git scan | Partial | Automated/code | Full runtime log scan pending |
+| Keychain | Secret leakage | Source/profile/config/Git/visible-diagnostic scan | Pass | Packaged automated audit | Scanned 130 repository, 29 isolated-profile, and 10 workspace files plus renderer local storage and visible diagnostics; zero unexpected credential-shaped matches, one known synthetic redaction fixture, and no credential value was read/printed |
 | OpenAI | Request adapter | Auth header, payload, response/errors | Pass | Unit | Mock server/fetch |
 | OpenAI | Invalid credential | Stored key is used and an accurate redacted auth error reaches UI | Pass | Packaged E2E | Temporary audit key survived restart, produced authentication failure, never appeared in returned error, and was deleted |
 | OpenAI | Real minimal successful request | Response reaches UI | Blocked | Manual/E2E | BLOCKED — USER CONFIGURATION REQUIRED; no valid OpenAI key is configured |
@@ -94,7 +94,7 @@ substitute for a real integration test where one is required.
 | Ollama | Real inference | Exact response and coding question | Blocked | E2E | Ollama service/model required |
 | AI chat | Provider/model switching | Defaults and manual changes stay coherent | Pass | Renderer unit | Five regression tests |
 | AI chat | Conversation clear/errors | UI resets and surfaces failure | Pass | Packaged live E2E + unit | Real Gemini responses reached UI; New Chat removed all messages; invalid auth and transient provider 503 produced accurate visible errors |
-| AI chat | Markdown/code blocks | Render assistant response appropriately | Not run | E2E | Current implementation uses preformatted text |
+| AI chat | Markdown/code blocks | Render assistant response appropriately | Pass | Unit + packaged live E2E | Real Gemini response rendered an `h2`, list items, inline code, and a language-tagged fenced JavaScript block; raw HTML stays inert and no legacy assistant `<pre>` remains |
 | AI chat | Streaming/stop | Generation updates and cancellation | Not implemented | Inspection | No UI/backend support exists |
 | Context | Current/open/selected files | Inspect exact outbound request | Pass | Packaged live E2E | Consent listed exact current/open/native-picked paths and 22-character selection; Gemini verified unique tokens from every category |
 | Context | Workspace retrieval | Multi-file relevance and actual payload | Pass | Unit + packaged live E2E | Exact outbound system context inspected in unit test; real Gemini derived undisclosed TTL/table/prefix across five retrieved files after consent |
@@ -104,7 +104,7 @@ substitute for a real integration test where one is required.
 | Inline AI | Proposal/accept/reject/save | Real selected-code workflow | Blocked | E2E | Working AI backend required |
 | Agent | Inspect/plan/propose files | Disposable multi-file task | Pass | Packaged live E2E | Two transient 503 attempts stopped safely with no writes; later retry read multiple files, proposed one derived file, opened review, accepted, and undid it |
 | Agent | Plan parsing/path safety | Reject traversal, malformed, incomplete, and oversized plans | Pass | Unit | Relative paths only; 50-file, 20-step, and 10-command limits verified |
-| Agent | Command permission | Approval and backend enforcement | Partial | Unit + packaged security | Main process blocked `sudo` and wrong workspace; dangerous command matrix passes; allowed-command native confirmation acceptance remains manual |
+| Agent | Command permission | Approval and backend enforcement | Pass | Unit + packaged macOS E2E | Main process blocked unsafe/wrong-workspace calls; native Cancel returned false with no file, native Run Command returned true, and only the approved safe command executed through a workspace PTY |
 | Diff | File/hunk accept/reject/all | Filesystem matches decisions | Pass | Unit + packaged E2E | Real three-file transaction stayed staged until accept; reject preserved disk |
 | Diff | Create/delete/undo | Restore exact filesystem state | Pass | Unit + packaged E2E | Modify/create/delete acceptance and full snapshot undo matched disk |
 | Settings | Workspace JSON | Validate/read/write and corrupt input | Pass | Unit + packaged E2E | Valid round-trip, atomic mode `0600`, invalid-port no-overwrite, malformed JSON error, restore, and cleanup passed |
@@ -116,9 +116,9 @@ substitute for a real integration test where one is required.
 | Layout | Persistence | Restore panel dimensions | Not implemented | Inspection | No persistence code found |
 | Security | Renderer sandbox/IPC sender | Reject untrusted calls/navigation | Pass | Automated/smoke | Further adversarial tests pending |
 | Security | Workspace boundary | Reject arbitrary external paths | Pass | Unit | Agent/terminal special cases pending |
-| Security | Dangerous commands | Backend approval enforcement | Partial | Unit + packaged security | Main-process policy blocks privileged/destructive/Keychain/nested-shell patterns; native approval acceptance remains manual |
+| Security | Dangerous commands | Backend approval enforcement | Pass | Unit + packaged macOS E2E | Main-process policy blocks privileged/destructive/Keychain/nested-shell patterns; native Cancel prevented execution and native approval allowed one exact safe workspace command |
 | Failure | Offline/provider/rate-limit/timeout | Graceful accurate errors | Partial | Unit + packaged E2E | Auth failure and a real transient Gemini 503 surfaced honestly; offline and timeout E2E remain |
-| Failure | Permission/read-only/moved files | Graceful accurate errors | Partial | Packaged E2E + unit | Real mode-`0555` save surfaced EACCES/permission guidance, preserved disk, and kept the buffer dirty; moved-workspace flow remains |
+| Failure | Permission/read-only/moved files | Graceful accurate errors | Pass | Packaged E2E + unit | Real mode-`0555` save surfaced EACCES guidance; moving a workspace during a dirty edit produced a visible conflict error; both cases preserved disk bytes and dirty buffers, then recovered cleanly |
 | Performance | Startup/idle | Time, CPU, memory | Pass | Packaged three-launch soak | Cold shell/workspace 10.5/11.2 s; warm at most 4.0/4.6 s; settled CPU 1.4–1.8%, RSS 371–376 MiB, graceful quit/helper cleanup under one second |
 | Performance | Large workspace/index/search | Responsiveness and bounds | Pass | Packaged measurement | 1,203 files: workspace open 415 ms, index 1.53 s, search 47 ms; renderer stayed responsive and results/ignores were exact |
 | Performance | Cleanup/leaks | Listeners, PTYs, servers, AI operations | Pass | Packaged soak | 8 PTYs and 3 servers created/stopped; server was not left running, app RSS settled 397→422 MiB, median idle CPU 0%, and no renderer error was captured |

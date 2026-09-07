@@ -218,7 +218,7 @@ for (let attempt = 1; attempt <= 4; attempt += 1) {
   await waitForRenderer(`document.querySelector('.ai-message.user')`, 10_000)
   await waitForRenderer(`!document.querySelector('.ai-thinking')`, 120_000)
   result = await evaluate(`return {
-    response: [...document.querySelectorAll('.ai-message.assistant pre')].at(-1)?.textContent?.trim() ?? '',
+    response: [...document.querySelectorAll('.ai-message.assistant .message-markdown')].at(-1)?.textContent?.trim() ?? '',
     error: document.querySelector('.ai-messages .inline-error')?.textContent ?? '',
     confirmation: window.__omnicodeContextConfirm,
     attached: [...document.querySelectorAll('.context-shelf label')].filter((label) => label.querySelector('input')?.checked).map((label) => label.textContent.trim()),

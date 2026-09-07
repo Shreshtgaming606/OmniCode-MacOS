@@ -31,7 +31,8 @@
     "lucide-react": "^0.542.0",
     "node-pty": "^1.1.0",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "react-markdown": "^10.1.0"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.0.1",

@@ -94,7 +94,7 @@ lost. Secrets, tokens, and authorization headers must never be included here.
 - Relevant files: `package.json` build configuration and release artifacts.
 - Current status: 🔵 BLOCKED — APPLE DEVELOPER ID REQUIRED.
 
-## OMI-007 — Critical renderer workflows lack end-to-end coverage
+## OMI-007 — Critical renderer workflows lack end-to-end coverage — Resolved
 
 - Severity: High
 - Reproduction: Inspect tests; most UI operations are not driven through the
@@ -105,7 +105,13 @@ lost. Secrets, tokens, and authorization headers must never be included here.
   server security, and cold file open only.
 - Suspected cause: Smoke suite grew incrementally around packaging milestones.
 - Relevant files: `scripts/`, `src/renderer/src/components/`.
-- Current status: 🟡 Open — expand integration/E2E coverage during each audit area.
+- Current status: ✅ Resolved — repeatable packaged audits now cover startup,
+  native window/dialog/clipboard behavior, open/edit/save/Save As, Explorer
+  lifecycle and drag/drop, terminal/Run, local server plus real-browser reload,
+  Git, Keychain/provider state, live Gemini Chat/Markdown/context, Agent
+  proposal/native command approval, diff/undo, settings/themes, indexing, and
+  performance. External credentials, services, and hardware remain explicitly
+  blocked rather than falsely passed.
 
 ## OMI-008 — AI chat is non-streaming and cannot stop generation
 
@@ -433,3 +439,21 @@ lost. Secrets, tokens, and authorization headers must never be included here.
   without continuous animation. Three packaged launches settled at 1.4–1.8%
   total app CPU with the panel visible, 371–376 MiB RSS, zero renderer errors,
   and full helper-process cleanup after quit.
+
+## OMI-030 — Assistant messages did not render Markdown — Resolved
+
+- Severity: Medium
+- Reproduction: Ask any AI provider for a heading, list, or fenced code block.
+- Expected: Common Markdown is readable and code fences render as code without
+  allowing provider-returned HTML to execute.
+- Actual: Assistant content was displayed as one plain preformatted text block.
+- Suspected cause: AI Chat intentionally rendered every message through `<pre>`
+  and had no safe Markdown presentation component.
+- Relevant files: `src/renderer/src/components/AIChat.tsx`,
+  `src/renderer/src/components/MarkdownMessage.tsx`,
+  `src/renderer/src/components/MarkdownMessage.test.ts`,
+  `scripts/audit-ai-markdown.mjs`.
+- Current status: ✅ Resolved — assistant replies render Markdown with raw HTML
+  left inert and HTTPS-only external-link handling. Two renderer tests pass and
+  a real Gemini response in the rebuilt `.app` produced the expected heading,
+  list, inline code, and language-tagged JavaScript block with no runtime error.

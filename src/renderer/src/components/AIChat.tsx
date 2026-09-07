@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Bot, Check, Cloud, Cpu, FilePlus2, Paperclip, Send, Sparkles, UserRound, X } from 'lucide-react'
 import type { AIMessage, AIModel, AIProviderId } from '../../../shared/contracts'
 import { AgentMode } from './AgentMode'
+import { MarkdownMessage } from './MarkdownMessage'
 
 const DEFAULT_MODELS: Record<AIProviderId, string> = {
   ollama: '', openai: 'gpt-5', anthropic: 'claude-sonnet-5', google: 'gemini-3.5-flash'
@@ -165,7 +166,9 @@ export function AIChat({
         <div>{['Explain the current file', 'Find likely bugs', 'Write unit tests'].map((suggestion) => <button key={suggestion} onClick={() => setPrompt(suggestion)}>{suggestion}</button>)}</div></div>}
       {messages.map((message, index) => <article className={`ai-message ${message.role}`} key={index}>
         <span className="message-avatar">{message.role === 'user' ? <UserRound /> : <Bot />}</span>
-        <div><strong>{message.role === 'user' ? 'You' : 'OmniCode'}</strong><pre>{message.content}</pre></div>
+        <div><strong>{message.role === 'user' ? 'You' : 'OmniCode'}</strong>{message.role === 'assistant'
+          ? <MarkdownMessage content={message.content} onLinkError={setError} />
+          : <pre className="message-plain">{message.content}</pre>}</div>
       </article>)}
       {busy && <div className="ai-thinking"><span /><span /><span /> Thinking with {model}…</div>}
       {error && <div className="inline-error"><strong>AI request failed</strong><p>{error}</p>{!local && <button onClick={onOpenSettings}>Open provider settings</button>}</div>}

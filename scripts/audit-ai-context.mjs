@@ -164,7 +164,7 @@ await evaluate(`
 await waitFor(`document.querySelector('.ai-thinking')`, 10_000)
 await waitFor(`!document.querySelector('.ai-thinking')`, 120_000)
 const chat = await evaluate(`
-  const messages = [...document.querySelectorAll('.ai-message.assistant pre')].map((node) => node.textContent.trim())
+  const messages = [...document.querySelectorAll('.ai-message.assistant .message-markdown')].map((node) => node.textContent.trim())
   return {
     response: messages.at(-1) || '',
     error: document.querySelector('.ai-messages .inline-error')?.textContent || '',
