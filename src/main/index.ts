@@ -16,6 +16,7 @@ import { WorkspaceHistoryManager } from './services/workspace-history-manager'
 import { RUNTIME_TOOL_DEFINITIONS, detectHardware, detectTools } from './services/runtime-manager'
 import { RuntimeInstaller, installationPlanFor, runtimeToolId } from './services/runtime-installer'
 import { validateAgentCommand } from './services/agent-command-policy'
+import { DiagnosticLogger } from './services/diagnostic-logger'
 
 let mainWindow: BrowserWindow | null = null
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
@@ -40,6 +41,7 @@ const ai = new AIManager(credentials, indexer, detectHardware, {
 })
 const settings = new SettingsManager()
 const workspaceHistory = new WorkspaceHistoryManager(path.join(app.getPath('userData'), 'recent-workspaces.json'))
+const diagnostics = new DiagnosticLogger(path.join(app.getPath('userData'), 'logs'))
 const runtimeInstaller = new RuntimeInstaller({
   openPath: (target) => shell.openPath(target)
 })
@@ -107,9 +109,14 @@ function handle(
   channel: string,
   listener: (event: Electron.IpcMainInvokeEvent, ...args: any[]) => unknown
 ): void {
-  ipcMain.handle(channel, (event, ...args) => {
-    assertTrustedSender(event)
-    return listener(event, ...args)
+  ipcMain.handle(channel, async (event, ...args) => {
+    try {
+      assertTrustedSender(event)
+      return await listener(event, ...args)
+    } catch (error) {
+      await diagnostics.failure(channel, error).catch(() => undefined)
+      throw error
+    }
   })
 }
 
@@ -137,6 +144,9 @@ function createWindow(): void {
   })
   mainWindow.webContents.on('will-navigate', (event, url) => {
     if (!isTrustedRendererUrl(url)) event.preventDefault()
+  })
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    void diagnostics.failure('renderer:process-gone', new Error(`${details.reason}; exit code ${details.exitCode}`)).catch(() => undefined)
   })
   mainWindow.webContents.on('will-prevent-unload', (event) => {
     if (!mainWindow) return
@@ -517,6 +527,7 @@ app.whenReady().then(() => {
   session.defaultSession.setPermissionCheckHandler(() => false)
   registerIpc()
   createWindow()
+  void diagnostics.lifecycle('ready', `OmniCode ${app.getVersion()} started on ${process.platform}/${process.arch}.`).catch(() => undefined)
   void openLaunchArguments(process.argv)
   installApplicationMenu(() => mainWindow)
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
@@ -545,5 +556,9 @@ app.on('will-quit', (event) => {
   ai.shutdown()
   runtimeInstaller.shutdown()
   terminals.shutdown()
-  void Promise.allSettled([server.stop(), fileSystem.unwatch()]).finally(() => app.exit(0))
+  void Promise.allSettled([
+    server.stop(),
+    fileSystem.unwatch(),
+    diagnostics.lifecycle('shutdown', 'OmniCode completed its shutdown sequence.')
+  ]).finally(() => app.exit(0))
 })

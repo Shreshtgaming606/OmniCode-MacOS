@@ -5,6 +5,46 @@ stabilization phase.
 
 ## 2026-09-07
 
+- Fixed five user-visible actions that depended on Electron's unsupported
+  `window.prompt()`: Clone Repository, New Project, Create Branch, Delete
+  Branch, and Rename Terminal. They now share the existing styled input modal
+  with dialog semantics, autofocus, empty-input protection, Escape/Cancel, and
+  backdrop dismissal.
+- Verified those repaired dialogs against real operations in the rebuilt app:
+  cloned a local bare repository through the native destination picker and
+  matched its origin, created/deleted a branch, renamed the live terminal, and
+  created an exact Unicode/space-named project directory. Escape cancellation
+  opened no picker and all fixtures were removed. Native confirmation support
+  was also observed separately.
+- Added a centralized, bounded main-process diagnostic log for lifecycle and
+  failed IPC operations. Records contain timestamp/subsystem/operation/category,
+  rotate at 512 KiB, use mode `0600`, refuse symlinks, and redact provider keys,
+  tokens, authorization fields, and URL credentials without ever logging IPC
+  arguments, request bodies, file contents, or stack traces. Five unit tests and
+  a real rebuilt-package permission failure passed.
+- Verified custom Run configuration in the packaged UI: a disposable
+  `.omnicode/settings.json` overrode the automatic JavaScript recipe, executed
+  preRun/build/run/postRun in order, preserved an exact space-containing cwd and
+  custom environment, and exited 0 before cleanup/restoration.
+- Audited runtime-install authorization and failure behavior. Native Cancel on
+  installed Git started no process/progress, an invalid tool ID failed before a
+  dialog, and a real missing-Go attempt surfaced Homebrew's non-writable-folder
+  failure without claiming success or leaving Go/a package process installed.
+- Exercised a live model-generated Agent command request with bounded retries.
+  Gemini returned repeated `fetch failed` transport errors; OmniCode displayed
+  the failure, proposed/executed nothing, left no marker, and the audit restored
+  its temporary confirmation override. A later retry on Google's API-recommended
+  Flash-Lite replacement produced exactly one command-only plan; Review & Run,
+  native approval, workspace PTY execution, exit code 0, exact bytes, and full
+  cleanup all passed with zero renderer errors.
+- Verified Recent workspace persistence through a real app restart without a
+  launch path. The exact canonical folder rendered in Welcome, reopened from
+  its UI button, and loaded a real 10-entry tree before graceful cleanup.
+- Re-ran the expanded suite after diagnostics: 244 tests passed, one native
+  Keychain test remained intentionally skipped from the normal run, TypeScript
+  and the production bundle passed, and the rebuilt x64 package recorded the
+  expected redacted permission diagnostic.
+
 - Verified native system clipboard behavior in the packaged editor and terminal,
   restoring the user's previous clipboard without logging it. Monaco inline
   Replace All, exact saved bytes, 1,520-row terminal scrollback, and terminal
@@ -34,6 +74,13 @@ stabilization phase.
   Keychain presence booleans. It found no unexpected credential-shaped values,
   explicitly permits only one known synthetic redaction fixture, and never reads
   or prints a credential value.
+- Verified the real native folder picker: Open exposed Open/Cancel/New Folder,
+  selected and authorized an exact disposable directory, Cancel preserved the
+  current workspace, and a second native selection restored the original path.
+- Verified notification input validation in the package. A valid bounded request
+  was accepted and empty/oversized variants were rejected; the native banner is
+  externally blocked because macOS/Electron do not deliver notifications from an
+  unsigned development build.
 - Re-ran the complete suite after the Chat repair: 239 tests passed, one native
   Keychain test remained intentionally skipped from the normal run, TypeScript
   passed, the x64 production directory rebuilt, and zero tests failed across 24

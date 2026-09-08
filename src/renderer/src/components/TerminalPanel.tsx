@@ -36,6 +36,7 @@ export interface TerminalPanelProps {
   visible: boolean
   onRequestClose: () => void
   onOutput?: (data: string) => void
+  onRequestText: (options: { title: string; label: string; value?: string; confirmLabel: string }) => Promise<string | null>
   runRequest?: TerminalRunRequest
 }
 
@@ -318,6 +319,7 @@ export function TerminalPanel({
   visible,
   onRequestClose,
   onOutput,
+  onRequestText,
   runRequest
 }: TerminalPanelProps): ReactNode {
   const [sessions, setSessions] = useState<PanelSession[]>([])
@@ -860,11 +862,11 @@ export function TerminalPanel({
           <button
             aria-label="Rename active terminal"
             disabled={!activeSession}
-            onClick={() => {
+            onClick={() => void (async () => {
               if (!activeSession) return
-              const name = window.prompt('Terminal name', activeSession.name)?.trim()
+              const name = await onRequestText({ title: 'Rename Terminal', label: 'Terminal name', value: activeSession.name, confirmLabel: 'Rename' })
               if (name) setSessions((current) => current.map((session) => session.id === activeSession.id ? { ...session, name } : session))
-            }}
+            })()}
             title="Rename terminal"
             type="button"
           >

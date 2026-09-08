@@ -34,7 +34,7 @@ interface OpenDocument {
 }
 
 interface CursorPosition { line: number; column: number }
-interface ModalInput { title: string; label: string; value: string; confirmLabel: string; onConfirm(value: string): void }
+interface ModalInput { title: string; label: string; value: string; confirmLabel: string; onConfirm(value: string): void; onCancel?(): void }
 interface InlineEditState {
   phase: 'prompt' | 'loading' | 'review'
   instruction: string
@@ -155,6 +155,19 @@ export function App() {
     const message = cause instanceof Error ? cause.message : String(cause)
     setToast({ message, kind: 'error' })
     setOutputs((current) => [...current, `[Error] ${message}`])
+  }, [])
+  const requestTextInput = useCallback((options: { title: string; label: string; value?: string; confirmLabel: string }): Promise<string | null> => {
+    return new Promise((resolve) => {
+      setModalInput({
+        ...options,
+        value: options.value ?? '',
+        onConfirm: (value) => {
+          setModalInput(null)
+          resolve(value.trim())
+        },
+        onCancel: () => resolve(null)
+      })
+    })
   }, [])
   const captureTerminalOutput = useCallback((data: string): void => {
     const plain = data.replace(/\u001B\[[0-?]*[ -\/]*[@-~]/g, '').replace(/\r(?!\n)/g, '\n')
@@ -542,21 +555,25 @@ export function App() {
 
   const cloneRepository = async (): Promise<boolean> => {
     if (!confirmWorkspaceSwitch()) return false
-    const url = window.prompt('Git repository URL')?.trim()
-    if (!url) return false
-    const destination = await window.omnicode.workspace.selectDestinationFolder()
-    if (!destination) return false
-    try { const cloned = await window.omnicode.git.clone(destination, url); await openWorkspace(cloned, true); return true }
+    try {
+      const url = await requestTextInput({ title: 'Clone Repository', label: 'Git repository URL', confirmLabel: 'Choose Destination' })
+      if (!url) return false
+      const destination = await window.omnicode.workspace.selectDestinationFolder()
+      if (!destination) return false
+      const cloned = await window.omnicode.git.clone(destination, url)
+      await openWorkspace(cloned, true)
+      return true
+    }
     catch (cause) { reportError(cause); return false }
   }
 
   const createProject = async (): Promise<boolean> => {
     if (!confirmWorkspaceSwitch()) return false
-    const destination = await window.omnicode.workspace.selectDestinationFolder()
-    if (!destination) return false
-    const name = window.prompt('New project folder name')?.trim()
-    if (!name) return false
     try {
+      const name = await requestTextInput({ title: 'New Project', label: 'Project folder name', confirmLabel: 'Choose Destination' })
+      if (!name) return false
+      const destination = await window.omnicode.workspace.selectDestinationFolder()
+      if (!destination) return false
       const project = await window.omnicode.workspace.createProject(destination, name)
       await openWorkspace(project, true)
       return true
@@ -885,7 +902,7 @@ export function App() {
           onTrash={async (node) => { const affected = documents.filter((document) => isPathAtOrBelow(document.path, node.path)); const dirty = affected.filter((document) => document.content !== document.savedContent); if (!confirm(`Move “${node.name}” to the Trash?${dirty.length ? `\n\n${dirty.length} open file${dirty.length === 1 ? '' : 's'} inside it have unsaved changes that will be discarded.` : ''}`)) return; try { await window.omnicode.workspace.trashEntry(node.path); setDocuments((current) => current.filter((document) => !isPathAtOrBelow(document.path, node.path))); if (activePath && isPathAtOrBelow(activePath, node.path)) setActivePath(null); await refreshTree() } catch (cause) { reportError(cause) } }}
           onReveal={(node) => void window.omnicode.workspace.revealInFinder(node.path).catch(reportError)} onCopyPath={(node) => void window.omnicode.workspace.copyPath(node.path).catch(reportError)} onOpenExternal={(node) => void window.omnicode.workspace.openExternal(node.path).catch(reportError)} onOpenWith={(node) => void window.omnicode.workspace.openWith(node.path).catch(reportError)} />}
         {workspacePath && activity === 'search' && <SearchView root={workspacePath} onOpen={(path, line, column) => void openFile(path, line, column)} />}
-        {workspacePath && activity === 'source' && <SourceControlView root={workspacePath} onOpenDiff={(path, staged) => void showGitDiff(path, staged)} onStatus={setGitStatus} />}
+        {workspacePath && activity === 'source' && <SourceControlView root={workspacePath} onOpenDiff={(path, staged) => void showGitDiff(path, staged)} onStatus={setGitStatus} onRequestText={requestTextInput} />}
         {workspacePath && activity === 'run' && <RunView root={workspacePath} activeFile={activeLanguage?.runnableOnMacOS ? activePath ?? undefined : undefined} serverState={serverState} onRun={() => void runCurrent()} onRunScript={runScript} onStartServer={(option, port) => void startServerOption(option, port)} onStopServer={() => void window.omnicode.server.stop()} onRestartServer={() => void startServer(true)} onOpenServer={() => void window.omnicode.server.open()} />}
         {activity === 'models' && <ModelsView />}
         {activity === 'tools' && <ToolsView />}
@@ -904,7 +921,7 @@ export function App() {
         </> : <div className="welcome-editor"><div className="welcome-mark"><Code2 /></div><h1>OmniCode</h1><p>Native tools. Local context. Your code stays in your control.</p><div className="welcome-actions"><button onClick={() => void openWorkspace()}><FolderOpen /> Open Folder <kbd>⌘⇧O</kbd></button><button onClick={() => void selectNativeFile()}><FileCode2 /> Open File <kbd>⌘O</kbd></button><button onClick={() => void cloneRepository()}><GitFork /> Clone Repository</button><button onClick={() => void createProject()}><Plus /> New Project</button></div>{recentFolders.length > 0 && <div className="recent-list"><h2>Recent</h2>{recentFolders.map((folder) => <button key={folder} onClick={() => void openWorkspace(folder)}><FolderOpen /><span><strong>{fileName(folder)}</strong><small>{folder}</small></span></button>)}</div>}<div className="shortcut-grid"><span><kbd>⌘P</kbd> Quick Open</span><span><kbd>⌘⇧P</kbd> Commands</span><span><kbd>⌘`</kbd> Terminal</span><span><kbd>⌘I</kbd> Inline AI</span></div></div>}
         <><div className="resize-handle horizontal" style={{ display: panelVisible ? undefined : 'none' }} onPointerDown={(event) => startResize('panel', event)} /><section className="bottom-panel" style={{ height: panelVisible ? panelHeight : 0, display: panelVisible ? undefined : 'none' }}>
           <div className="panel-tabs">{(['terminal', 'output', 'problems', 'debug'] as PanelTab[]).map((tab) => <button key={tab} className={panelTab === tab ? 'active' : ''} onClick={() => setPanelTab(tab)}>{tab}{tab === 'problems' && problems.length > 0 && <span>{problems.length}</span>}</button>)}<div /><button title="Close panel" onClick={() => setPanelVisible(false)}><X /></button></div>
-          <div className="panel-content"><TerminalPanel workspacePath={workspacePath} visible={panelVisible && panelTab === 'terminal'} onRequestClose={() => setPanelVisible(false)} runRequest={runRequest} onOutput={captureTerminalOutput} />
+          <div className="panel-content"><TerminalPanel workspacePath={workspacePath} visible={panelVisible && panelTab === 'terminal'} onRequestClose={() => setPanelVisible(false)} runRequest={runRequest} onOutput={captureTerminalOutput} onRequestText={requestTextInput} />
             {panelTab === 'output' && <pre className="output-view">{outputs.join('\n')}</pre>}
             {panelTab === 'problems' && <div className="problems-view">{problems.map((problem, index) => <button key={index} onClick={() => { editorRef.current?.setPosition({ lineNumber: problem.startLineNumber, column: problem.startColumn }); editorRef.current?.revealLineInCenter(problem.startLineNumber) }}><CircleAlert className={problem.severity === 8 ? 'error' : 'warning'} /><span>{problem.message}</span><small>{problem.startLineNumber}:{problem.startColumn}</small></button>)}{!problems.length && <div className="panel-empty"><CheckCircle2 /> No problems detected in the active file.</div>}</div>}
             {panelTab === 'debug' && (terminalOutput
@@ -917,7 +934,11 @@ export function App() {
     </div>
     <footer className="status-bar"><button title="Git branch"><GitBranch />{gitStatus?.isRepository ? gitStatus.branch : 'No Git'}</button><button onClick={() => { setPanelVisible(true); setPanelTab('problems') }}><CircleAlert />{problems.length}</button><span className="status-spacer" /><button title={serverState.running ? 'Open local server (stop it from the Run menu)' : 'Open Run view'} onClick={() => serverState.running && serverState.url ? void window.omnicode.server.open() : (setActivity('run'), setSidebarVisible(true))}>{serverState.running ? <><Server className="server-on" /> {serverState.name ?? 'Running'}{serverState.port ? ` :${serverState.port}` : ''}</> : <><Server /> Server off</>}</button>{activeRuntime && <button title={activeRuntime.installed ? `${activeRuntime.path ?? activeRuntime.command}${activeRuntime.version ? ` · ${activeRuntime.version}` : ''}` : activeRuntime.guidance} onClick={() => { setActivity('tools'); setSidebarVisible(true) }}><Boxes />{activeRuntime.name}: {activeRuntime.installed ? 'Ready' : 'Missing'}</button>}<span title={aiAutocomplete ? `${autocompleteProvider}: ${autocompleteModel || 'automatic local model'}` : 'AI autocomplete is disabled'}><Sparkles /> {aiAutocomplete ? 'Autocomplete on' : 'Autocomplete off'}</span><span><Cpu /> {ollamaState.status === 'ready' ? 'Local AI' : 'AI optional'}</span><span>UTF-8</span><span>Ln {cursor.line}, Col {cursor.column}</span><span>{activeLanguage?.displayName ?? 'Plain Text'}</span></footer>
     {palette && <div className="palette-backdrop" onMouseDown={() => setPalette(null)}><div className="palette" onMouseDown={(event) => event.stopPropagation()}><div><Command /><input autoFocus value={paletteQuery} onChange={(event) => setPaletteQuery(event.target.value)} placeholder={palette === 'commands' ? 'Type a command' : 'Search files by name'} /></div><div className="palette-results">{palette === 'commands' ? commands.filter(([label]) => label.toLowerCase().includes(paletteQuery.toLowerCase())).map(([label, action]) => <button key={label} onClick={() => { setPalette(null); action() }}><Command /><span>{label}</span></button>) : allFiles.filter((file) => file.path.toLowerCase().includes(paletteQuery.toLowerCase())).slice(0, 100).map((file) => <button key={file.path} onClick={() => { setPalette(null); void openFile(file.path) }}><FileCode2 /><span><strong>{file.name}</strong><small>{file.path.replace(`${workspacePath}/`, '')}</small></span></button>)}</div></div></div>}
-    {modalInput && <div className="modal-backdrop"><form className="input-modal" onSubmit={(event) => { event.preventDefault(); modalInput.onConfirm(modalInput.value) }}><h2>{modalInput.title}</h2><label>{modalInput.label}<input autoFocus value={modalInput.value} onChange={(event) => setModalInput({ ...modalInput, value: event.target.value })} /></label><div><button type="button" onClick={() => setModalInput(null)}>Cancel</button><button className="primary-button" disabled={!modalInput.value.trim()}>{modalInput.confirmLabel}</button></div></form></div>}
+    {modalInput && <div className="modal-backdrop" onMouseDown={(event) => {
+      if (event.target === event.currentTarget) { modalInput.onCancel?.(); setModalInput(null) }
+    }}><form className="input-modal" role="dialog" aria-modal="true" aria-label={modalInput.title} onKeyDown={(event) => {
+      if (event.key === 'Escape') { event.preventDefault(); modalInput.onCancel?.(); setModalInput(null) }
+    }} onSubmit={(event) => { event.preventDefault(); modalInput.onConfirm(modalInput.value) }}><h2>{modalInput.title}</h2><label>{modalInput.label}<input autoFocus value={modalInput.value} onChange={(event) => setModalInput({ ...modalInput, value: event.target.value })} /></label><div><button type="button" onClick={() => { modalInput.onCancel?.(); setModalInput(null) }}>Cancel</button><button className="primary-button" disabled={!modalInput.value.trim()}>{modalInput.confirmLabel}</button></div></form></div>}
     {showHelp && <div className="modal-backdrop"><section className="help-modal" role="dialog" aria-modal="true" aria-label="OmniCode help"><header><div><Code2 /><span><h2>OmniCode</h2><small>macOS developer workspace</small></span></div><button title="Close help" onClick={() => setShowHelp(false)}><X /></button></header><p>Write, run, host, version, and review AI-assisted changes without leaving your workspace. AI is optional; local models stay on this Mac.</p><div className="help-shortcuts">{[['⌘ P', 'Quick Open'], ['⌘ ⇧ P', 'Command Palette'], ['⌘ S', 'Save'], ['⌘ ⇧ F', 'Workspace Search'], ['⌘ `', 'Terminal'], ['⌘ I', 'Inline AI'], ['⌃ R', 'Run Current File'], ['⌘ ,', 'Settings']].map(([shortcut, label]) => <div key={shortcut}><kbd>{shortcut}</kbd><span>{label}</span></div>)}</div><footer><button onClick={() => { setShowHelp(false); setShowOnboarding(true) }}>Run Setup Guide Again</button><button className="primary-button" onClick={() => setShowHelp(false)}>Done</button></footer></section></div>}
     {inlineEdit && <div className="inline-ai-overlay"><div className={`inline-ai-dialog ${inlineEdit.phase === 'review' ? 'review' : ''}`}><header><Sparkles /><strong>OmniCode Inline Edit</strong><span className="privacy-badge local"><Cpu /> LOCAL</span><button onClick={() => setInlineEdit(null)}><X /></button></header>{inlineEdit.phase !== 'review' ? <><textarea autoFocus value={inlineEdit.instruction} disabled={inlineEdit.phase === 'loading'} onChange={(event) => setInlineEdit({ ...inlineEdit, instruction: event.target.value })} placeholder="Describe the change…" />{inlineEdit.error && <div className="inline-error">{inlineEdit.error}</div>}<footer><span>{inlineEdit.original.split('\n').length} selected line(s)</span><button onClick={() => setInlineEdit(null)}>Cancel</button><button className="primary-button" disabled={!inlineEdit.instruction.trim() || inlineEdit.phase === 'loading'} onClick={() => void submitInlineAI()}>{inlineEdit.phase === 'loading' ? 'Generating…' : 'Generate Diff'}</button></footer></> : <><div className="diff-host"><DiffEditor original={inlineEdit.original} modified={inlineEdit.proposal} language={activeDocument ? languageForPath(activeDocument.path) : 'plaintext'} theme={dark ? 'vs-dark' : 'light'} options={{ automaticLayout: true, readOnly: true, minimap: { enabled: false }, renderSideBySide: true, fontSize: 12 }} /></div><footer><span>Review the proposed replacement before applying.</span><button onClick={() => setInlineEdit(null)}>Reject</button><button className="primary-button" onClick={acceptInlineAI}>Accept Change</button></footer></>}</div></div>}
     {diffProposalId && <div className="change-review-overlay"><div className="change-review-dialog"><DiffReview proposalId={diffProposalId} onClose={() => setDiffProposalId(null)} onProposalChange={handleProposalChange} /></div></div>}

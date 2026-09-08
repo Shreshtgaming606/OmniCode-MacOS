@@ -41,8 +41,13 @@ lost. Secrets, tokens, and authorization headers must never be included here.
   and Claude successful live requests are BLOCKED — USER CONFIGURATION REQUIRED.
   Gemini also completed the live multi-file Chat context test. Two Agent planning
   attempts received an honest transient HTTP 503 high-demand response; a bounded
-  later retry succeeded through propose/review/accept/undo. No user credential
-  was overwritten or printed.
+  later retry succeeded through propose/review/accept/undo. A subsequent bounded
+  command-only Agent audit encountered repeated real `fetch failed` transport
+  errors; it stopped without a proposal, command, or filesystem write and
+  restored its temporary harness state. Retrying against Google's current
+  Flash-Lite replacement then completed the command-only plan, native approval,
+  workspace PTY execution, and cleanup after three additional transient
+  failures. No user credential was overwritten or printed.
 
 ## OMI-003 — Local inference is unverified on the current host
 
@@ -93,6 +98,10 @@ lost. Secrets, tokens, and authorization headers must never be included here.
 - Suspected cause: Apple developer credentials are an external requirement.
 - Relevant files: `package.json` build configuration and release artifacts.
 - Current status: 🔵 BLOCKED — APPLE DEVELOPER ID REQUIRED.
+  This also blocks native Notification Center delivery: the packaged notification
+  IPC accepts valid bounded content and rejects invalid content, but Electron's
+  macOS notification contract states unsigned development builds are not
+  delivered. The current-host banner audit therefore observed no notification.
 
 ## OMI-007 — Critical renderer workflows lack end-to-end coverage — Resolved
 
@@ -457,3 +466,43 @@ lost. Secrets, tokens, and authorization headers must never be included here.
   left inert and HTTPS-only external-link handling. Two renderer tests pass and
   a real Gemini response in the rebuilt `.app` produced the expected heading,
   list, inline code, and language-tagged JavaScript block with no runtime error.
+
+## OMI-031 — Failures lacked a persistent diagnostic trail — Resolved
+
+- Severity: Medium
+- Reproduction: Trigger a backend IPC failure, close the transient UI error,
+  then inspect application support data for a bounded diagnostic record.
+- Expected: A timestamped subsystem, operation, and error category are retained
+  without recording secrets, request bodies, IPC arguments, stacks, or files.
+- Actual: Before this repair, failures were visible in the UI but no centralized
+  persistent diagnostic log existed.
+- Suspected cause: Each subsystem returned errors independently and the trusted
+  IPC registration helper did not observe rejected operations.
+- Relevant files: `src/main/services/diagnostic-logger.ts`,
+  `src/main/index.ts`, `scripts/audit-diagnostic-logging.mjs`.
+- Current status: ✅ Resolved — logs are serialized JSON lines, mode `0600`,
+  rotated at 512 KiB, and redact common provider keys, GitHub tokens,
+  authorization values, URL credentials, and query tokens. Five unit tests and
+  a rebuilt packaged boundary-failure audit passed; the real IPC argument was
+  absent and the UI still received the accurate denial.
+
+## OMI-032 — Text-entry actions used unsupported Electron prompts — Resolved
+
+- Severity: High
+- Reproduction: Click Clone Repository, New Project, Create/Delete Branch, or
+  Rename Terminal in the packaged Electron 44 application.
+- Expected: A text-entry dialog opens and the requested real operation can
+  continue or be canceled.
+- Actual: `window.prompt()` throws `Error: prompt() is not supported`; several
+  handlers rejected before reaching their backend and appeared to do nothing.
+- Suspected cause: Browser prompt behavior was assumed to exist in Electron.
+- Relevant files: `src/renderer/src/App.tsx`,
+  `src/renderer/src/components/SourceControlView.tsx`,
+  `src/renderer/src/components/TerminalPanel.tsx`,
+  `scripts/audit-input-dialog-workflows.mjs`.
+- Current status: ✅ Resolved — every `window.prompt()` call was replaced with
+  OmniCode's styled input modal, including dialog semantics, autofocus,
+  disabled-empty confirmation, Cancel, Escape, and backdrop cancellation. A
+  rebuilt packaged audit passed real clone/native destination, branch
+  create/delete, terminal rename, and Unicode New Project operations with zero
+  renderer errors. Native `window.confirm()` support was separately observed.

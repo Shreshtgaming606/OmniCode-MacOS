@@ -43,10 +43,11 @@ function ChangeGroup({ title, changes, actionTitle, staged, busy, onAll, onActio
   </section>
 }
 
-export function SourceControlView({ root, onOpenDiff, onStatus }: {
+export function SourceControlView({ root, onOpenDiff, onStatus, onRequestText }: {
   root: string
   onOpenDiff(path: string, staged?: boolean): void
   onStatus(status: GitStatus): void
+  onRequestText(options: { title: string; label: string; value?: string; confirmLabel: string }): Promise<string | null>
 }) {
   const [status, setStatus] = useState<GitStatus | null>(null)
   const [branches, setBranches] = useState<string[]>([])
@@ -110,15 +111,20 @@ export function SourceControlView({ root, onOpenDiff, onStatus }: {
     <div className="sidebar-empty"><GitBranch /><p>This folder is not a Git repository.</p><button className="primary-button" disabled={busy} onClick={() => void perform('init', () => window.omnicode.git.operation(root, 'init'), 'Repository initialized.')}>Initialize Repository</button>{status.error && <small>{status.error}</small>}{error && <small>{error}</small>}</div>
   </div>
 
-  const createBranch = (): void => {
-    const name = window.prompt('New branch name')?.trim()
+  const createBranch = async (): Promise<void> => {
+    const name = await onRequestText({ title: 'Create Branch', label: 'New branch name', confirmLabel: 'Create Branch' })
     if (name) void perform('branch-create', () => window.omnicode.git.switchBranch(root, name, true), `Created and switched to ${name}.`)
   }
 
-  const deleteBranch = (): void => {
+  const deleteBranch = async (): Promise<void> => {
     const candidates = branches.filter((branch) => branch !== status?.branch)
     if (!candidates.length) return
-    const name = window.prompt(`Branch to delete:\n\n${candidates.join('\n')}`, candidates[0])?.trim()
+    const name = await onRequestText({
+      title: 'Delete Branch',
+      label: `Branch name (${candidates.join(', ')})`,
+      value: candidates[0],
+      confirmLabel: 'Delete Branch'
+    })
     if (!name || !candidates.includes(name)) {
       if (name) setError('Choose an existing local branch other than the current branch.')
       return
@@ -140,7 +146,7 @@ export function SourceControlView({ root, onOpenDiff, onStatus }: {
       <button disabled={busy} title="Push" onClick={() => void perform('push', () => window.omnicode.git.operation(root, 'push'), 'Pushed local commits.')}><CloudUpload /></button>
       <button disabled={busy} title="Refresh" onClick={() => void refresh()}><RefreshCw className={busyAction === 'refresh' ? 'spin' : ''} /></button>
     </div></div>
-    {status && <div className="branch-controls"><GitBranch /><select aria-label="Current Git branch" disabled={busy} value={status.branch} onChange={(event) => void perform('branch-switch', () => window.omnicode.git.switchBranch(root, event.target.value), `Switched to ${event.target.value}.`)}>{!branches.includes(status.branch) && <option value={status.branch}>{status.branch}</option>}{branches.map((branch) => <option key={branch} value={branch}>{branch}</option>)}</select><span>{status.ahead ? `↑${status.ahead}` : ''}{status.behind ? `↓${status.behind}` : ''}</span><button disabled={busy} title="Create branch" onClick={createBranch}><Plus /></button><button disabled={busy || branches.filter((branch) => branch !== status.branch).length === 0} title="Delete another branch" onClick={deleteBranch}><Trash2 /></button></div>}
+    {status && <div className="branch-controls"><GitBranch /><select aria-label="Current Git branch" disabled={busy} value={status.branch} onChange={(event) => void perform('branch-switch', () => window.omnicode.git.switchBranch(root, event.target.value), `Switched to ${event.target.value}.`)}>{!branches.includes(status.branch) && <option value={status.branch}>{status.branch}</option>}{branches.map((branch) => <option key={branch} value={branch}>{branch}</option>)}</select><span>{status.ahead ? `↑${status.ahead}` : ''}{status.behind ? `↓${status.behind}` : ''}</span><button disabled={busy} title="Create branch" onClick={() => void createBranch()}><Plus /></button><button disabled={busy || branches.filter((branch) => branch !== status.branch).length === 0} title="Delete another branch" onClick={() => void deleteBranch()}><Trash2 /></button></div>}
     <div className="commit-box"><textarea className="commit-input" rows={3} value={message} disabled={busy} onChange={(event) => setMessage(event.target.value)} placeholder="Commit message" /><button className="primary-button commit-button" disabled={!message.trim() || busy || !stagedChanges.length} title={stagedChanges.length ? 'Commit staged changes' : 'Stage changes before committing'} onClick={() => void perform('commit', async () => { await window.omnicode.git.commit(root, message); setMessage('') }, 'Commit created.')}><GitCommitHorizontal /> Commit <span>{stagedChanges.length || ''}</span></button></div>
     {error && <div className="inline-error">{error}</div>}
     {notice && <div className="git-notice"><Check />{notice}</div>}
@@ -150,4 +156,3 @@ export function SourceControlView({ root, onOpenDiff, onStatus }: {
     {!status && <div className="empty-compact">{busy ? 'Reading Git status…' : 'Git status unavailable.'}</div>}
   </div>
 }
-
