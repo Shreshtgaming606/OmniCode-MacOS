@@ -12,15 +12,16 @@ substitute for a real integration test where one is required.
 | Startup | Workbench | Complete setup and render main window | Pass | Automated smoke | No white/infinite loading state |
 | Startup | Window lifecycle | Minimize, zoom/full-screen, close, reopen | Pass | Packaged macOS E2E | Real resize, minimize/restore, Zoom/unzoom, full-screen enter/exit, close, renderer teardown, `open -a` reopen, and renderer recreation passed |
 | Startup | Menu | Open each native menu and invoke core commands | Pass | Packaged macOS E2E | All 11 app menus opened, 48 expected items verified, representative renderer command invoked twice; core accelerator commands are covered by packaged shortcut audits |
+| Startup | Early command delivery | Preserve menu/Finder commands before React subscribes | Pass | Unit + production build | Preload subscribes before renderer paint and drains a bounded ordered queue; ordering, live delivery/unsubscribe, and two-item queue bounds passed |
 | Startup | Console | Capture renderer/unhandled startup errors | Pass | Automated smoke | No meaningful errors captured |
 | Filesystem | Open folder | Authorize and display real temporary workspace | Pass | Automated smoke | Tree returned two entries |
 | Filesystem | Native folder dialog | Open, cancel, authorize, and restore exact folder | Pass | Packaged macOS E2E | File → Open Folder showed the real Open/Cancel/New Folder sheet, opened a disposable exact folder, Cancel left it unchanged, and a second native selection restored the original workspace |
 | Filesystem | Open file | Open real file from cold launch | Pass | Packaged E2E + smoke | Cold launch and real `⌘O` native sheet loaded exact disposable file content into offline Monaco |
-| Filesystem | Create file/folder | Verify nested real filesystem changes | Pass | Packaged integration | Real nested directory and Unicode file created through preload/backend |
-| Filesystem | Rename file/folder | Spaces, punctuation, Unicode | Pass | Packaged integration + unit | Real file renamed; remaining context-menu UI paths pending |
+| Filesystem | Create file/folder | Verify nested real filesystem changes | Pass | Packaged E2E + integration | Actual Explorer context-menu controls and styled dialogs created an exact Unicode/space folder and file; nested backend path also passed |
+| Filesystem | Rename file/folder | Spaces, punctuation, Unicode | Pass | Packaged E2E + unit | Actual Explorer context-menu Rename remapped the open tab and exact real path; collision/scope rules are unit-covered |
 | Filesystem | Move file/folder | Nested paths and invalid cycles | Pass | Packaged integration + unit | Real nested file moved; invalid cycles covered by unit test |
-| Filesystem | Duplicate file/folder | Verify contents and destination | Pass | Packaged integration + unit | Real duplicate content verified on disk |
-| Filesystem | Trash file/folder | Verify scoped deletion | Pass | Packaged integration + unit | Disposable file and audit directory moved to macOS Trash through OmniCode |
+| Filesystem | Duplicate file/folder | Verify contents and destination | Pass | Packaged E2E + unit | Actual Explorer Duplicate created the expected sibling and exact source bytes on disk |
+| Filesystem | Trash file/folder | Verify scoped deletion | Pass | Packaged macOS E2E + unit | Actual Explorer Move to Trash and native confirmation removed duplicate/original files plus created/parent folders; four dialogs and exact disk state passed |
 | Filesystem | Save | Persist editor content and clear dirty state | Pass | Packaged E2E | Monaco edit saved and exact disk bytes verified |
 | Filesystem | Save As | Persist to user-selected path | Pass | Packaged macOS E2E | Real `⌘⇧S` sheet wrote exact bytes under a space-containing name, retained source, and updated the active tab path |
 | Filesystem | Autosave | Delayed write and conflict behavior | Pass | Packaged E2E | Real Monaco edit auto-wrote exact bytes after the delay; dirty state cleared only after success; conflicting external revision was preserved |
@@ -54,7 +55,7 @@ substitute for a real integration test where one is required.
 | Runtime | Missing tools | Clean state without crash or stack trace | Pass | Automated | Runtime tests and setup smoke |
 | Runtime | Fresh Mac shims | Detection does not trigger Apple installer | Pass | Unit | Regression coverage |
 | Runtime | Installation | Formula/native paths, progress, cancellation | Pass | Unit/integration-mock | No real system changes made |
-| Runtime | Native authorization/failure | Cancel before process and report real package-manager failure | Pass | Packaged macOS E2E | Native Git Cancel started no installer/progress; invalid ID was rejected pre-dialog; missing Go reached Homebrew, failed on non-writable directories, stayed absent, and left no process or fake success |
+| Runtime | Native authorization/failure | Cancel from Setup before process and report real package-manager failure | Pass | Packaged macOS E2E | Command Palette → Setup → Programming Runtimes exposed the actual `Install Go` control; native Cancel started no installer/progress, returned to workbench, and left Go absent. Invalid ID was rejected pre-dialog; a separate real Go attempt reached Homebrew, failed on non-writable directories, stayed absent, and left no process or fake success |
 | Hardware | Current Mac | Architecture/CPU/RAM/macOS/Metal correctness | Pass | Packaged integration | x64 Sonoma 14.8.9, Intel i5, 8 GiB, UHD 617, Metal 3 verified |
 | Hardware | Recommendations | Memory-based model ranking | Pass | Unit | Real host comparison pending |
 | Run | Python | Real success and syntax error through OmniCode | Pass | Packaged integration | `PYTHON_OK`; syntax error returned nonzero |
@@ -66,6 +67,7 @@ substitute for a real integration test where one is required.
 | Run | Go | Real build/run | Blocked | Host integration | BLOCKED — USER CONFIGURATION REQUIRED: Go not installed |
 | Run | Error reporting | stdout, stderr, exit code, missing tool | Pass | Packaged E2E + unit | Run UI showed stdout and `[Process exited with code 0]`; deliberate failures nonzero |
 | Run | Custom configuration | Execute preRun/build/run/postRun with cwd/env | Pass | Packaged E2E | `.omnicode/settings.json` overrode the automatic JavaScript recipe; all four commands, space-containing cwd, inherited custom environment, and exit code 0 were exact; fixture cleaned up |
+| Run | Captured Run Log | Accurately label and mirror real task output | Pass | Packaged E2E | The relabeled Run Log displayed exact pre/build/run/post markers and `[Process exited with code 0]`; OmniCode does not claim a debugger adapter |
 | npm | Script detection | Read package scripts and choose runner | Pass | Packaged integration + unit | Disposable manifest exposed real `npm run` commands |
 | npm | Install/run/server | Real lifecycle with approval boundary | Pass | Packaged E2E | `npm run verify` and dependency-free server passed; no `node_modules` or automatic install was created |
 | Server | Static start | Start valid localhost port | Pass | Packaged E2E | Auto port returned reachable HTTP server and Run UI reflected state |
@@ -121,8 +123,8 @@ substitute for a real integration test where one is required.
 | Layout | Resizing | Sidebars/panel/window min/max | Pass | Packaged E2E | Sidebar 200–480, AI 300–640, panel 140–60% viewport; hide/show controls and editor relayout passed |
 | Layout | Persistence | Restore panel dimensions | Not implemented | Inspection | No persistence code found |
 | macOS | Notifications | Validate request and display native banner | Blocked | Packaged E2E + platform inspection | Valid request accepted and three malformed/oversized requests rejected; no banner appeared because Electron documents that unsigned macOS development builds are not delivered to Notification Center — APPLE DEVELOPER ID REQUIRED |
-| Security | Renderer sandbox/IPC sender | Reject untrusted calls/navigation | Pass | Automated/smoke | Further adversarial tests pending |
-| Security | Workspace boundary | Reject arbitrary external paths | Pass | Unit | Agent/terminal special cases pending |
+| Security | Renderer sandbox/IPC sender | Reject untrusted calls/navigation | Pass | Automated/smoke + inspection | Sender must be the current window's main frame at the exact packaged renderer URL; renderer is sandboxed with no Node access, external main-frame navigation was blocked in the packaged smoke, and new windows are denied |
+| Security | Workspace boundary | Reject arbitrary external paths | Pass | Unit + packaged E2E | Workspace file access, terminal cwd, AI attachments, Agent roots, and diff paths outside the current authorized workspace were rejected |
 | Security | Dangerous commands | Backend approval enforcement | Pass | Unit + packaged macOS E2E | Main-process policy blocks privileged/destructive/Keychain/nested-shell patterns; native Cancel prevented execution and native approval allowed one exact safe workspace command |
 | Diagnostics | Persistent structured log | Record categorized failures without secrets | Pass | Unit + packaged E2E | Real boundary failure recorded timestamp/subsystem/operation/permission category in a mode-`0600` log; IPC argument and authorization-header scans passed; rotation/redaction/symlink tests passed |
 | Failure | Offline/provider/rate-limit/timeout | Graceful accurate errors | Partial | Unit + packaged E2E | Invalid auth, a real Gemini 503, and repeated live `fetch failed` transport errors surfaced honestly with no fake success; rate-limit/timeout paths pass unit tests, while a physically disconnected-network E2E remains |
@@ -130,7 +132,7 @@ substitute for a real integration test where one is required.
 | Performance | Startup/idle | Time, CPU, memory | Pass | Packaged three-launch soak | Cold shell/workspace 10.5/11.2 s; warm at most 4.0/4.6 s; settled CPU 1.4–1.8%, RSS 371–376 MiB, graceful quit/helper cleanup under one second |
 | Performance | Large workspace/index/search | Responsiveness and bounds | Pass | Packaged measurement | 1,203 files: workspace open 415 ms, index 1.53 s, search 47 ms; renderer stayed responsive and results/ignores were exact |
 | Performance | Cleanup/leaks | Listeners, PTYs, servers, AI operations | Pass | Packaged soak | 8 PTYs and 3 servers created/stopped; server was not left running, app RSS settled 397→422 MiB, median idle CPU 0%, and no renderer error was captured |
-| Production | Build | Typecheck and electron-vite build | Pass | Automated | Baseline 0.1.1 |
+| Production | Build | Typecheck and electron-vite build | Pass | Automated | Current 0.1.1 source, including command relay and Run Log repairs |
 | Production | Intel app | Launch and core smoke on Sonoma | Pass | Automated smoke | Current host x86_64 |
 | Production | Apple Silicon app | Correct executable/native slices | Pass | Automated inspection | Hardware launch blocked |
 | Production | Archives | DMG/ZIP integrity and checksums | Pass | Automated | 0.1.1 baseline |

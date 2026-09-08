@@ -3,12 +3,18 @@ import type {
   AIChatRequest, AIProviderId, OllamaPullProgress, OmniCodeAPI, ServerState,
   TerminalDataEvent, TerminalExitEvent, ToolInstallationProgress
 } from '../shared/contracts'
+import { createAppCommandRelay } from './command-relay'
 
 function subscribe<T>(channel: string, callback: (payload: T) => void): () => void {
   const listener = (_event: Electron.IpcRendererEvent, payload: T): void => callback(payload)
   ipcRenderer.on(channel, listener)
   return () => ipcRenderer.removeListener(channel, listener)
 }
+
+const appCommands = createAppCommandRelay()
+ipcRenderer.on('app:command', (_event, command: string, payload?: unknown) => {
+  appCommands.dispatch(command, payload)
+})
 
 const api: OmniCodeAPI = {
   workspace: {
@@ -131,11 +137,7 @@ const api: OmniCodeAPI = {
     cancelClose: () => ipcRenderer.invoke('app:cancel-close'),
     openExternal: (url) => ipcRenderer.invoke('app:open-external', url),
     notify: (title, body) => ipcRenderer.invoke('app:notify', title, body),
-    onCommand: (callback) => {
-      const listener = (_event: Electron.IpcRendererEvent, command: string, payload?: unknown): void => callback(command, payload)
-      ipcRenderer.on('app:command', listener)
-      return () => ipcRenderer.removeListener('app:command', listener)
-    }
+    onCommand: (callback) => appCommands.subscribe(callback)
   }
 }
 

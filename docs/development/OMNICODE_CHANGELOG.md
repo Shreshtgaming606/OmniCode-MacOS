@@ -5,6 +5,25 @@ stabilization phase.
 
 ## 2026-09-07
 
+- Completed the Explorer context-menu lifecycle in the packaged app: actual New
+  Folder, New File, Rename, Duplicate, and Move to Trash controls produced exact
+  filesystem state for spaces, Unicode, and periods. Three styled input dialogs
+  and four native confirmations completed with exact duplicate bytes, full
+  disposable cleanup, and zero renderer errors.
+- Replaced the misleading `Debug`/`Debug Console` label with `Run Log`. The
+  panel still captures real task output, now without implying that OmniCode has
+  a debugger adapter; a packaged custom task populated the relabeled panel with
+  the exact real pre/build/run/post output and exit code.
+- Fixed a startup race that could discard native menu or Finder commands sent
+  between the first renderer paint and React's command subscription. The
+  preload now attaches its IPC listener immediately and drains a bounded,
+  ordered startup queue when the renderer subscribes; three regression tests
+  cover ordering, live delivery/unsubscribe, and queue bounds.
+- Exercised the Setup install UI itself in the rebuilt package. Command Palette
+  opened Setup, the Programming Runtimes step rendered an enabled `Install Go`
+  action, the native Install/Cancel sheet appeared, and Cancel started no
+  installer or progress, left Go absent, returned to the workbench, and emitted
+  no renderer error. Invalid tool identifiers still fail before a dialog.
 - Fixed five user-visible actions that depended on Electron's unsupported
   `window.prompt()`: Clone Repository, New Project, Create Branch, Delete
   Branch, and Rename Terminal. They now share the existing styled input modal
@@ -26,10 +45,11 @@ stabilization phase.
   `.omnicode/settings.json` overrode the automatic JavaScript recipe, executed
   preRun/build/run/postRun in order, preserved an exact space-containing cwd and
   custom environment, and exited 0 before cleanup/restoration.
-- Audited runtime-install authorization and failure behavior. Native Cancel on
-  installed Git started no process/progress, an invalid tool ID failed before a
-  dialog, and a real missing-Go attempt surfaced Homebrew's non-writable-folder
-  failure without claiming success or leaving Go/a package process installed.
+- Audited runtime-install authorization and failure behavior. The real Setup
+  `Install Go` action exposed native Cancel and started no process/progress; an
+  invalid tool ID failed before a dialog, and a separate real missing-Go attempt
+  surfaced Homebrew's non-writable-folder failure without claiming success or
+  leaving Go/a package process installed.
 - Exercised a live model-generated Agent command request with bounded retries.
   Gemini returned repeated `fetch failed` transport errors; OmniCode displayed
   the failure, proposed/executed nothing, left no marker, and the audit restored

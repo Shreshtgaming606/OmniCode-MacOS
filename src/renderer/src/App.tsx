@@ -24,7 +24,7 @@ import { fileName, flattenFiles, languageDefinitionForPath, languageForPath } fr
 import { storedAgentPermission, storedAIProvider, storedModelName, storedTheme } from './lib/preferences'
 
 type Activity = 'explorer' | 'search' | 'source' | 'run' | 'models' | 'tools'
-type PanelTab = 'terminal' | 'output' | 'problems' | 'debug'
+type PanelTab = 'terminal' | 'output' | 'problems' | 'runlog'
 
 interface OpenDocument {
   path: string
@@ -920,12 +920,12 @@ export function App() {
           }} /></div>
         </> : <div className="welcome-editor"><div className="welcome-mark"><Code2 /></div><h1>OmniCode</h1><p>Native tools. Local context. Your code stays in your control.</p><div className="welcome-actions"><button onClick={() => void openWorkspace()}><FolderOpen /> Open Folder <kbd>⌘⇧O</kbd></button><button onClick={() => void selectNativeFile()}><FileCode2 /> Open File <kbd>⌘O</kbd></button><button onClick={() => void cloneRepository()}><GitFork /> Clone Repository</button><button onClick={() => void createProject()}><Plus /> New Project</button></div>{recentFolders.length > 0 && <div className="recent-list"><h2>Recent</h2>{recentFolders.map((folder) => <button key={folder} onClick={() => void openWorkspace(folder)}><FolderOpen /><span><strong>{fileName(folder)}</strong><small>{folder}</small></span></button>)}</div>}<div className="shortcut-grid"><span><kbd>⌘P</kbd> Quick Open</span><span><kbd>⌘⇧P</kbd> Commands</span><span><kbd>⌘`</kbd> Terminal</span><span><kbd>⌘I</kbd> Inline AI</span></div></div>}
         <><div className="resize-handle horizontal" style={{ display: panelVisible ? undefined : 'none' }} onPointerDown={(event) => startResize('panel', event)} /><section className="bottom-panel" style={{ height: panelVisible ? panelHeight : 0, display: panelVisible ? undefined : 'none' }}>
-          <div className="panel-tabs">{(['terminal', 'output', 'problems', 'debug'] as PanelTab[]).map((tab) => <button key={tab} className={panelTab === tab ? 'active' : ''} onClick={() => setPanelTab(tab)}>{tab}{tab === 'problems' && problems.length > 0 && <span>{problems.length}</span>}</button>)}<div /><button title="Close panel" onClick={() => setPanelVisible(false)}><X /></button></div>
+          <div className="panel-tabs">{(['terminal', 'output', 'problems', 'runlog'] as PanelTab[]).map((tab) => <button key={tab} className={panelTab === tab ? 'active' : ''} onClick={() => setPanelTab(tab)}>{tab === 'runlog' ? 'Run Log' : tab}{tab === 'problems' && problems.length > 0 && <span>{problems.length}</span>}</button>)}<div /><button title="Close panel" onClick={() => setPanelVisible(false)}><X /></button></div>
           <div className="panel-content"><TerminalPanel workspacePath={workspacePath} visible={panelVisible && panelTab === 'terminal'} onRequestClose={() => setPanelVisible(false)} runRequest={runRequest} onOutput={captureTerminalOutput} onRequestText={requestTextInput} />
             {panelTab === 'output' && <pre className="output-view">{outputs.join('\n')}</pre>}
             {panelTab === 'problems' && <div className="problems-view">{problems.map((problem, index) => <button key={index} onClick={() => { editorRef.current?.setPosition({ lineNumber: problem.startLineNumber, column: problem.startColumn }); editorRef.current?.revealLineInCenter(problem.startLineNumber) }}><CircleAlert className={problem.severity === 8 ? 'error' : 'warning'} /><span>{problem.message}</span><small>{problem.startLineNumber}:{problem.startColumn}</small></button>)}{!problems.length && <div className="panel-empty"><CheckCircle2 /> No problems detected in the active file.</div>}</div>}
-            {panelTab === 'debug' && (terminalOutput
-              ? <pre className="output-view debug-view">{terminalOutput}</pre>
+            {panelTab === 'runlog' && (terminalOutput
+              ? <pre className="output-view">{terminalOutput}</pre>
               : <div className="panel-empty"><Bug /> Run a task to inspect its captured console output here.</div>)}
           </div>
         </section></>

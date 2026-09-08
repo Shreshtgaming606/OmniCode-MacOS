@@ -506,3 +506,36 @@ lost. Secrets, tokens, and authorization headers must never be included here.
   rebuilt packaged audit passed real clone/native destination, branch
   create/delete, terminal rename, and Unicode New Project operations with zero
   renderer errors. Native `window.confirm()` support was separately observed.
+
+## OMI-033 — Early native commands could be dropped before subscription — Resolved
+
+- Severity: Medium
+- Reproduction: Send a native menu or Finder open command after the first
+  renderer paint but before React's command effect subscribes.
+- Expected: The requested action runs once the workbench command handler is
+  ready.
+- Actual: The preload did not attach `ipcRenderer.on('app:command')` until React
+  subscribed, so a command in that narrow startup interval disappeared.
+- Suspected cause: Native-command receipt and renderer subscription were the
+  same operation instead of a relay with startup buffering.
+- Relevant files: `src/preload/command-relay.ts`, `src/preload/index.ts`,
+  `src/preload/command-relay.test.ts`.
+- Current status: ✅ Resolved — preload receipt is immediate and a bounded
+  50-command queue drains in order on subscription. Regression tests cover
+  queued payloads/order, subsequent live delivery/unsubscribe, and oldest-entry
+  eviction at the configured bound; the production preload rebuilt cleanly.
+
+## OMI-034 — Run output was mislabeled as a Debug Console — Resolved
+
+- Severity: Low
+- Reproduction: Open the bottom `Debug` tab or read the feature list while no
+  debugger adapter exists.
+- Expected: The label describes captured task output without claiming native
+  debugging.
+- Actual: The panel mirrored terminal task output but was named `Debug`/`Debug
+  Console`, which could imply breakpoints or a debug-adapter protocol.
+- Suspected cause: The output-capture panel retained an aspirational label.
+- Relevant files: `src/renderer/src/App.tsx`, `README.md`,
+  `scripts/audit-run-custom-config.mjs`.
+- Current status: ✅ Resolved — it is now `Run Log`; a rebuilt packaged custom
+  task populated it with exact real pre/build/run/post output and exit code.

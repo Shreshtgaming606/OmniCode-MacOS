@@ -22,7 +22,7 @@ typed preload boundary; the React renderer has no direct Node.js access.
   fallback; `.gitignore` and `.omnicodeignore` are respected.
 - Multiple named and restartable terminal sessions backed by `node-pty`, plus
   searchable terminal output.
-- Output, Problems, and Debug Console panels.
+- Output, Problems, and captured Run Log panels.
 - Automatic runtime/tool detection for Apple toolchains, Python, Node.js,
   Java, .NET, Rust, Go, Ruby, PHP, Docker, Git, Homebrew, and Ollama.
 - Run/build recipes for common source files and project manifests, including
@@ -314,7 +314,7 @@ files and may be committed to source control.
   command/fix loop; every command still requires a separate user confirmation.
 - OmniCode does not implement the VS Code extension host, language-server
   protocol clients, or native debugger adapters in version 0.1. Monaco
-  validation, runtime output, Problems, and Debug Console capture remain
+  validation, runtime output, Problems, and captured Run Log remain
   available without them.
 - Workspace indexing is an in-memory snapshot capped at 4,000 files and 32 MiB
   of source content. Opening another workspace atomically cancels the prior

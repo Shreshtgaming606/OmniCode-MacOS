@@ -115,6 +115,17 @@ try {
   }
   if (!output.includes(workingDirectory)) throw new Error(`Custom working directory was not used: ${output}`)
 
+  await evaluate(`
+    [...document.querySelectorAll('.panel-tabs button')].find((item) => item.textContent?.trim() === 'Run Log')?.click()
+    return true
+  `)
+  await waitForRenderer(`[...document.querySelectorAll('.panel-tabs button')].find((item) => item.textContent?.trim() === 'Run Log')?.classList.contains('active')`)
+  await waitForRenderer(`document.querySelector('.panel-content > .output-view')?.textContent.includes('POST_RUN_OK')`)
+  const capturedRunLog = await evaluate(`return document.querySelector('.panel-content > .output-view')?.textContent ?? ''`)
+  for (const expected of ['PRE_RUN_OK', 'BUILD_RUN_OK', 'CUSTOM_RUN_OK', 'POST_RUN_OK', '[Process exited with code 0]']) {
+    if (!capturedRunLog.includes(expected)) throw new Error(`Captured Run Log omitted ${expected}: ${capturedRunLog}`)
+  }
+
   await dispatchDirectoryDrop(originalWorkspace)
   await waitForRenderer(`document.querySelector('.workspace-heading')?.getAttribute('title') === ${JSON.stringify(originalWorkspace)}`)
   const unexpectedErrors = runtimeErrors.filter((message) => !/ResizeObserver loop|Failed to load resource.*(?:403|404)/iu.test(message))
@@ -125,6 +136,7 @@ try {
     workingDirectory: { spacesHandled: true, exactPath: true },
     environment: { customValueInherited: true },
     exitCode: 0,
+    runLog: { accuratelyLabeled: true, capturedRealTaskOutput: true },
     cleanup: { originalWorkspaceRestored: true, fixtureRemoved: true },
     runtimeErrors: unexpectedErrors
   }, null, 2))

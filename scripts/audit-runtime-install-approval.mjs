@@ -88,10 +88,40 @@ async function evaluate(body) {
 await call('Runtime.enable')
 await call('Log.enable')
 await waitFor(async () => evaluate(`return Boolean(window.omnicode && document.querySelector('.app-shell'))`), 'workbench')
-const before = await evaluate(`return (await window.omnicode.tools.detect()).find((tool) => tool.id === 'git')`)
-if (!before?.installed) throw new Error('The safe approval audit requires Git to already be installed.')
+const before = await evaluate(`return {
+  git: (await window.omnicode.tools.detect()).find((tool) => tool.id === 'git'),
+  go: (await window.omnicode.tools.detect()).find((tool) => tool.id === 'go')
+}`)
+if (!before.git?.installed) throw new Error('The safe approval audit requires Git to already be installed.')
+if (before.go?.installed || !before.go?.installable) throw new Error('The Setup UI audit requires missing, installable Go on this host.')
 
-const installDecision = evaluate(`return await window.omnicode.tools.install('git')`)
+await waitFor(
+  async () => {
+    await apple('tell application "OmniCode" to activate')
+    return (await apple('tell application "System Events" to tell process "OmniCode" to get frontmost')) === 'true'
+  },
+  'OmniCode to become frontmost'
+)
+await apple('tell application "System Events" to keystroke "p" using {command down, shift down}')
+await waitFor(async () => evaluate(`return Boolean(document.querySelector('.palette input[placeholder="Type a command"]'))`), 'Command Palette')
+await evaluate(`
+  const input = document.querySelector('.palette input[placeholder="Type a command"]')
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, 'Setup & Install Tools')
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  return true
+`)
+await waitFor(async () => evaluate(`return [...document.querySelectorAll('.palette-results button')].some((item) => item.textContent?.includes('Setup & Install Tools'))`), 'Setup command')
+await evaluate(`
+  [...document.querySelectorAll('.palette-results button')].find((item) => item.textContent?.includes('Setup & Install Tools')).click()
+  return true
+`)
+await waitFor(async () => evaluate(`return document.querySelector('.onboarding__header h1')?.textContent === 'Make OmniCode yours'`), 'Setup guide')
+for (const heading of ['Development tools', 'Programming runtimes']) {
+  await evaluate(`document.querySelector('.onboarding__footer .onboarding__button--primary').click(); return true`)
+  await waitFor(async () => evaluate(`return document.querySelector('.onboarding__header h1')?.textContent === ${JSON.stringify(heading)}`), heading)
+}
+await waitFor(async () => evaluate(`return Boolean(document.querySelector('button[aria-label="Install Go"]:not(:disabled)'))`), 'Go Install button')
+await evaluate(`document.querySelector('button[aria-label="Install Go"]').click(); return true`)
 await waitFor(
   hasSheet,
   'native runtime installation confirmation'
@@ -103,18 +133,23 @@ await waitFor(
   async () => !(await hasSheet()),
   'cancelled runtime confirmation to close'
 )
-const cancelled = await installDecision
-if (!cancelled.cancelled || cancelled.installed || cancelled.toolId !== 'git') {
-  throw new Error(`Runtime cancellation result was inaccurate: ${JSON.stringify(cancelled)}`)
+await waitFor(async () => evaluate(`return Boolean(document.querySelector('button[aria-label="Install Go"]:not(:disabled)'))`), 'cancelled Go action to settle')
+
+for (const heading of ['Local AI with Ollama', 'Cloud AI providers', 'Ready to build']) {
+  await evaluate(`document.querySelector('.onboarding__footer .onboarding__button--primary').click(); return true`)
+  await waitFor(async () => evaluate(`return document.querySelector('.onboarding__header h1')?.textContent === ${JSON.stringify(heading)}`), heading)
 }
+await evaluate(`document.querySelector('.onboarding__footer .onboarding__button--primary').click(); return true`)
+await waitFor(async () => evaluate(`return Boolean(document.querySelector('.app-shell'))`), 'workbench after Setup')
 
 const after = await evaluate(`return {
-  tool: (await window.omnicode.tools.detect()).find((tool) => tool.id === 'git'),
-  progress: (await window.omnicode.tools.installations()).find((item) => item.toolId === 'git'),
-  idleCancel: await window.omnicode.tools.cancelInstallation('git'),
+  git: (await window.omnicode.tools.detect()).find((tool) => tool.id === 'git'),
+  go: (await window.omnicode.tools.detect()).find((tool) => tool.id === 'go'),
+  progress: (await window.omnicode.tools.installations()).find((item) => item.toolId === 'go'),
+  idleCancel: await window.omnicode.tools.cancelInstallation('go'),
   invalidError: await window.omnicode.tools.install('go; touch /tmp/unsafe').then(() => '', (error) => String(error))
 }`)
-if (!after.tool.installed || after.progress || after.idleCancel || !/supported development tool/iu.test(after.invalidError)) {
+if (!after.git.installed || after.go.installed || after.progress || after.idleCancel || !/supported development tool/iu.test(after.invalidError)) {
   throw new Error(`Cancelled/invalid runtime request changed state: ${JSON.stringify(after)}`)
 }
 
@@ -122,7 +157,9 @@ const unexpectedErrors = runtimeErrors.filter((message) => !/ResizeObserver loop
 if (unexpectedErrors.length) throw new Error(`Renderer errors: ${unexpectedErrors.join(' | ')}`)
 socket.close()
 console.log(JSON.stringify({
+  setupUI: { openedFromCommandPalette: true, programmingRuntimesStep: true, installButton: 'Install Go' },
   installedTool: { id: 'git', remainedInstalled: true },
+  missingTool: { id: 'go', remainedMissing: true },
   nativeConfirmation: { buttons: ['Install', 'Cancel'], cancelSelected: true },
   noInstallerStarted: true,
   noProgressClaimed: true,
