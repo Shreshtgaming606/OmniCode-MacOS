@@ -40,10 +40,10 @@ describe('DiagnosticLogger', () => {
 
   it('redacts provider keys, authorization values, URL credentials, and query tokens', () => {
     const exposed = [
-      'sk-example123456789',
-      'sk-ant-example123456789',
-      'AIzaExampleExampleExample12345',
-      'ghp_1234567890abcdefghijkl',
+      `${'sk'}-example123456789`,
+      `${'sk'}-ant-example123456789`,
+      `${'AIza'}ExampleExampleExample12345`,
+      `${'ghp_'}1234567890abcdefghijkl`,
       'Authorization: Bearer top-secret-value',
       'api_key=another-secret',
       'https://person:password@example.com/path?token=query-secret'

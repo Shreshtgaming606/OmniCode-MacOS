@@ -1,6 +1,6 @@
 # OmniCode Known Issues
 
-Last updated: 2026-09-07
+Last updated: 2026-09-08
 
 Resolved issues remain in this file with a resolution so audit history is not
 lost. Secrets, tokens, and authorization headers must never be included here.
@@ -94,7 +94,9 @@ lost. Secrets, tokens, and authorization headers must never be included here.
 - Severity: High for public distribution; Low for local testing
 - Reproduction: Inspect build identities or distribute the DMG to another Mac.
 - Expected: Public release is signed, notarized, and stapled.
-- Actual: No valid Developer ID Application identity is installed.
+- Actual: Final Intel and Apple Silicon 0.1.1 installers build and pass archive
+  validation, but no valid Developer ID Application identity is installed, so
+  they are unsigned and unnotarized.
 - Suspected cause: Apple developer credentials are an external requirement.
 - Relevant files: `package.json` build configuration and release artifacts.
 - Current status: 🔵 BLOCKED — APPLE DEVELOPER ID REQUIRED.
@@ -149,8 +151,9 @@ lost. Secrets, tokens, and authorization headers must never be included here.
 - Severity: Medium
 - Reproduction: Attempt to run the arm64 app on the x86_64 Sonoma build host.
 - Expected: Architecture-specific app launches on matching Apple hardware.
-- Actual: Static architecture and archive checks pass; native execution is not
-  possible on this host.
+- Actual: The final arm64 app executable and active `node-pty` module are arm64,
+  its ZIP decompresses cleanly, and its DMG mounts with a valid internal
+  checksum; native execution is not possible on this Intel host.
 - Suspected cause: External hardware requirement.
 - Relevant files: `dist/mac-arm64/OmniCode.app`.
 - Current status: 🔵 BLOCKED — APPLE-SILICON HARDWARE REQUIRED.

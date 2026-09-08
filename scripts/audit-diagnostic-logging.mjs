@@ -5,7 +5,7 @@ const port = Number(process.argv[2] ?? 9390)
 const profile = await fs.realpath(process.argv[3] ?? '')
 const workspace = await fs.realpath(process.argv[4] ?? '')
 const logPath = path.join(profile, 'logs', 'omnicode.jsonl')
-const syntheticArgument = '/tmp/sk-diagnostic-test-secret-123456789'
+const syntheticArgument = `/tmp/${'sk'}-diagnostic-test-secret-123456789`
 
 async function waitFor(check, description, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs

@@ -3,6 +3,28 @@
 This log records repairs and audit milestones made during the no-new-features
 stabilization phase.
 
+## 2026-09-08
+
+- Rebuilt the final OmniCode 0.1.1 Intel and Apple Silicon DMG and ZIP artifacts
+  from the stabilized production source. Both ZIP archives passed full
+  decompression tests, both DMGs mounted and verified their internal checksums,
+  and the app plus active `node-pty` modules matched their x86_64/arm64 labels.
+- Re-ran the final Intel packaged smoke against the release candidate. Startup,
+  workspace IPC, a real zsh PTY, localhost public/secret boundaries, blocked
+  external navigation, and zero renderer errors passed.
+- Re-ran the real custom execution pipeline and captured Run Log against the
+  final package. Pre-run, build, command, post-run, space-containing working
+  directory, environment, and exit code 0 all matched exact output.
+- Completed a final credential-leak audit across 143 repository files, 30 files
+  in the isolated packaged profile, 10 workspace files, renderer local storage,
+  and visible diagnostics. No unexpected credential-shaped value was found and
+  no Keychain credential was read or printed.
+- Split synthetic token-shaped redaction fixtures so repository secret scanning
+  does not confuse deliberate test data with stored credentials; all five
+  diagnostic logger regression tests still pass.
+- Generated fresh SHA-256 checksums for all four 0.1.1 release artifacts and
+  recorded final release readiness separately.
+
 ## 2026-09-07
 
 - Completed the Explorer context-menu lifecycle in the packaged app: actual New

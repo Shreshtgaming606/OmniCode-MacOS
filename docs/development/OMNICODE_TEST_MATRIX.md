@@ -1,6 +1,6 @@
 # OmniCode Stabilization Test Matrix
 
-Last updated: 2026-09-07
+Last updated: 2026-09-08
 
 Results are changed to **Pass** only after the recorded behavior was observed.
 “Covered” means an existing automated test exercises the code path; it does not
@@ -84,7 +84,7 @@ substitute for a real integration test where one is required.
 | GitHub | Authentication | Existing SSH/HTTPS/gh state | Blocked | Host inspection | `gh` absent and no safe configured writable remote; USER CONFIGURATION REQUIRED for authenticated writes |
 | Keychain | Save/read/restart | All provider keys across manager instances | Pass | Native + packaged E2E | Isolated native test passed all providers; packaged temporary OpenAI key survived a full app restart and was actually used; user Google key untouched |
 | Keychain | Update/remove | Replace and delete all provider keys | Pass | Native integration | Disposable keychain |
-| Keychain | Secret leakage | Source/profile/config/Git/visible-diagnostic scan | Pass | Packaged automated audit | Scanned 130 repository, 29 isolated-profile, and 10 workspace files plus renderer local storage and visible diagnostics; zero unexpected credential-shaped matches, one known synthetic redaction fixture, and no credential value was read/printed |
+| Keychain | Secret leakage | Source/profile/config/Git/visible-diagnostic scan | Pass | Packaged automated audit | Final scan covered 143 repository, 30 isolated-profile, and 10 workspace files plus renderer local storage and visible diagnostics; zero unexpected credential-shaped matches, one known split synthetic redaction fixture, and no credential value was read/printed |
 | OpenAI | Request adapter | Auth header, payload, response/errors | Pass | Unit | Mock server/fetch |
 | OpenAI | Invalid credential | Stored key is used and an accurate redacted auth error reaches UI | Pass | Packaged E2E | Temporary audit key survived restart, produced authentication failure, never appeared in returned error, and was deleted |
 | OpenAI | Real minimal successful request | Response reaches UI | Blocked | Manual/E2E | BLOCKED — USER CONFIGURATION REQUIRED; no valid OpenAI key is configured |
@@ -133,7 +133,7 @@ substitute for a real integration test where one is required.
 | Performance | Large workspace/index/search | Responsiveness and bounds | Pass | Packaged measurement | 1,203 files: workspace open 415 ms, index 1.53 s, search 47 ms; renderer stayed responsive and results/ignores were exact |
 | Performance | Cleanup/leaks | Listeners, PTYs, servers, AI operations | Pass | Packaged soak | 8 PTYs and 3 servers created/stopped; server was not left running, app RSS settled 397→422 MiB, median idle CPU 0%, and no renderer error was captured |
 | Production | Build | Typecheck and electron-vite build | Pass | Automated | Current 0.1.1 source, including command relay and Run Log repairs |
-| Production | Intel app | Launch and core smoke on Sonoma | Pass | Automated smoke | Current host x86_64 |
-| Production | Apple Silicon app | Correct executable/native slices | Pass | Automated inspection | Hardware launch blocked |
-| Production | Archives | DMG/ZIP integrity and checksums | Pass | Automated | 0.1.1 baseline |
+| Production | Intel app | Launch and core smoke on Sonoma | Pass | Automated smoke | Final x86_64 package passed startup, workspace IPC, real zsh PTY, server/public-secret boundaries, blocked external navigation, custom run pipeline/Run Log, secret scan, zero renderer errors, and clean quit |
+| Production | Apple Silicon app | Correct executable/native slices | Pass | Automated inspection | Final app executable and active `node-pty` module are arm64; matching-hardware launch remains blocked |
+| Production | Archives | DMG/ZIP integrity and checksums | Pass | Automated | Final 0.1.1 Intel/Apple Silicon DMGs mounted and verified internal checksums; both ZIPs decompressed cleanly; fresh SHA-256 sums recorded in `dist/SHA256SUMS.txt` |
 | Production | Signing/notarization | Gatekeeper-ready public release | Blocked | External | Developer ID certificate required |
