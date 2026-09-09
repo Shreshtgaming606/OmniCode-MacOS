@@ -1,0 +1,167 @@
+import { describe, expect, it, vi } from 'vitest'
+
+import type { ToolDescriptor } from '../../shared/tool-contracts'
+import type { AIManager } from './ai-manager'
+import { modelCanUseWorkTools, WorkAgentManager } from './work-agent-manager'
+
+const browserTool: ToolDescriptor = {
+  id: 'browser.read',
+  name: 'Read visible page',
+  description: 'Read the current managed browser page.',
+  connectorId: 'browser',
+  modes: ['work'],
+  action: 'read',
+  confirmation: 'never',
+  requiredScopes: [],
+  inputSchema: { type: 'object', properties: {}, additionalProperties: false }
+}
+
+describe('Work model tool boundary', () => {
+  it('keeps unknown or unsupported local models chat-only', () => {
+    expect(modelCanUseWorkTools('ollama', 'unknown-local', [
+      { id: 'unknown-local', installed: true },
+      { id: 'no-tools', installed: true, toolUse: false }
+    ])).toBe(false)
+    expect(modelCanUseWorkTools('ollama', 'no-tools', [
+      { id: 'no-tools', installed: true, toolUse: false }
+    ])).toBe(false)
+  })
+
+  it('exposes tools only to an installed matching local model with explicit support', () => {
+    const models = [
+      { id: 'tool-model', installed: true, toolUse: true },
+      { id: 'not-installed', installed: false, toolUse: true }
+    ]
+    expect(modelCanUseWorkTools('ollama', 'TOOL-MODEL', models)).toBe(true)
+    expect(modelCanUseWorkTools('ollama', 'not-installed', models)).toBe(false)
+    expect(modelCanUseWorkTools('google', 'gemini-test', [])).toBe(true)
+  })
+})
+
+describe('WorkAgentManager', () => {
+  it('executes only a registered tool and returns safe activity metadata', async () => {
+    const toolTurn = vi.fn()
+      .mockResolvedValueOnce({ content: '', calls: [{ callId: 'call-1', name: 'tool_0_browser_read', toolId: 'browser.read', input: {} }] })
+      .mockResolvedValueOnce({ content: 'The page title is Example Domain.', calls: [] })
+    const manager = new WorkAgentManager({ toolTurn } as unknown as AIManager)
+    const execute = vi.fn(async () => ({
+      toolId: 'browser.read', startedAt: '2026-01-01T00:00:00Z', completedAt: '2026-01-01T00:00:01Z',
+      result: { title: 'Example Domain' }
+    }))
+
+    const response = await manager.chat({
+      provider: 'google', model: 'gemini-test', messages: [{ role: 'user', content: 'What page is open?' }]
+    }, [browserTool], execute)
+
+    expect(response.content).toBe('The page title is Example Domain.')
+    expect(response.toolCallCount).toBe(1)
+    expect(response.toolActivities).toMatchObject([{ toolId: 'browser.read', status: 'succeeded' }])
+    expect(execute).toHaveBeenCalledWith({ toolId: 'browser.read', mode: 'work', input: {} })
+    expect(response.toolActivities[0]).not.toHaveProperty('result')
+  })
+
+  it('feeds tool failures back to the model and never reports them as success', async () => {
+    const toolTurn = vi.fn()
+      .mockResolvedValueOnce({ content: '', calls: [{ callId: 'call-1', name: 'tool_0_browser_read', toolId: 'browser.read', input: {} }] })
+      .mockResolvedValueOnce({ content: 'I could not read the page.', calls: [] })
+    const manager = new WorkAgentManager({ toolTurn } as unknown as AIManager)
+
+    const response = await manager.chat({
+      provider: 'google', model: 'gemini-test', messages: [{ role: 'user', content: 'Read the page.' }]
+    }, [browserTool], async () => { throw new Error('Browser disconnected.') })
+
+    expect(response.toolActivities[0]).toMatchObject({ status: 'failed', errorCode: 'TOOL_EXECUTION_FAILED' })
+    expect(toolTurn.mock.calls[1]?.[0].messages.at(-1)?.content).toContain('Browser disconnected.')
+  })
+
+  it('redacts credential-like values from persisted activity and model-visible failures', async () => {
+    const toolTurn = vi.fn()
+      .mockResolvedValueOnce({ content: '', calls: [{ callId: 'call-1', name: 'tool_0_browser_read', toolId: 'browser.read', input: {} }] })
+      .mockResolvedValueOnce({ content: 'The browser failed safely.', calls: [] })
+    const manager = new WorkAgentManager({ toolTurn } as unknown as AIManager)
+
+    const response = await manager.chat({
+      provider: 'google', model: 'gemini-test', messages: [{ role: 'user', content: 'Read the page.' }]
+    }, [browserTool], async () => { throw new Error('Authorization: Bearer secret-token-123; api_key=also-secret') })
+
+    expect(JSON.stringify(response)).not.toContain('secret-token-123')
+    expect(JSON.stringify(response)).not.toContain('also-secret')
+    expect(toolTurn.mock.calls[1]?.[0].messages.at(-1)?.content).not.toContain('secret-token-123')
+    expect(response.toolActivities[0]?.summary).toContain('••••')
+  })
+
+  it('rejects a batch above the call limit before executing any partial batch', async () => {
+    const calls = Array.from({ length: 13 }, (_, index) => ({
+      callId: `call-${index}`,
+      name: 'tool_0_browser_read',
+      toolId: 'browser.read',
+      input: {}
+    }))
+    const manager = new WorkAgentManager({
+      toolTurn: vi.fn(async () => ({ content: '', calls }))
+    } as unknown as AIManager)
+    const execute = vi.fn()
+
+    await expect(manager.chat({
+      provider: 'google', model: 'gemini-test', messages: [{ role: 'user', content: 'Read many pages.' }]
+    }, [browserTool], execute)).rejects.toThrow(/tool-call limit/i)
+    expect(execute).not.toHaveBeenCalled()
+  })
+
+  it('does not replay a repeated provider tool-call identifier', async () => {
+    const toolTurn = vi.fn()
+      .mockResolvedValueOnce({ content: '', calls: [{ callId: 'same-call', name: 'tool_0_browser_read', toolId: 'browser.read', input: {} }] })
+      .mockResolvedValueOnce({ content: '', calls: [{ callId: 'same-call', name: 'tool_0_browser_read', toolId: 'browser.read', input: {} }] })
+    const manager = new WorkAgentManager({ toolTurn } as unknown as AIManager)
+    const execute = vi.fn(async () => ({
+      toolId: 'browser.read', startedAt: '2026-01-01T00:00:00Z', completedAt: '2026-01-01T00:00:01Z', result: null
+    }))
+
+    await expect(manager.chat({
+      provider: 'google', model: 'gemini-test', messages: [{ role: 'user', content: 'Read twice.' }]
+    }, [browserTool], execute)).rejects.toThrow(/repeated a tool-call identifier/i)
+    expect(execute).toHaveBeenCalledOnce()
+  })
+
+  it('treats a mismatched executor result as a failed tool call', async () => {
+    const toolTurn = vi.fn()
+      .mockResolvedValueOnce({ content: '', calls: [{ callId: 'call-1', name: 'tool_0_browser_read', toolId: 'browser.read', input: {} }] })
+      .mockResolvedValueOnce({ content: 'The connector result was rejected.', calls: [] })
+    const manager = new WorkAgentManager({ toolTurn } as unknown as AIManager)
+
+    const response = await manager.chat({
+      provider: 'google', model: 'gemini-test', messages: [{ role: 'user', content: 'Read the page.' }]
+    }, [browserTool], async () => ({
+      toolId: 'browser.open', startedAt: '2026-01-01T00:00:00Z', completedAt: '2026-01-01T00:00:01Z', result: null
+    }))
+
+    expect(response.toolActivities[0]).toMatchObject({ status: 'failed', errorCode: 'TOOL_EXECUTION_FAILED' })
+    expect(toolTurn.mock.calls[1]?.[0].messages.at(-1)?.content).toContain('wrong tool')
+  })
+
+  it('uses the shared chat path when no connected tools are available', async () => {
+    const chat = vi.fn(async () => ({ content: 'Plain chat', contextFiles: [] }))
+    const manager = new WorkAgentManager({ chat } as unknown as AIManager)
+    await expect(manager.chat({
+      provider: 'ollama', model: 'local', messages: [{ role: 'user', content: 'Hello' }]
+    }, [], vi.fn())).resolves.toMatchObject({ content: 'Plain chat', toolCallCount: 0 })
+  })
+
+  it('uses real provider streaming and forwards deltas when requested', async () => {
+    const streamChat = vi.fn(async (_request, onDelta: (delta: string) => void) => {
+      onDelta('Hel')
+      onDelta('lo')
+      return { content: 'Hello', contextFiles: [] }
+    })
+    const manager = new WorkAgentManager({ streamChat } as unknown as AIManager)
+    const deltas: string[] = []
+
+    await expect(manager.chat({
+      provider: 'google', model: 'gemini-test', messages: [{ role: 'user', content: 'Hello' }]
+    }, [], vi.fn(), { onDelta: (delta) => deltas.push(delta) })).resolves.toMatchObject({
+      content: 'Hello', toolCallCount: 0
+    })
+    expect(deltas).toEqual(['Hel', 'lo'])
+    expect(streamChat).toHaveBeenCalledOnce()
+  })
+})

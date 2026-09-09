@@ -29,6 +29,8 @@ export function installApplicationMenu(getWindow: () => BrowserWindow | null): v
       submenu: [
         { label: 'Open…', accelerator: 'CommandOrControl+O', click: withWindow('open-file') },
         { label: 'Open Folder…', accelerator: 'CommandOrControl+Shift+O', click: withWindow('open-folder') },
+        { label: 'Open Existing Repository…', click: withWindow('open-repository') },
+        { label: 'Clone Repository…', click: withWindow('clone-repository') },
         { type: 'separator' },
         { label: 'Save', accelerator: 'CommandOrControl+S', click: withWindow('save') },
         { label: 'Save As…', accelerator: 'CommandOrControl+Shift+S', click: withWindow('save-as') },

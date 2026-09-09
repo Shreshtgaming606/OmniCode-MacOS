@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type {
-  AIChatRequest, AIProviderId, OllamaPullProgress, OmniCodeAPI, ServerState,
+  AIChatRequest, AIProviderId, GitCloneProgress, OllamaPullProgress, OmniCodeAPI, ServerState,
   TerminalDataEvent, TerminalExitEvent, ToolInstallationProgress
 } from '../shared/contracts'
 import { createAppCommandRelay } from './command-relay'
@@ -91,6 +91,7 @@ const api: OmniCodeAPI = {
   },
   git: {
     status: (root) => ipcRenderer.invoke('git:status', root),
+    inspect: (root) => ipcRenderer.invoke('git:inspect', root),
     diff: (root, path, staged) => ipcRenderer.invoke('git:diff', root, path, staged),
     stage: (root, paths) => ipcRenderer.invoke('git:stage', root, paths),
     unstage: (root, paths) => ipcRenderer.invoke('git:unstage', root, paths),
@@ -99,12 +100,53 @@ const api: OmniCodeAPI = {
     branches: (root) => ipcRenderer.invoke('git:branches', root),
     switchBranch: (root, name, create) => ipcRenderer.invoke('git:switch-branch', root, name, create),
     deleteBranch: (root, name, force) => ipcRenderer.invoke('git:delete-branch', root, name, force),
-    clone: (destinationParent, repositoryUrl) => ipcRenderer.invoke('git:clone', destinationParent, repositoryUrl)
+    clone: (requestId, destinationParent, repositoryUrl) => ipcRenderer.invoke('git:clone', requestId, destinationParent, repositoryUrl),
+    cancelClone: (requestId) => ipcRenderer.invoke('git:clone-cancel', requestId),
+    onCloneProgress: (callback) => subscribe<GitCloneProgress>('git:clone-progress', callback)
+  },
+  work: {
+    conversations: {
+      list: () => ipcRenderer.invoke('work:conversations:list'),
+      search: (request) => ipcRenderer.invoke('work:conversations:search', request),
+      get: (id) => ipcRenderer.invoke('work:conversations:get', id),
+      create: (request) => ipcRenderer.invoke('work:conversations:create', request),
+      update: (id, request) => ipcRenderer.invoke('work:conversations:update', id, request),
+      delete: (id) => ipcRenderer.invoke('work:conversations:delete', id),
+      addMessage: (id, request) => ipcRenderer.invoke('work:conversations:add-message', id, request),
+      updateMessage: (conversationId, messageId, request) => ipcRenderer.invoke('work:conversations:update-message', conversationId, messageId, request),
+      deleteMessage: (conversationId, messageId) => ipcRenderer.invoke('work:conversations:delete-message', conversationId, messageId),
+      clearMessages: (id) => ipcRenderer.invoke('work:conversations:clear-messages', id),
+      recover: () => ipcRenderer.invoke('work:conversations:recover')
+    },
+    connectors: {
+      list: (refresh) => ipcRenderer.invoke('work:connectors:list', refresh),
+      connect: (id) => ipcRenderer.invoke('work:connectors:connect', id),
+      disconnect: (id) => ipcRenderer.invoke('work:connectors:disconnect', id)
+    },
+    attachments: {
+      select: () => ipcRenderer.invoke('work:attachments:select'),
+      importDroppedFile: (file) => {
+        const path = webUtils.getPathForFile(file)
+        if (!path) return Promise.reject(new Error('Only files selected or dropped through macOS can be attached.'))
+        return ipcRenderer.invoke('work:attachments:import-dropped', path)
+      },
+      remove: (id) => ipcRenderer.invoke('work:attachments:remove', id)
+    },
+    tools: {
+      list: () => ipcRenderer.invoke('work:tools:list'),
+      execute: (request) => ipcRenderer.invoke('work:tools:execute', request)
+    },
+    agent: {
+      chat: (requestId, request) => ipcRenderer.invoke('work:agent:chat', requestId, request),
+      cancel: (requestId) => ipcRenderer.invoke('work:agent:cancel', requestId),
+      onEvent: (callback) => subscribe('work:agent:event', callback)
+    }
   },
   ai: {
     ollamaStatus: () => ipcRenderer.invoke('ai:ollama-status'),
     models: () => ipcRenderer.invoke('ai:models'),
     modelCatalog: (query) => ipcRenderer.invoke('ai:model-catalog', query),
+    cloudModelCatalog: (provider, query) => ipcRenderer.invoke('ai:cloud-model-catalog', provider, query),
     modelPreferences: () => ipcRenderer.invoke('ai:model-preferences'),
     selectModel: (model, makeDefault) => ipcRenderer.invoke('ai:select-model', model, makeDefault),
     pullModel: (model) => ipcRenderer.invoke('ai:pull-model', model),
@@ -136,6 +178,7 @@ const api: OmniCodeAPI = {
     closeWindow: () => ipcRenderer.invoke('app:close-window'),
     cancelClose: () => ipcRenderer.invoke('app:cancel-close'),
     openExternal: (url) => ipcRenderer.invoke('app:open-external', url),
+    copyText: (value) => ipcRenderer.invoke('app:copy-text', value),
     notify: (title, body) => ipcRenderer.invoke('app:notify', title, body),
     onCommand: (callback) => appCommands.subscribe(callback)
   }

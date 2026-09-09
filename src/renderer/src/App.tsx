@@ -4,10 +4,10 @@ import type { CancellationToken, Position, editor, languages } from 'monaco-edit
 import {
   Bot, Bug, ChevronDown, CircleAlert, CircleDot, Code2, Command, Cpu, FileCode2, Files,
   GitBranch, Menu, PanelBottom, Play, Plus, Save, Search, Settings, Sparkles, TerminalSquare,
-  X, Boxes, FolderOpen, GitFork, Server, CheckCircle2
+  X, Boxes, FolderOpen, GitFork, Server, CheckCircle2, LoaderCircle
 } from 'lucide-react'
 import type {
-  AIModel, AIProviderId, DevServerOption, DiffProposal, FileNode, GitStatus, OllamaPullProgress, PackageScript, ServerState, ThemePreference, ToolInfo, ToolInstallationProgress, WorkspaceSettings
+  AIModel, AIProviderId, DevServerOption, DiffProposal, FileNode, GitCloneProgress, GitStatus, OllamaPullProgress, PackageScript, ServerState, ThemePreference, ToolInfo, ToolInstallationProgress, WorkspaceSettings
 } from '../../shared/contracts'
 import { AIChat } from './components/AIChat'
 import { DiffReview } from './components/DiffReview'
@@ -20,8 +20,11 @@ import { SettingsPanel } from './components/SettingsPanel'
 import { SourceControlView } from './components/SourceControlView'
 import { TerminalPanel, type TerminalRunRequest } from './components/TerminalPanel'
 import { ToolsView } from './components/ToolsView'
+import { ModeSwitcher } from './components/modes/ModeSwitcher'
+import { WorkMode } from './components/work/WorkMode'
 import { fileName, flattenFiles, languageDefinitionForPath, languageForPath } from './lib/languages'
-import { storedAgentPermission, storedAIProvider, storedModelName, storedTheme } from './lib/preferences'
+import { storedAgentPermission, storedAIProvider, storedAppMode, storedModelName, storedTheme } from './lib/preferences'
+import type { AppMode } from '../../shared/work-contracts'
 
 type Activity = 'explorer' | 'search' | 'source' | 'run' | 'models' | 'tools'
 type PanelTab = 'terminal' | 'output' | 'problems' | 'runlog'
@@ -84,6 +87,7 @@ function ActivityButton({ id, current, label, badge, onClick, children }: {
 }
 
 export function App() {
+  const [appMode, setAppMode] = useState<AppMode>(() => storedAppMode(localStorage))
   const [workspacePath, setWorkspacePath] = useState<string | null>(null)
   const [recentFolders, setRecentFolders] = useState<string[]>([])
   const [tree, setTree] = useState<FileNode[]>([])
@@ -121,6 +125,7 @@ export function App() {
   const [outputs, setOutputs] = useState<string[]>(['OmniCode output channels are ready.'])
   const [terminalOutput, setTerminalOutput] = useState('')
   const [toast, setToast] = useState<{ message: string; kind: 'error' | 'info' } | null>(null)
+  const [cloneProgress, setCloneProgress] = useState<GitCloneProgress | null>(null)
   const [modalInput, setModalInput] = useState<ModalInput | null>(null)
   const [palette, setPalette] = useState<'commands' | 'files' | null>(null)
   const [paletteQuery, setPaletteQuery] = useState('')
@@ -150,6 +155,13 @@ export function App() {
   const dirtyCount = documents.filter((document) => document.content !== document.savedContent).length
   const allFiles = useMemo(() => flattenFiles(tree), [tree])
   const dark = theme === 'dark' || (theme === 'system' && systemDark)
+
+  const changeAppMode = useCallback((mode: AppMode): void => {
+    if (mode === appMode) return
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+    localStorage.setItem('omnicode.appMode', mode)
+    setAppMode(mode)
+  }, [appMode])
 
   const reportError = useCallback((cause: unknown): void => {
     const message = cause instanceof Error ? cause.message : String(cause)
@@ -431,14 +443,14 @@ export function App() {
   }
 
   const handleInlineAI = useCallback((): void => {
-    if (!activeDocument || !editorRef.current) return
+    if (appMode !== 'code' || !activeDocument || !editorRef.current) return
     const selection = editorRef.current.getSelection()
     const model = editorRef.current.getModel()
     if (!selection || !model) return
     const hasSelection = !selection.isEmpty()
     const range = hasSelection ? selection : model.getFullModelRange()
     setInlineEdit({ phase: 'prompt', instruction: '', original: model.getValueInRange(range), proposal: '', range })
-  }, [activeDocument])
+  }, [activeDocument, appMode])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
@@ -560,11 +572,45 @@ export function App() {
       if (!url) return false
       const destination = await window.omnicode.workspace.selectDestinationFolder()
       if (!destination) return false
-      const cloned = await window.omnicode.git.clone(destination, url)
+      const requestId = crypto.randomUUID()
+      setCloneProgress({ requestId, phase: 'starting', message: 'Preparing the Git clone…', done: false, cancellable: true, destination })
+      const cloned = await window.omnicode.git.clone(requestId, destination, url)
       await openWorkspace(cloned, true)
+      changeAppMode('code')
+      setActivity('source')
+      setSidebarVisible(true)
+      setCloneProgress(null)
+      setToast({ message: `Cloned and opened ${fileName(cloned)}.`, kind: 'info' })
       return true
     }
-    catch (cause) { reportError(cause); return false }
+    catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause)
+      if (/cancelled/u.test(message)) setToast({ message: 'Repository clone cancelled.', kind: 'info' })
+      else reportError(cause)
+      return false
+    }
+  }
+
+  const openExistingRepository = async (): Promise<boolean> => {
+    const opened = await openWorkspace()
+    if (!opened) return false
+    changeAppMode('code')
+    try {
+      const info = await window.omnicode.git.inspect(opened)
+      if (info.isRepository) {
+        setActivity('source')
+        setSidebarVisible(true)
+        const remote = info.host === 'github' ? ' GitHub' : info.host === 'other' ? ' remote' : ''
+        setToast({ message: `Opened${remote} repository on ${info.branch || 'HEAD'}.`, kind: 'info' })
+      } else {
+        setActivity('explorer')
+        setToast({ message: 'Opened the folder normally; it is not a Git repository.', kind: 'info' })
+      }
+      return true
+    } catch (cause) {
+      reportError(cause)
+      return true
+    }
   }
 
   const createProject = async (): Promise<boolean> => {
@@ -756,9 +802,11 @@ export function App() {
     const timeout = window.setTimeout(() => setToast(null), 3500)
     return () => window.clearTimeout(timeout)
   }, [toast])
+  useEffect(() => window.omnicode.git.onCloneProgress(setCloneProgress), [])
 
   const commands = useMemo(() => [
-    ['Open File…', () => void selectNativeFile()], ['Open Folder…', () => void openWorkspace()], ['Save', () => void saveDocument()],
+    ['Open File…', () => void selectNativeFile()], ['Open Folder…', () => void openWorkspace()],
+    ['Open Existing Repository…', () => void openExistingRepository()], ['Clone Repository…', () => void cloneRepository()], ['Save', () => void saveDocument()],
     ['Save As…', () => void saveAs()], ['Run Current File', () => void runCurrent()], ['New Terminal', newTerminal],
     ['Start Local Server', () => void startServer()], ['Stop Local Server', () => void window.omnicode.server.stop()],
     ['Toggle AI Sidebar', () => setAiVisible((value) => !value)], ['Settings', () => setShowSettings(true)], ['Setup & Install Tools', () => setShowOnboarding(true)], ['Index Workspace', () => workspacePath && void window.omnicode.ai.index(workspacePath)]
@@ -767,7 +815,9 @@ export function App() {
   useEffect(() => {
     const unsubscribe = window.omnicode.app.onCommand((command, payload) => {
       const handlers: Record<string, () => void> = {
-      'open-file': () => void selectNativeFile(), 'open-folder': () => void openWorkspace(), save: () => void saveDocument(), 'save-as': () => void saveAs(),
+      'open-file': () => void selectNativeFile(), 'open-folder': () => void openWorkspace(),
+      'open-repository': () => void openExistingRepository(), 'clone-repository': () => void cloneRepository(),
+      save: () => void saveDocument(), 'save-as': () => void saveAs(),
       'close-tab': () => closeDocument(), settings: () => setShowSettings(true), 'settings-ai': () => setShowSettings(true),
       'setup-tools': () => { setShowSettings(false); setPalette(null); setShowOnboarding(true) },
       'command-palette': () => { setPalette('commands'); setPaletteQuery('') }, 'quick-open': () => { setPalette('files'); setPaletteQuery('') },
@@ -871,18 +921,24 @@ export function App() {
     onCloneRepository={async () => { if (await cloneRepository()) { localStorage.setItem('omnicode.onboardingComplete', 'true'); setShowOnboarding(false) } }} onCreateProject={async () => { if (await createProject()) { localStorage.setItem('omnicode.onboardingComplete', 'true'); setShowOnboarding(false) } }}
     onOpenFolder={async () => { const opened = await openWorkspace(); if (opened) { localStorage.setItem('omnicode.onboardingComplete', 'true'); setShowOnboarding(false) } }} />
 
-  return <div className="app-shell" onDragOver={(event) => event.preventDefault()} onDrop={(event) => {
+  return <div className="app-shell" onDragOver={(event) => { if (appMode === 'code') event.preventDefault() }} onDrop={(event) => {
+    if (appMode !== 'code') return
     event.preventDefault(); const file = event.dataTransfer.files[0]; if (!file) return
     void window.omnicode.workspace.inspectDroppedFile(file).then((opened) => openGrantedPath(opened.path, opened.kind)).catch(reportError)
   }}>
     <header className="titlebar">
       <div className="titlebar-spacer" />
-      <button className="layout-button" title="Toggle sidebar" onClick={() => setSidebarVisible((value) => !value)}><Menu /></button>
-      <button className="command-center" onClick={() => { setPalette('files'); setPaletteQuery('') }}><Search /><span>{workspacePath ? fileName(workspacePath) : 'Search files by name'}</span><kbd>⌘P</kbd></button>
-      <button className="run-button" disabled={!activeDocument || !workspacePath || !activeLanguage?.runnableOnMacOS} title={!workspacePath && activeDocument ? 'Open the containing folder as a workspace before running this file.' : activeLanguage && !activeLanguage.runnableOnMacOS ? `${activeLanguage.displayName} files are editable but do not have a native macOS run action.` : 'Run current file or project'} onClick={() => void runCurrent()}><Play /><span>Run</span></button>
-      <button className="run-menu" title="Run configurations" onClick={() => { setActivity('run'); setSidebarVisible(true) }}><ChevronDown /></button>
-      <div className="titlebar-layout"><button className={sidebarVisible ? 'active' : ''} title="Primary sidebar" onClick={() => setSidebarVisible((value) => !value)}><Files /></button><button className={panelVisible ? 'active' : ''} title="Bottom panel" onClick={() => setPanelVisible((value) => !value)}><PanelBottom /></button><button className={aiVisible ? 'active' : ''} title="AI sidebar" onClick={() => setAiVisible((value) => !value)}><Sparkles /></button></div>
+      <ModeSwitcher value={appMode} onChange={changeAppMode} />
+      {appMode === 'code' ? <>
+        <button className="layout-button" title="Toggle sidebar" onClick={() => setSidebarVisible((value) => !value)}><Menu /></button>
+        <button className="command-center" onClick={() => { setPalette('files'); setPaletteQuery('') }}><Search /><span>{workspacePath ? fileName(workspacePath) : 'Search files by name'}</span><kbd>⌘P</kbd></button>
+        <button className="run-button" disabled={!activeDocument || !workspacePath || !activeLanguage?.runnableOnMacOS} title={!workspacePath && activeDocument ? 'Open the containing folder as a workspace before running this file.' : activeLanguage && !activeLanguage.runnableOnMacOS ? `${activeLanguage.displayName} files are editable but do not have a native macOS run action.` : 'Run current file or project'} onClick={() => void runCurrent()}><Play /><span>Run</span></button>
+        <button className="run-menu" title="Run configurations" onClick={() => { setActivity('run'); setSidebarVisible(true) }}><ChevronDown /></button>
+        <div className="titlebar-layout"><button className={sidebarVisible ? 'active' : ''} title="Primary sidebar" onClick={() => setSidebarVisible((value) => !value)}><Files /></button><button className={panelVisible ? 'active' : ''} title="Bottom panel" onClick={() => setPanelVisible((value) => !value)}><PanelBottom /></button><button className={aiVisible ? 'active' : ''} title="AI sidebar" onClick={() => setAiVisible((value) => !value)}><Sparkles /></button></div>
+      </> : <div className="work-titlebar-label"><Sparkles /><span>Conversations, cloud models, and connected apps</span></div>}
     </header>
+    <div className="mode-content">
+    <div className={`code-mode-host${appMode === 'code' ? '' : ' mode-hidden'}`} aria-hidden={appMode !== 'code'}>
     <div className="workbench">
       <nav className="activity-bar" aria-label="Primary activities">
         <div><ActivityButton id="explorer" current={activity} label="Explorer" onClick={() => { if (activity === 'explorer') setSidebarVisible((value) => !value); else { setActivity('explorer'); setSidebarVisible(true) } }}><Files /></ActivityButton>
@@ -895,14 +951,14 @@ export function App() {
         <div><ActivityButton id="settings" current={showSettings ? 'settings' : ''} label="Settings" onClick={() => setShowSettings(true)}><Settings /></ActivityButton></div>
       </nav>
       {sidebarVisible && <><aside className="primary-sidebar" style={{ width: sidebarWidth }}>
-        {!workspacePath && activity !== 'models' && activity !== 'tools' && <div className="sidebar-view"><div className="sidebar-title">{activity[0].toUpperCase() + activity.slice(1)}</div><div className="sidebar-empty"><FolderOpen /><p>Open a folder to use this view.</p><button className="primary-button" onClick={() => void openWorkspace()}>Open Folder</button></div></div>}
+        {!workspacePath && activity !== 'models' && activity !== 'tools' && <div className="sidebar-view"><div className="sidebar-title">{activity[0].toUpperCase() + activity.slice(1)}</div><div className="sidebar-empty"><FolderOpen /><p>{activity === 'source' ? 'Open an existing repository or clone one to use Source Control.' : 'Open a folder to use this view.'}</p><button className="primary-button" onClick={() => void (activity === 'source' ? openExistingRepository() : openWorkspace())}>{activity === 'source' ? 'Open Repository' : 'Open Folder'}</button>{activity === 'source' && <button onClick={() => void cloneRepository()}>Clone Repository</button>}</div></div>}
         {workspacePath && activity === 'explorer' && <Explorer root={workspacePath} nodes={tree} activePath={activePath ?? undefined} onOpen={(path) => void openFile(path)} onRefresh={() => void refreshTree()} onCreate={createEntry} onRename={renameEntry}
           onMove={async (source, destination) => { try { const moved = await window.omnicode.workspace.moveEntry(source, destination); setDocuments((current) => current.map((item) => ({ ...item, path: remapPath(item.path, source, moved) }))); if (activePath && isPathAtOrBelow(activePath, source)) setActivePath(remapPath(activePath, source, moved)); await refreshTree() } catch (cause) { reportError(cause) } }}
           onDuplicate={async (node) => { try { await window.omnicode.workspace.duplicateEntry(node.path); await refreshTree() } catch (cause) { reportError(cause) } }}
           onTrash={async (node) => { const affected = documents.filter((document) => isPathAtOrBelow(document.path, node.path)); const dirty = affected.filter((document) => document.content !== document.savedContent); if (!confirm(`Move “${node.name}” to the Trash?${dirty.length ? `\n\n${dirty.length} open file${dirty.length === 1 ? '' : 's'} inside it have unsaved changes that will be discarded.` : ''}`)) return; try { await window.omnicode.workspace.trashEntry(node.path); setDocuments((current) => current.filter((document) => !isPathAtOrBelow(document.path, node.path))); if (activePath && isPathAtOrBelow(activePath, node.path)) setActivePath(null); await refreshTree() } catch (cause) { reportError(cause) } }}
           onReveal={(node) => void window.omnicode.workspace.revealInFinder(node.path).catch(reportError)} onCopyPath={(node) => void window.omnicode.workspace.copyPath(node.path).catch(reportError)} onOpenExternal={(node) => void window.omnicode.workspace.openExternal(node.path).catch(reportError)} onOpenWith={(node) => void window.omnicode.workspace.openWith(node.path).catch(reportError)} />}
         {workspacePath && activity === 'search' && <SearchView root={workspacePath} onOpen={(path, line, column) => void openFile(path, line, column)} />}
-        {workspacePath && activity === 'source' && <SourceControlView root={workspacePath} onOpenDiff={(path, staged) => void showGitDiff(path, staged)} onStatus={setGitStatus} onRequestText={requestTextInput} />}
+        {workspacePath && activity === 'source' && <SourceControlView root={workspacePath} onOpenDiff={(path, staged) => void showGitDiff(path, staged)} onStatus={setGitStatus} onRequestText={requestTextInput} onOpenRepository={() => void openExistingRepository()} onCloneRepository={() => void cloneRepository()} />}
         {workspacePath && activity === 'run' && <RunView root={workspacePath} activeFile={activeLanguage?.runnableOnMacOS ? activePath ?? undefined : undefined} serverState={serverState} onRun={() => void runCurrent()} onRunScript={runScript} onStartServer={(option, port) => void startServerOption(option, port)} onStopServer={() => void window.omnicode.server.stop()} onRestartServer={() => void startServer(true)} onOpenServer={() => void window.omnicode.server.open()} />}
         {activity === 'models' && <ModelsView />}
         {activity === 'tools' && <ToolsView />}
@@ -918,10 +974,10 @@ export function App() {
             padding: { top: 8 }, scrollBeyondLastLine: false, renderWhitespace: 'selection', tabSize: activeLanguageSettings?.tabSize ?? editorTabSize, insertSpaces: activeLanguageSettings?.insertSpaces ?? true,
             wordWrap: 'off', quickSuggestions: true, suggestOnTriggerCharacters: true
           }} /></div>
-        </> : <div className="welcome-editor"><div className="welcome-mark"><Code2 /></div><h1>OmniCode</h1><p>Native tools. Local context. Your code stays in your control.</p><div className="welcome-actions"><button onClick={() => void openWorkspace()}><FolderOpen /> Open Folder <kbd>⌘⇧O</kbd></button><button onClick={() => void selectNativeFile()}><FileCode2 /> Open File <kbd>⌘O</kbd></button><button onClick={() => void cloneRepository()}><GitFork /> Clone Repository</button><button onClick={() => void createProject()}><Plus /> New Project</button></div>{recentFolders.length > 0 && <div className="recent-list"><h2>Recent</h2>{recentFolders.map((folder) => <button key={folder} onClick={() => void openWorkspace(folder)}><FolderOpen /><span><strong>{fileName(folder)}</strong><small>{folder}</small></span></button>)}</div>}<div className="shortcut-grid"><span><kbd>⌘P</kbd> Quick Open</span><span><kbd>⌘⇧P</kbd> Commands</span><span><kbd>⌘`</kbd> Terminal</span><span><kbd>⌘I</kbd> Inline AI</span></div></div>}
+        </> : <div className="welcome-editor"><div className="welcome-mark"><Code2 /></div><h1>OmniCode</h1><p>Native tools. Local context. Your code stays in your control.</p><div className="welcome-actions"><button onClick={() => void openWorkspace()}><FolderOpen /> Open Folder <kbd>⌘⇧O</kbd></button><button onClick={() => void selectNativeFile()}><FileCode2 /> Open File <kbd>⌘O</kbd></button><button onClick={() => void openExistingRepository()}><GitBranch /> Open Existing Repository</button><button onClick={() => void cloneRepository()}><GitFork /> Clone Repository</button><button onClick={() => void createProject()}><Plus /> New Project</button></div>{recentFolders.length > 0 && <div className="recent-list"><h2>Recent</h2>{recentFolders.map((folder) => <button key={folder} onClick={() => void openWorkspace(folder)}><FolderOpen /><span><strong>{fileName(folder)}</strong><small>{folder}</small></span></button>)}</div>}<div className="shortcut-grid"><span><kbd>⌘P</kbd> Quick Open</span><span><kbd>⌘⇧P</kbd> Commands</span><span><kbd>⌘`</kbd> Terminal</span><span><kbd>⌘I</kbd> Inline AI</span></div></div>}
         <><div className="resize-handle horizontal" style={{ display: panelVisible ? undefined : 'none' }} onPointerDown={(event) => startResize('panel', event)} /><section className="bottom-panel" style={{ height: panelVisible ? panelHeight : 0, display: panelVisible ? undefined : 'none' }}>
           <div className="panel-tabs">{(['terminal', 'output', 'problems', 'runlog'] as PanelTab[]).map((tab) => <button key={tab} className={panelTab === tab ? 'active' : ''} onClick={() => setPanelTab(tab)}>{tab === 'runlog' ? 'Run Log' : tab}{tab === 'problems' && problems.length > 0 && <span>{problems.length}</span>}</button>)}<div /><button title="Close panel" onClick={() => setPanelVisible(false)}><X /></button></div>
-          <div className="panel-content"><TerminalPanel workspacePath={workspacePath} visible={panelVisible && panelTab === 'terminal'} onRequestClose={() => setPanelVisible(false)} runRequest={runRequest} onOutput={captureTerminalOutput} onRequestText={requestTextInput} />
+          <div className="panel-content"><TerminalPanel workspacePath={workspacePath} visible={appMode === 'code' && panelVisible && panelTab === 'terminal'} onRequestClose={() => setPanelVisible(false)} runRequest={runRequest} onOutput={captureTerminalOutput} onRequestText={requestTextInput} />
             {panelTab === 'output' && <pre className="output-view">{outputs.join('\n')}</pre>}
             {panelTab === 'problems' && <div className="problems-view">{problems.map((problem, index) => <button key={index} onClick={() => { editorRef.current?.setPosition({ lineNumber: problem.startLineNumber, column: problem.startColumn }); editorRef.current?.revealLineInCenter(problem.startLineNumber) }}><CircleAlert className={problem.severity === 8 ? 'error' : 'warning'} /><span>{problem.message}</span><small>{problem.startLineNumber}:{problem.startColumn}</small></button>)}{!problems.length && <div className="panel-empty"><CheckCircle2 /> No problems detected in the active file.</div>}</div>}
             {panelTab === 'runlog' && (terminalOutput
@@ -933,7 +989,24 @@ export function App() {
       {aiVisible && <><div className="resize-handle vertical ai-resizer" onPointerDown={(event) => startResize('ai', event)} /><div style={{ width: aiWidth, minWidth: aiWidth }}><AIChat key={workspacePath ?? 'no-workspace'} workspacePath={workspacePath} defaultProvider={workspaceChatProvider} defaultModel={workspaceChatModel} activeFile={activePath ?? undefined} openFiles={documents.map((document) => document.path)} selectedCode={() => { const selection = editorRef.current?.getSelection(); const model = editorRef.current?.getModel(); return selection && model && !selection.isEmpty() ? model.getValueInRange(selection) : '' }} terminalOutput={terminalOutput} problems={problems.map((problem) => `${problem.startLineNumber}:${problem.startColumn} ${problem.message}`).join('\n')} gitChanges={gitStatus?.changes.map((change) => `${change.indexStatus}${change.workingTreeStatus} ${change.path}`).join('\n') ?? ''} permission={permission} prepareWorkspace={saveAllDocuments} onReviewProposal={setDiffProposalId} onRunAgentCommand={runAgentCommand} onOpenSettings={() => setShowSettings(true)} /></div></>}
     </div>
     <footer className="status-bar"><button title="Git branch"><GitBranch />{gitStatus?.isRepository ? gitStatus.branch : 'No Git'}</button><button onClick={() => { setPanelVisible(true); setPanelTab('problems') }}><CircleAlert />{problems.length}</button><span className="status-spacer" /><button title={serverState.running ? 'Open local server (stop it from the Run menu)' : 'Open Run view'} onClick={() => serverState.running && serverState.url ? void window.omnicode.server.open() : (setActivity('run'), setSidebarVisible(true))}>{serverState.running ? <><Server className="server-on" /> {serverState.name ?? 'Running'}{serverState.port ? ` :${serverState.port}` : ''}</> : <><Server /> Server off</>}</button>{activeRuntime && <button title={activeRuntime.installed ? `${activeRuntime.path ?? activeRuntime.command}${activeRuntime.version ? ` · ${activeRuntime.version}` : ''}` : activeRuntime.guidance} onClick={() => { setActivity('tools'); setSidebarVisible(true) }}><Boxes />{activeRuntime.name}: {activeRuntime.installed ? 'Ready' : 'Missing'}</button>}<span title={aiAutocomplete ? `${autocompleteProvider}: ${autocompleteModel || 'automatic local model'}` : 'AI autocomplete is disabled'}><Sparkles /> {aiAutocomplete ? 'Autocomplete on' : 'Autocomplete off'}</span><span><Cpu /> {ollamaState.status === 'ready' ? 'Local AI' : 'AI optional'}</span><span>UTF-8</span><span>Ln {cursor.line}, Col {cursor.column}</span><span>{activeLanguage?.displayName ?? 'Plain Text'}</span></footer>
+    </div>
+    <div className={`work-mode-host${appMode === 'work' ? '' : ' mode-hidden'}`} aria-hidden={appMode !== 'work'}><WorkMode active={appMode === 'work'} onOpenSettings={() => setShowSettings(true)} onError={reportError} requestText={requestTextInput} /></div>
+    </div>
     {palette && <div className="palette-backdrop" onMouseDown={() => setPalette(null)}><div className="palette" onMouseDown={(event) => event.stopPropagation()}><div><Command /><input autoFocus value={paletteQuery} onChange={(event) => setPaletteQuery(event.target.value)} placeholder={palette === 'commands' ? 'Type a command' : 'Search files by name'} /></div><div className="palette-results">{palette === 'commands' ? commands.filter(([label]) => label.toLowerCase().includes(paletteQuery.toLowerCase())).map(([label, action]) => <button key={label} onClick={() => { setPalette(null); action() }}><Command /><span>{label}</span></button>) : allFiles.filter((file) => file.path.toLowerCase().includes(paletteQuery.toLowerCase())).slice(0, 100).map((file) => <button key={file.path} onClick={() => { setPalette(null); void openFile(file.path) }}><FileCode2 /><span><strong>{file.name}</strong><small>{file.path.replace(`${workspacePath}/`, '')}</small></span></button>)}</div></div></div>}
+    {cloneProgress && <div className="modal-backdrop clone-progress-backdrop"><section className="clone-progress-dialog" role="dialog" aria-modal="true" aria-label="Repository clone progress">
+      <header><div className={`clone-progress-icon phase-${cloneProgress.phase}`}>{cloneProgress.done ? cloneProgress.phase === 'completed' ? <CheckCircle2 /> : <CircleAlert /> : <LoaderCircle className="spin" />}</div><span><h2>Clone Repository</h2><small>{cloneProgress.message}</small></span></header>
+      {cloneProgress.percent !== undefined
+        ? <div className="clone-progress-meter"><progress max="100" value={cloneProgress.percent} /><span>{Math.round(cloneProgress.percent)}%</span></div>
+        : !cloneProgress.done && <div className="clone-progress-meter indeterminate"><progress /><span>Working…</span></div>}
+      {cloneProgress.destination && <div className="clone-progress-destination"><strong>{cloneProgress.phase === 'completed' ? 'Repository' : 'Destination'}</strong><code>{cloneProgress.destination}</code></div>}
+      {cloneProgress.error && <p className="clone-progress-error">{cloneProgress.error}</p>}
+      <footer>{cloneProgress.cancellable
+        ? <button type="button" onClick={() => {
+            setCloneProgress((current) => current ? { ...current, phase: 'cancelling', message: 'Stopping Git…', cancellable: false } : current)
+            void window.omnicode.git.cancelClone(cloneProgress.requestId)
+          }}>Cancel Clone</button>
+        : cloneProgress.done && <button type="button" className="primary-button" onClick={() => setCloneProgress(null)}>Close</button>}</footer>
+    </section></div>}
     {modalInput && <div className="modal-backdrop" onMouseDown={(event) => {
       if (event.target === event.currentTarget) { modalInput.onCancel?.(); setModalInput(null) }
     }}><form className="input-modal" role="dialog" aria-modal="true" aria-label={modalInput.title} onKeyDown={(event) => {

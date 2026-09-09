@@ -1,3 +1,30 @@
+import type {
+  AIModelCatalogQuery,
+  AIModelCatalogResult,
+  CloudAIProviderId
+} from './model-contracts'
+import type {
+  ConnectorDescriptor,
+  ToolDescriptor,
+  ToolExecutionRequest,
+  ToolExecutionResult
+} from './tool-contracts'
+import type {
+  CreateWorkConversationRequest,
+  CreateWorkMessageRequest,
+  RecoverWorkConversationStoreResult,
+  UpdateWorkConversationRequest,
+  UpdateWorkMessageRequest,
+  WorkConversation,
+  WorkConversationSearchRequest,
+  WorkConversationSummary,
+  WorkAgentChatRequest,
+  WorkAgentChatResponse,
+  WorkAgentStreamEvent,
+  WorkAttachment,
+  WorkMessage
+} from './work-contracts'
+
 export type ThemePreference = 'system' | 'dark' | 'light'
 
 export interface FileNode {
@@ -99,6 +126,34 @@ export interface GitStatus {
   ahead: number
   behind: number
   changes: GitFileChange[]
+  error?: string
+}
+
+export interface GitRepositoryInfo {
+  isRepository: boolean
+  branch: string
+  remoteUrl?: string
+  host: 'github' | 'other' | 'none'
+}
+
+export type GitClonePhase =
+  | 'starting'
+  | 'receiving'
+  | 'resolving'
+  | 'checking-out'
+  | 'completed'
+  | 'cancelling'
+  | 'cancelled'
+  | 'failed'
+
+export interface GitCloneProgress {
+  requestId: string
+  phase: GitClonePhase
+  message: string
+  percent?: number
+  done: boolean
+  cancellable: boolean
+  destination?: string
   error?: string
 }
 
@@ -386,6 +441,7 @@ export interface TerminalAPI {
 
 export interface GitAPI {
   status(root: string): Promise<GitStatus>
+  inspect(root: string): Promise<GitRepositoryInfo>
   diff(root: string, path?: string, staged?: boolean): Promise<string>
   stage(root: string, paths: string[]): Promise<void>
   unstage(root: string, paths: string[]): Promise<void>
@@ -394,7 +450,9 @@ export interface GitAPI {
   branches(root: string): Promise<string[]>
   switchBranch(root: string, name: string, create?: boolean): Promise<void>
   deleteBranch(root: string, name: string, force?: boolean): Promise<void>
-  clone(destinationParent: string, repositoryUrl: string): Promise<string>
+  clone(requestId: string, destinationParent: string, repositoryUrl: string): Promise<string>
+  cancelClone(requestId: string): Promise<boolean>
+  onCloneProgress(callback: (progress: GitCloneProgress) => void): () => void
 }
 
 export interface DiffAPI {
@@ -405,6 +463,41 @@ export interface DiffAPI {
   undo(proposalId: string): Promise<DiffProposal>
   discard(proposalId: string): Promise<void>
   onChanged(callback: (proposal: DiffProposal) => void): () => void
+}
+
+export interface WorkAPI {
+  conversations: {
+    list(): Promise<WorkConversationSummary[]>
+    search(request?: WorkConversationSearchRequest): Promise<WorkConversationSummary[]>
+    get(id: string): Promise<WorkConversation>
+    create(request?: CreateWorkConversationRequest): Promise<WorkConversation>
+    update(id: string, request: UpdateWorkConversationRequest): Promise<WorkConversation>
+    delete(id: string): Promise<void>
+    addMessage(id: string, request: CreateWorkMessageRequest): Promise<WorkMessage>
+    updateMessage(conversationId: string, messageId: string, request: UpdateWorkMessageRequest): Promise<WorkMessage>
+    deleteMessage(conversationId: string, messageId: string): Promise<WorkConversation>
+    clearMessages(id: string): Promise<WorkConversation>
+    recover(): Promise<RecoverWorkConversationStoreResult>
+  }
+  connectors: {
+    list(refresh?: boolean): Promise<ConnectorDescriptor[]>
+    connect(id: string): Promise<ConnectorDescriptor['status']>
+    disconnect(id: string): Promise<ConnectorDescriptor['status']>
+  }
+  attachments: {
+    select(): Promise<WorkAttachment[]>
+    importDroppedFile(file: File): Promise<WorkAttachment>
+    remove(id: string): Promise<void>
+  }
+  tools: {
+    list(): Promise<ToolDescriptor[]>
+    execute(request: ToolExecutionRequest): Promise<ToolExecutionResult>
+  }
+  agent: {
+    chat(requestId: string, request: WorkAgentChatRequest): Promise<WorkAgentChatResponse>
+    cancel(requestId: string): Promise<boolean>
+    onEvent(callback: (event: WorkAgentStreamEvent) => void): () => void
+  }
 }
 
 export interface OmniCodeAPI {
@@ -434,10 +527,12 @@ export interface OmniCodeAPI {
     onLog(callback: (line: string) => void): () => void
   }
   git: GitAPI
+  work: WorkAPI
   ai: {
     ollamaStatus(): Promise<OllamaStatus>
     models(): Promise<AIModel[]>
     modelCatalog(query?: string): Promise<AIModel[]>
+    cloudModelCatalog(provider: CloudAIProviderId, query?: AIModelCatalogQuery): Promise<AIModelCatalogResult>
     modelPreferences(): Promise<AIModelPreferences>
     selectModel(model: string, makeDefault?: boolean): Promise<AIModelPreferences>
     pullModel(model: string): Promise<OllamaPullResult>
@@ -469,6 +564,7 @@ export interface OmniCodeAPI {
     closeWindow(): Promise<void>
     cancelClose(): Promise<void>
     openExternal(url: string): Promise<void>
+    copyText(value: string): Promise<void>
     notify(title: string, body: string): Promise<void>
     onCommand(callback: (command: string, payload?: unknown) => void): () => void
   }

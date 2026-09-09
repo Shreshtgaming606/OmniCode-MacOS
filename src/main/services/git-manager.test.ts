@@ -4,7 +4,7 @@ import path from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { GitManager, parseGitStatus, redactGitOutput, runGit } from './git-manager'
+import { GitManager, parseGitCloneProgress, parseGitStatus, redactGitOutput, runGit, validateRepositoryUrl } from './git-manager'
 
 const temporaryDirectories: string[] = []
 
@@ -57,7 +57,42 @@ describe('redactGitOutput', () => {
   })
 })
 
+describe('validateRepositoryUrl', () => {
+  it('accepts HTTPS, SSH, and local repository sources', () => {
+    expect(validateRepositoryUrl('https://github.com/example/project.git')).toBe('https://github.com/example/project.git')
+    expect(validateRepositoryUrl('git@github.com:example/project.git')).toBe('git@github.com:example/project.git')
+    expect(validateRepositoryUrl('ssh://git@github.com/example/project.git')).toBe('ssh://git@github.com/example/project.git')
+    expect(validateRepositoryUrl('/tmp/project.git')).toBe('/tmp/project.git')
+  })
+
+  it('rejects insecure schemes and embedded credentials or query tokens', () => {
+    expect(() => validateRepositoryUrl('http://github.com/example/project.git')).toThrow(/HTTPS or SSH/i)
+    expect(() => validateRepositoryUrl('https://user:secret@github.com/example/project.git')).toThrow(/embedded credentials/i)
+    expect(() => validateRepositoryUrl('https://github.com/example/project.git?token=secret')).toThrow(/query tokens/i)
+  })
+})
+
+describe('parseGitCloneProgress', () => {
+  it('reports bounded progress for each real Git clone phase', () => {
+    expect(parseGitCloneProgress("Cloning into 'project'...\n")).toEqual({ phase: 'starting', message: 'Connecting to the repository…' })
+    expect(parseGitCloneProgress('remote: Counting objects\rReceiving objects: 47% (47/100)')).toEqual({ phase: 'receiving', message: 'Receiving repository objects…', percent: 47 })
+    expect(parseGitCloneProgress('Resolving deltas: 101% (10/10)')).toEqual({ phase: 'resolving', message: 'Resolving repository history…', percent: 100 })
+    expect(parseGitCloneProgress('Updating files: 8% (2/24)')).toEqual({ phase: 'checking-out', message: 'Checking out repository files…', percent: 8 })
+  })
+
+  it('does not forward unrelated stderr that could contain credentials', () => {
+    expect(parseGitCloneProgress('fatal: authentication failed for https://user:secret@example.test/repo')).toBeNull()
+  })
+})
+
 describe('GitManager', () => {
+  it('stops a Git operation when its abort signal is already cancelled', async () => {
+    const root = await repository()
+    const controller = new AbortController()
+    controller.abort()
+    await expect(runGit(root, ['status'], { signal: controller.signal })).rejects.toThrow(/cancelled/i)
+  })
+
   it('supports initial staging, unstaging, commits, diffs, and branch lifecycle', async () => {
     const root = await repository()
     const manager = new GitManager()
@@ -103,6 +138,27 @@ describe('GitManager', () => {
 
     await new GitManager().status(root)
     await expect(fs.access(marker)).rejects.toThrow()
+  })
+
+  it('inspects branch, remote, and GitHub hosting without exposing URL credentials', async () => {
+    const root = await repository()
+    const manager = new GitManager()
+    await runGit(root, ['remote', 'add', 'origin', 'https://user:secret@github.com/example/project.git'])
+
+    const info = await manager.inspect(root)
+    expect(info).toMatchObject({ isRepository: true, host: 'github' })
+    expect(info.branch).toBeTruthy()
+    expect(info.remoteUrl).toContain('github.com/example/project.git')
+    expect(info.remoteUrl).not.toContain('secret')
+  })
+
+  it('allows ordinary folders through repository inspection', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'omnicode-normal-folder-'))
+    temporaryDirectories.push(root)
+
+    await expect(new GitManager().inspect(root)).resolves.toEqual({
+      isRepository: false, branch: '', host: 'none'
+    })
   })
 
   it('clones, fetches, pulls, and pushes against a real local bare remote', async () => {

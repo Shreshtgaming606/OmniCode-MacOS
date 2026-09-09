@@ -3,6 +3,61 @@
 This log records repairs and audit milestones made during the no-new-features
 stabilization phase.
 
+## Work Mode expansion — 2026-09-09
+
+- Began a new expansion phase on `codex/work-mode` after the 0.1.1 stabilization
+  checkpoint. Work Mode is explicitly separate from the existing Code Mode.
+- Audited the renderer, AI/model, Git/import, Keychain, IPC, security, and
+  documentation architecture before implementation.
+- Recorded the mode, conversation, model-catalog, tool, connector, permission,
+  Browser, OAuth, and repository-import boundaries in
+  `OMNICODE_WORK_MODE_ARCHITECTURE.md`.
+- Added a persistent Code/Work mode switch while keeping the complete Code
+  workbench mounted, so editor buffers, terminals, Git and servers survive mode
+  changes.
+- Added private atomic Work conversation persistence with bounded CRUD, search,
+  rename, pin, delete, message editing, regeneration, recovery, and mode-`0600`
+  storage.
+- Added bounded account-visible cloud model discovery, pagination, caching,
+  stale/error states and refresh for OpenAI, Anthropic and Gemini, plus inspected
+  Ollama metadata. Replaced raw cloud model fields in Work, Code Chat and
+  Settings with real selectors.
+- Added native OpenAI/Anthropic/Gemini/Ollama streaming and cancellation for
+  Work Mode. A live packaged Gemini 3.7 request streamed the exact expected
+  response; Stop preserves an honest cancelled partial response.
+- Completed the trusted main-process Tool Registry, Permission Manager, and
+  Connector Manager. Mode, connector, scope, schema, action, timeout, result
+  bounds and confirmation policies are enforced outside React.
+- Added the isolated read-only Managed Browser connector. HTTPS/DNS/private-
+  network, redirect, popup, download, protocol and permission protections have
+  regression coverage; the packaged connector opened, read and searched the
+  real Example Domain page, then disconnected cleanly.
+- Fixed Gemini tool calling by removing unsupported schema keywords and
+  retaining provider thought signatures/call metadata; fixed Ollama's tool turn
+  wire format. A live Gemini 3.7 Work agent completed a real browser tool turn.
+- Fixed the local-model capability boundary so unknown, unsupported, or
+  uninstalled Ollama models remain chat-only even when apps are connected.
+- Added private Work attachment import for bounded text/source files using
+  opaque IDs and controlled copies. Live Markdown context reached Gemini while
+  the original path stayed out of persisted conversation metadata; unsupported
+  binary/rich formats fail honestly.
+- Added Open Existing Repository entry points and sanitized inspection, plus
+  real clone progress, final exit state, cancellation, URL validation, and a
+  polished modal. Real completion, cancellation, and invalid-URL workflows
+  passed without fake success or raw stderr leakage.
+- Added Work Mode and Connected Apps Settings sections with real connector
+  state/actions. OAuth-dependent Google/Microsoft/Discord connectors remain
+  blocked until registered desktop OAuth clients and user consent exist.
+- Added `scripts/smoke-work-mode.mjs` and passed the packaged 0.2.0 Intel smoke:
+  separate surface, Code preservation, conversation persistence, browser tools,
+  live Gemini streaming, cleanup, and zero renderer errors.
+- Expanded the automated suite to 350 passing tests with one intentionally
+  skipped native Keychain test; TypeScript and the full production build pass.
+- Built OmniCode 0.2.0 Intel and Apple Silicon DMG/ZIP artifacts. Both DMGs
+  verify and mount, both ZIPs decompress, architecture/native-module slices and
+  embedded versions match, and the packaged icon is byte-identical to the
+  original `build/icon.icns`.
+
 ## 2026-09-08
 
 - Rebuilt the final OmniCode 0.1.1 Intel and Apple Silicon DMG and ZIP artifacts

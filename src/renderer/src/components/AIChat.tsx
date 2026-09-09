@@ -1,12 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { Bot, Check, Cloud, Cpu, FilePlus2, Paperclip, Send, Sparkles, UserRound, X } from 'lucide-react'
+import { Bot, Check, Cloud, Cpu, FilePlus2, LoaderCircle, Paperclip, RefreshCw, Send, Sparkles, UserRound, X } from 'lucide-react'
 import type { AIMessage, AIModel, AIProviderId } from '../../../shared/contracts'
+import type { AIModelDescriptor, CloudAIProviderId } from '../../../shared/model-contracts'
 import { AgentMode } from './AgentMode'
 import { MarkdownMessage } from './MarkdownMessage'
-
-const DEFAULT_MODELS: Record<AIProviderId, string> = {
-  ollama: '', openai: 'gpt-5', anthropic: 'claude-sonnet-5', google: 'gemini-3.5-flash'
-}
 
 export function AIChat({
   workspacePath,
@@ -42,8 +39,10 @@ export function AIChat({
   const [mode, setMode] = useState<'chat' | 'agent'>('chat')
   const [agentResetToken, setAgentResetToken] = useState(0)
   const [provider, setProvider] = useState<AIProviderId>(defaultProvider)
-  const [model, setModel] = useState(defaultModel || DEFAULT_MODELS[defaultProvider])
+  const [model, setModel] = useState(defaultModel)
   const [models, setModels] = useState<AIModel[]>([])
+  const [cloudModels, setCloudModels] = useState<Partial<Record<CloudAIProviderId, AIModelDescriptor[]>>>({})
+  const [modelsLoading, setModelsLoading] = useState(false)
   const [messages, setMessages] = useState<AIMessage[]>([])
   const [prompt, setPrompt] = useState('')
   const [attachFile, setAttachFile] = useState(true)
@@ -63,7 +62,7 @@ export function AIChat({
     const revision = ++selectionRevision.current
     // Apply workspace defaults as a pair before waiting for optional local AI.
     setProvider(defaultProvider)
-    setModel(defaultModel || DEFAULT_MODELS[defaultProvider])
+    setModel(defaultModel)
     setError('')
     void Promise.all([window.omnicode.ai.models(), window.omnicode.ai.modelPreferences()]).then(([available, preferences]) => {
       if (!active) return
@@ -78,18 +77,68 @@ export function AIChat({
         setError(`Could not load local models: ${cause instanceof Error ? cause.message : String(cause)}`)
       }
     })
+    if (defaultProvider !== 'ollama') {
+      setModelsLoading(true)
+      void window.omnicode.ai.cloudModelCatalog(defaultProvider, {}).then((result) => {
+        if (!active || selectionRevision.current !== revision) return
+        const compatible = result.models.filter((item) => item.availability !== 'unavailable' && item.capabilities.chat.support !== 'unsupported')
+        setCloudModels((current) => ({ ...current, [defaultProvider]: compatible }))
+        setModel(compatible.some((item) => item.id === defaultModel) ? defaultModel : compatible[0]?.id ?? '')
+        if (result.providerState === 'authentication-failed' || result.providerState === 'unavailable') setError(result.message)
+      }).catch((cause) => {
+        if (active && selectionRevision.current === revision) setError(`Could not load cloud models: ${cause instanceof Error ? cause.message : String(cause)}`)
+      }).finally(() => {
+        if (active && selectionRevision.current === revision) setModelsLoading(false)
+      })
+    }
     return () => { active = false }
   }, [defaultModel, defaultProvider])
   useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }) }, [messages, busy])
   const changeProvider = (next: AIProviderId): void => {
-    selectionRevision.current += 1
+    const revision = ++selectionRevision.current
     setProvider(next)
-    setModel(next === 'ollama' ? models[0]?.id ?? '' : DEFAULT_MODELS[next])
     setError('')
+    if (next === 'ollama') {
+      setModel(models[0]?.id ?? '')
+      setModelsLoading(false)
+      return
+    }
+    const cached = cloudModels[next]
+    setModel(cached?.[0]?.id ?? '')
+    setModelsLoading(true)
+    void window.omnicode.ai.cloudModelCatalog(next, {}).then((result) => {
+      if (selectionRevision.current !== revision) return
+      const compatible = result.models.filter((item) => item.availability !== 'unavailable' && item.capabilities.chat.support !== 'unsupported')
+      setCloudModels((current) => ({ ...current, [next]: compatible }))
+      setModel((current) => compatible.some((item) => item.id === current) ? current : compatible[0]?.id ?? '')
+      if (result.providerState === 'authentication-failed' || result.providerState === 'unavailable') setError(result.message)
+    }).catch((cause) => {
+      if (selectionRevision.current === revision) setError(`Could not load cloud models: ${cause instanceof Error ? cause.message : String(cause)}`)
+    }).finally(() => {
+      if (selectionRevision.current === revision) setModelsLoading(false)
+    })
   }
   const changeModel = (next: string): void => {
     selectionRevision.current += 1
     setModel(next)
+  }
+  const refreshCloudModels = async (): Promise<void> => {
+    if (provider === 'ollama' || modelsLoading) return
+    const revision = ++selectionRevision.current
+    setModelsLoading(true)
+    setError('')
+    try {
+      const result = await window.omnicode.ai.cloudModelCatalog(provider, { forceRefresh: true })
+      if (selectionRevision.current !== revision) return
+      const compatible = result.models.filter((item) => item.availability !== 'unavailable' && item.capabilities.chat.support !== 'unsupported')
+      setCloudModels((current) => ({ ...current, [provider]: compatible }))
+      setModel((current) => compatible.some((item) => item.id === current) ? current : compatible[0]?.id ?? '')
+      if (result.providerState === 'authentication-failed' || result.providerState === 'unavailable') setError(result.message)
+    } catch (cause) {
+      if (selectionRevision.current === revision) setError(`Could not refresh cloud models: ${cause instanceof Error ? cause.message : String(cause)}`)
+    } finally {
+      if (selectionRevision.current === revision) setModelsLoading(false)
+    }
   }
   const send = async (): Promise<void> => {
     if (!prompt.trim() || busy) return
@@ -148,15 +197,19 @@ export function AIChat({
     finally { setBusy(false) }
   }
   const local = provider === 'ollama'
+  const cloudProvider = provider as CloudAIProviderId
   return <aside className="ai-sidebar">
     <header className="ai-header"><div><Sparkles /><strong>OmniCode AI</strong></div><div className="ai-header-actions"><span className="ai-mode-toggle"><button className={mode === 'chat' ? 'active' : ''} onClick={() => setMode('chat')}>Chat</button><button className={mode === 'agent' ? 'active' : ''} onClick={() => setMode('agent')}>Agent</button></span><button onClick={() => mode === 'chat' ? setMessages([]) : setAgentResetToken((value) => value + 1)}>New {mode === 'chat' ? 'Chat' : 'Task'}</button></div></header>
-    <div className="model-bar">
+    <div className={`model-bar${local ? '' : ' cloud-model-bar'}`}>
       <select aria-label="AI provider" value={provider} onChange={(event) => changeProvider(event.target.value as AIProviderId)}>
         <option value="ollama">Ollama</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="google">Google</option>
       </select>
-      {local && models.length ? <select aria-label="AI model" value={model} onChange={(event) => changeModel(event.target.value)}>
-        {models.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
-      </select> : <input aria-label="AI model name" value={model} onChange={(event) => changeModel(event.target.value)} placeholder="Model name" />}
+      {local ? <select aria-label="AI model" value={model} disabled={!models.length} onChange={(event) => changeModel(event.target.value)}>
+        {!models.length && <option value="">No installed models</option>}{models.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
+      </select> : <><select aria-label="AI model" value={model} disabled={modelsLoading || !cloudModels[cloudProvider]?.length} onChange={(event) => changeModel(event.target.value)}>
+        {!cloudModels[cloudProvider]?.length && <option value="">{modelsLoading ? 'Loading models…' : 'No compatible models'}</option>}
+        {cloudModels[cloudProvider]?.map((item) => <option value={item.id} key={item.id}>{item.displayName}</option>)}
+      </select><button type="button" className="model-refresh" title="Refresh cloud models" aria-label={`Refresh ${provider} models`} disabled={modelsLoading} onClick={() => void refreshCloudModels()}>{modelsLoading ? <LoaderCircle className="spin" /> : <RefreshCw />}</button></>}
       <span className={`privacy-badge ${local ? 'local' : 'cloud'}`}>{local ? <Cpu /> : <Cloud />}{local ? 'LOCAL' : 'CLOUD'}</span>
     </div>
     <div className="privacy-line">{local ? 'AI processing runs locally on this Mac.' : 'Attached project information may be sent to this provider.'}</div>

@@ -1,6 +1,6 @@
 # OmniCode Known Issues
 
-Last updated: 2026-09-08
+Last updated: 2026-09-09
 
 Resolved issues remain in this file with a resolution so audit history is not
 lost. Secrets, tokens, and authorization headers must never be included here.
@@ -37,7 +37,9 @@ lost. Secrets, tokens, and authorization headers must never be included here.
 - Suspected cause: Valid account credentials and account/model access are external.
 - Relevant files: `src/main/services/ai-manager.ts`,
   `src/renderer/src/components/AIChat.tsx`, `src/main/services/credential-manager.ts`.
-- Current status: 🟡 Partially resolved — Gemini is verified end to end. OpenAI
+- Current status: 🟡 Partially resolved — Gemini is verified end to end in both
+  Code and Work modes, including real 3.7 streaming and a real Managed Browser
+  tool turn. OpenAI
   and Claude successful live requests are BLOCKED — USER CONFIGURATION REQUIRED.
   Gemini also completed the live multi-file Chat context test. Two Agent planning
   attempts received an honest transient HTTP 503 high-demand response; a bounded
@@ -87,14 +89,15 @@ lost. Secrets, tokens, and authorization headers must never be included here.
 - Suspected cause: Initial application work was never committed.
 - Relevant files: entire repository.
 - Current status: ✅ Resolved — checkpoint `7e85887` preserves the complete
-  pre-repair baseline.
+  pre-repair baseline and `28bb077` preserves the stabilized 0.1.1 state before
+  the `codex/work-mode` expansion.
 
 ## OMI-006 — Distribution is unsigned and unnotarized
 
 - Severity: High for public distribution; Low for local testing
 - Reproduction: Inspect build identities or distribute the DMG to another Mac.
 - Expected: Public release is signed, notarized, and stapled.
-- Actual: Final Intel and Apple Silicon 0.1.1 installers build and pass archive
+- Actual: Final Intel and Apple Silicon 0.2.0 installers build and pass archive
   validation, but no valid Developer ID Application identity is installed, so
   they are unsigned and unnotarized.
 - Suspected cause: Apple developer credentials are an external requirement.
@@ -119,22 +122,27 @@ lost. Secrets, tokens, and authorization headers must never be included here.
 - Current status: ✅ Resolved — repeatable packaged audits now cover startup,
   native window/dialog/clipboard behavior, open/edit/save/Save As, Explorer
   lifecycle and drag/drop, terminal/Run, local server plus real-browser reload,
-  Git, Keychain/provider state, live Gemini Chat/Markdown/context, Agent
+  Git, Keychain/provider state, live Gemini Chat/Markdown/context, Agent,
+  separate Work Mode, conversation persistence, streaming, Connected Apps,
+  Managed Browser, model selectors, attachments, and repository import/clone,
   proposal/native command approval, diff/undo, settings/themes, indexing, and
   performance. External credentials, services, and hardware remain explicitly
   blocked rather than falsely passed.
 
-## OMI-008 — AI chat is non-streaming and cannot stop generation
+## OMI-008 — Code Chat is non-streaming and cannot stop generation
 
 - Severity: Medium
 - Reproduction: Send a long AI request.
 - Expected if claimed: Incremental output and a stop control.
-- Actual: One request resolves to one final response; no cancellation UI exists.
-- Suspected cause: Streaming/cancellation was never implemented.
+- Actual: Code Chat still resolves one final response and has no cancellation
+  control. Work Mode now streams OpenAI/Anthropic/Gemini/Ollama responses and
+  has a real sender-bound Stop action that preserves cancelled partial output.
+- Suspected cause: The original Code Chat transport predates the Work transport;
+  changing its interaction model was outside the Work Mode compatibility scope.
 - Relevant files: `src/main/services/ai-manager.ts`,
   `src/renderer/src/components/AIChat.tsx`, `src/shared/contracts.ts`.
-- Current status: ⚪ Not implemented. Do not add during stabilization unless
-  existing product copy is found to promise it.
+- Current status: 🟡 Partially resolved — verified in Work Mode, accurately not
+  implemented in Code Chat. The Code UI does not claim streaming or Stop.
 
 ## OMI-009 — Workbench layout does not persist across restart
 
@@ -151,7 +159,7 @@ lost. Secrets, tokens, and authorization headers must never be included here.
 - Severity: Medium
 - Reproduction: Attempt to run the arm64 app on the x86_64 Sonoma build host.
 - Expected: Architecture-specific app launches on matching Apple hardware.
-- Actual: The final arm64 app executable and active `node-pty` module are arm64,
+- Actual: The final 0.2.0 arm64 app executable and active `node-pty` module are arm64,
   its ZIP decompresses cleanly, and its DMG mounts with a valid internal
   checksum; native execution is not possible on this Intel host.
 - Suspected cause: External hardware requirement.
@@ -542,3 +550,73 @@ lost. Secrets, tokens, and authorization headers must never be included here.
   `scripts/audit-run-custom-config.mjs`.
 - Current status: ✅ Resolved — it is now `Run Log`; a rebuilt packaged custom
   task populated it with exact real pre/build/run/post output and exit code.
+
+## OMI-035 — OAuth service connectors require registered applications
+
+- Severity: Medium
+- Reproduction: Attempt to connect Gmail/Drive/Calendar, Microsoft 365, or
+  Discord from the current Connected Apps surface.
+- Expected: OmniCode starts Authorization Code + PKCE, stores tokens in
+  Keychain, verifies the selected service, and requests only needed scopes.
+- Actual: Only the real read-only Managed Browser connector is registered. No
+  OAuth service is shown as connected or simulated.
+- Suspected cause: Google, Microsoft, and Discord desktop client IDs, redirect
+  configuration, user consent, scopes, and safe test accounts are external
+  deployment requirements. A Gemini API key is not a Google Workspace OAuth
+  credential.
+- Relevant files: `src/main/services/connector-manager.ts`,
+  `src/renderer/src/components/SettingsPanel.tsx`,
+  `src/renderer/src/components/work/WorkMode.tsx`.
+- Current status: 🔵 BLOCKED — REGISTERED OAUTH CLIENTS AND USER CONSENT REQUIRED.
+
+## OMI-036 — Rich Work attachment extraction is not implemented
+
+- Severity: Medium
+- Reproduction: Attach a PDF, Word document, spreadsheet, or image in Work Mode.
+- Expected if claimed: A dedicated bounded parser extracts useful content and
+  identifies the format accurately.
+- Actual: OmniCode supports bounded text/source attachments and rejects binary
+  or unsupported inputs explicitly. It does not decode these rich formats or
+  pretend their binary bytes are text.
+- Suspected cause: Dedicated format parsers and image/vision transport have not
+  been integrated.
+- Relevant files: `src/main/services/work-attachment-manager.ts`,
+  `src/renderer/src/components/work/WorkMode.tsx`.
+- Current status: ⚪ Not implemented. Text/source attachment import, privacy,
+  persistence, limits, live provider context, and cleanup are verified.
+
+## OMI-037 — Provider tool turns were not interoperable — Resolved
+
+- Severity: High
+- Reproduction: Ask Gemini or Ollama in Work Mode to use a registered browser
+  tool.
+- Expected: The model proposes a structured call, OmniCode executes only the
+  registered tool, preserves provider turn metadata, and receives a final answer.
+- Actual: Google's API rejected an unsupported JSON-schema keyword and later
+  turns could lose thought signatures; the initial Ollama tool-result payload
+  did not match Ollama's chat wire format.
+- Suspected cause: Provider-specific tool protocols were normalized too early.
+- Relevant files: `src/main/services/ai-manager.ts`,
+  `src/main/services/ai-tool-types.ts`,
+  `src/main/services/work-agent-manager.ts`.
+- Current status: ✅ Resolved — provider-native serializers/parsers preserve
+  Gemini thought signatures and call IDs, emit supported schemas, and use the
+  correct Ollama messages. Unit tests pass and a real Gemini 3.7 browser tool
+  turn completed successfully.
+
+## OMI-038 — Unknown local models could receive connected-app tools — Resolved
+
+- Severity: High
+- Reproduction: Connect an app, select an installed Ollama model whose tool
+  capability is absent or false, and send a Work prompt.
+- Expected: The model remains chat-only and receives no tool schemas.
+- Actual: The initial handler exposed every connected tool without considering
+  the selected local model's inspected metadata.
+- Suspected cause: Connector availability and model capability were evaluated
+  independently.
+- Relevant files: `src/main/index.ts`,
+  `src/main/services/work-agent-manager.ts`,
+  `src/renderer/src/components/work/WorkModeShell.tsx`.
+- Current status: ✅ Resolved — the main process exposes tools to Ollama only
+  when the exact installed model explicitly has `toolUse: true`; the UI shows an
+  honest chat-only notice and focused regression tests cover the boundary.

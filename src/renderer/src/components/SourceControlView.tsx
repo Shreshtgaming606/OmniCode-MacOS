@@ -3,8 +3,10 @@ import {
   Check,
   CloudDownload,
   CloudUpload,
+  FolderOpen,
   GitBranch,
   GitCommitHorizontal,
+  GitFork,
   Minus,
   Plus,
   RefreshCw,
@@ -43,11 +45,13 @@ function ChangeGroup({ title, changes, actionTitle, staged, busy, onAll, onActio
   </section>
 }
 
-export function SourceControlView({ root, onOpenDiff, onStatus, onRequestText }: {
+export function SourceControlView({ root, onOpenDiff, onStatus, onRequestText, onOpenRepository, onCloneRepository }: {
   root: string
   onOpenDiff(path: string, staged?: boolean): void
   onStatus(status: GitStatus): void
   onRequestText(options: { title: string; label: string; value?: string; confirmLabel: string }): Promise<string | null>
+  onOpenRepository(): void
+  onCloneRepository(): void
 }) {
   const [status, setStatus] = useState<GitStatus | null>(null)
   const [branches, setBranches] = useState<string[]>([])
@@ -108,7 +112,7 @@ export function SourceControlView({ root, onOpenDiff, onStatus, onRequestText }:
 
   if (status && !status.isRepository) return <div className="sidebar-view source-view">
     <div className="sidebar-title"><span>Source Control</span><button title="Refresh" onClick={() => void refresh()}><RefreshCw className={busyAction === 'refresh' ? 'spin' : ''} /></button></div>
-    <div className="sidebar-empty"><GitBranch /><p>This folder is not a Git repository.</p><button className="primary-button" disabled={busy} onClick={() => void perform('init', () => window.omnicode.git.operation(root, 'init'), 'Repository initialized.')}>Initialize Repository</button>{status.error && <small>{status.error}</small>}{error && <small>{error}</small>}</div>
+    <div className="sidebar-empty"><GitBranch /><p>This folder is not a Git repository.</p><button className="primary-button" disabled={busy} onClick={() => void perform('init', () => window.omnicode.git.operation(root, 'init'), 'Repository initialized.')}>Initialize Repository</button><button disabled={busy} onClick={onOpenRepository}>Open Existing Repository</button><button disabled={busy} onClick={onCloneRepository}>Clone Repository</button>{status.error && <small>{status.error}</small>}{error && <small>{error}</small>}</div>
   </div>
 
   const createBranch = async (): Promise<void> => {
@@ -141,6 +145,8 @@ export function SourceControlView({ root, onOpenDiff, onStatus, onRequestText }:
 
   return <div className="sidebar-view source-view">
     <div className="sidebar-title"><span>Source Control</span><div className="toolbar compact">
+      <button disabled={busy} title="Open Existing Repository" onClick={onOpenRepository}><FolderOpen /></button>
+      <button disabled={busy} title="Clone Repository" onClick={onCloneRepository}><GitFork /></button>
       <button disabled={busy} title="Fetch" onClick={() => void perform('fetch', () => window.omnicode.git.operation(root, 'fetch'), 'Fetched remote updates.')}><CloudDownload /></button>
       <button disabled={busy} title="Pull" onClick={() => void perform('pull', () => window.omnicode.git.operation(root, 'pull'), 'Pulled remote changes.')}><RefreshCw className={busyAction === 'pull' ? 'spin' : ''} /></button>
       <button disabled={busy} title="Push" onClick={() => void perform('push', () => window.omnicode.git.operation(root, 'push'), 'Pushed local commits.')}><CloudUpload /></button>

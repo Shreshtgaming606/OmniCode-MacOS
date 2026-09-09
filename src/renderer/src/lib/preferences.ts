@@ -1,4 +1,5 @@
 import type { AIProviderId, ThemePreference } from '../../../shared/contracts'
+import type { AppMode } from '../../../shared/work-contracts'
 
 export type AgentPermission = 'ask' | 'workspace' | 'agent'
 
@@ -14,6 +15,10 @@ function storedEnum<T extends string>(
 
 export function storedTheme(storage: Pick<Storage, 'getItem'>): ThemePreference {
   return storedEnum(storage, 'omnicode.theme', ['system', 'dark', 'light'], 'system')
+}
+
+export function storedAppMode(storage: Pick<Storage, 'getItem'>): AppMode {
+  return storedEnum(storage, 'omnicode.appMode', ['code', 'work'], 'code')
 }
 
 export function storedAgentPermission(storage: Pick<Storage, 'getItem'>): AgentPermission {

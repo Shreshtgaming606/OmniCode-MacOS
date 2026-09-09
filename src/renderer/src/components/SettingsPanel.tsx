@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
-import { CheckCircle2, KeyRound, LoaderCircle, Shield, Trash2, X } from 'lucide-react'
+import { CheckCircle2, KeyRound, LoaderCircle, Plug, RefreshCw, Shield, Trash2, Unplug, X } from 'lucide-react'
 import type { AIModel, AIProviderConnectionStatus, AIProviderId, ThemePreference, WorkspaceSettings } from '../../../shared/contracts'
+import type { AIModelDescriptor, CloudAIProviderId } from '../../../shared/model-contracts'
+import type { ConnectorDescriptor } from '../../../shared/tool-contracts'
 
 type CloudProvider = Exclude<AIProviderId, 'ollama'>
 const PROVIDERS: Array<{ id: CloudProvider; name: string; placeholder: string }> = [
@@ -51,6 +53,41 @@ export function SettingsPanel({
   const [statusError, setStatusError] = useState(false)
   const [workspaceJson, setWorkspaceJson] = useState('{}')
   const [localModels, setLocalModels] = useState<AIModel[]>([])
+  const [cloudModels, setCloudModels] = useState<Partial<Record<CloudProvider, AIModelDescriptor[]>>>({})
+  const [cloudModelsBusy, setCloudModelsBusy] = useState<CloudProvider | null>(null)
+  const [cloudModelErrors, setCloudModelErrors] = useState<Partial<Record<CloudProvider, string>>>({})
+  const [connectors, setConnectors] = useState<ConnectorDescriptor[]>([])
+  const [connectorBusy, setConnectorBusy] = useState<string | null>(null)
+  const [connectorError, setConnectorError] = useState('')
+
+  const refreshCloudModels = async (provider: CloudProvider, forceRefresh = false): Promise<void> => {
+    setCloudModelsBusy(provider)
+    setCloudModelErrors((current) => ({ ...current, [provider]: undefined }))
+    try {
+      const result = await window.omnicode.ai.cloudModelCatalog(provider as CloudAIProviderId, { forceRefresh })
+      const models = result.models.filter((model) => model.availability !== 'unavailable' && model.capabilities.chat.support !== 'unsupported')
+      setCloudModels((current) => ({ ...current, [provider]: models }))
+      if (autocompleteProvider === provider && !models.some((model) => model.id === autocompleteModel)) {
+        onAutocompleteModel(models[0]?.id ?? '')
+      }
+      if (result.providerState === 'authentication-failed' || result.providerState === 'unavailable') {
+        setCloudModelErrors((current) => ({ ...current, [provider]: result.message }))
+      }
+    } catch (cause) {
+      setCloudModelErrors((current) => ({ ...current, [provider]: cause instanceof Error ? cause.message : String(cause) }))
+    } finally {
+      setCloudModelsBusy((current) => current === provider ? null : current)
+    }
+  }
+
+  const refreshConnectors = async (verify = false): Promise<void> => {
+    try {
+      setConnectorError('')
+      setConnectors(await window.omnicode.work.connectors.list(verify))
+    } catch (cause) {
+      setConnectorError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
   useEffect(() => {
     let active = true
     for (const { id } of PROVIDERS) {
@@ -75,6 +112,14 @@ export function SettingsPanel({
       if (autocompleteProvider === 'ollama' && !autocompleteModel && models[0]) onAutocompleteModel(models[0].id)
     }).catch(() => undefined)
   }, [])
+  useEffect(() => {
+    void refreshConnectors(true)
+  }, [])
+  useEffect(() => {
+    if (autocompleteProvider !== 'ollama' && !cloudModels[autocompleteProvider]) {
+      void refreshCloudModels(autocompleteProvider)
+    }
+  }, [autocompleteProvider])
   useEffect(() => {
     if (!workspacePath) return setWorkspaceJson('{}')
     void window.omnicode.settings.read(workspacePath).then((settings) => setWorkspaceJson(JSON.stringify(settings, null, 2))).catch((cause) => { setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause)) })
@@ -134,11 +179,25 @@ export function SettingsPanel({
       setCredentialErrors((current) => ({ ...current, [provider]: cause instanceof Error ? cause.message : String(cause) }))
     } finally { setCredentialBusy((current) => ({ ...current, [provider]: undefined })) }
   }
+  const toggleConnector = async (connector: ConnectorDescriptor): Promise<void> => {
+    if (connectorBusy) return
+    setConnectorBusy(connector.id)
+    setConnectorError('')
+    try {
+      if (connector.status.state === 'connected') await window.omnicode.work.connectors.disconnect(connector.id)
+      else await window.omnicode.work.connectors.connect(connector.id)
+      await refreshConnectors(true)
+    } catch (cause) {
+      setConnectorError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setConnectorBusy(null)
+    }
+  }
   return <div className="settings-overlay" role="dialog" aria-modal="true" aria-label="Settings">
     <div className="settings-panel">
       <header><div><h1>Settings</h1><p>User settings · stored locally</p></div><button onClick={onClose} title="Close settings"><X /></button></header>
       <div className="settings-content">
-        <nav><a href="#appearance">Appearance</a><a href="#files">Files & Autosave</a><a href="#providers">AI Providers</a><a href="#autocomplete">AI Autocomplete</a><a href="#workspace">Workspace</a><a href="#permissions">Permissions & Privacy</a></nav>
+        <nav><a href="#appearance">Appearance</a><a href="#files">Files & Autosave</a><a href="#providers">AI Providers</a><a href="#autocomplete">AI Autocomplete</a><a href="#work-mode">Work Mode</a><a href="#connected-apps">Connected Apps</a><a href="#workspace">Workspace</a><a href="#permissions">Permissions & Privacy</a></nav>
         <main>
           <section id="appearance"><h2>Appearance</h2><p>Choose how OmniCode follows macOS.</p>
             <div className="segmented">{(['system', 'dark', 'light'] as ThemePreference[]).map((item) => <button className={theme === item ? 'active' : ''} key={item} onClick={() => onTheme(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}</div>
@@ -166,12 +225,30 @@ export function SettingsPanel({
                 const next = event.target.value as AIProviderId
                 if (aiAutocomplete && next !== 'ollama' && !window.confirm(`Switch autocomplete to ${next}? Nearby code will be sent to this cloud provider while you type.`)) return
                 onAutocompleteProvider(next)
-                onAutocompleteModel(next === 'ollama' ? localModels[0]?.id ?? '' : '')
+                onAutocompleteModel(next === 'ollama' ? localModels[0]?.id ?? '' : cloudModels[next]?.[0]?.id ?? '')
               }}><option value="ollama">Ollama · local</option><option value="openai">OpenAI · cloud</option><option value="anthropic">Anthropic · cloud</option><option value="google">Google Gemini · cloud</option></select></label>
               <label><strong>Model</strong>{autocompleteProvider === 'ollama'
                 ? <select value={autocompleteModel} onChange={(event) => onAutocompleteModel(event.target.value)}><option value="">Choose an installed model</option>{localModels.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}</select>
-                : <input value={autocompleteModel} onChange={(event) => onAutocompleteModel(event.target.value)} placeholder="Provider model ID" />}</label>
+                : <span className="cloud-model-setting"><select aria-label={`${PROVIDERS.find((provider) => provider.id === autocompleteProvider)?.name ?? autocompleteProvider} autocomplete model`} value={autocompleteModel} disabled={cloudModelsBusy === autocompleteProvider} onChange={(event) => onAutocompleteModel(event.target.value)}>
+                  {!cloudModels[autocompleteProvider]?.length && <option value="">{cloudModelsBusy === autocompleteProvider ? 'Loading available models…' : 'No compatible models available'}</option>}
+                  {cloudModels[autocompleteProvider]?.map((model) => <option key={model.id} value={model.id}>{model.displayName}</option>)}
+                </select><button type="button" className="icon-button" title="Refresh available cloud models" aria-label={`Refresh ${autocompleteProvider} autocomplete models`} disabled={cloudModelsBusy === autocompleteProvider} onClick={() => void refreshCloudModels(autocompleteProvider, true)}>{cloudModelsBusy === autocompleteProvider ? <LoaderCircle className="spin" /> : <RefreshCw />}</button></span>}</label>
+              {autocompleteProvider !== 'ollama' && cloudModelErrors[autocompleteProvider] && <p className="provider-error" role="alert">{cloudModelErrors[autocompleteProvider]}</p>}
             </div>
+          </section>
+          <section id="work-mode"><h2>Work Mode</h2><p>Work Mode has its own persistent conversations and shares OmniCode’s secure AI provider and model infrastructure. The selected Work model is changed from the Work conversation header.</p>
+            <div className="work-settings-summary"><Shield /><span><strong>Tool permissions stay in the main process</strong><small>AI-generated tool requests are schema-validated and checked before a connector can run. Write and high-impact actions require confirmation.</small></span></div>
+          </section>
+          <section id="connected-apps"><h2>Work Mode · Connected Apps</h2><p>Only real registered connectors appear here. A connector is shown as connected only after its own connection verification succeeds.</p>
+            <div className="settings-connectors">
+              {connectors.map((connector) => {
+                const connected = connector.status.state === 'connected'
+                const busy = connectorBusy === connector.id || connector.status.state === 'connecting'
+                return <article key={connector.id} className={`settings-connector state-${connector.status.state}`}><div><Plug /><span><strong>{connector.name}</strong><small>{connector.status.message}</small></span></div><p>{connector.description}</p><ul>{connector.capabilities.map((capability) => <li key={capability}>{capability}</li>)}</ul><button type="button" disabled={busy} className={connected ? 'disconnect' : 'primary-button'} onClick={() => void toggleConnector(connector)}>{busy ? <LoaderCircle className="spin" /> : connected ? <Unplug /> : <Plug />}{busy ? 'Working…' : connected ? 'Disconnect' : 'Connect'}</button></article>
+              })}
+              {!connectors.length && !connectorError && <div className="settings-empty-connector"><Plug /><span><strong>No connectors registered</strong><small>This build will not display simulated connected services.</small></span></div>}
+            </div>
+            {connectorError && <div className="settings-status error" role="alert">{connectorError}</div>}
           </section>
           <section id="workspace"><h2>Workspace Configuration</h2><p>{workspacePath ? <>Saved to <code>{workspacePath}/.omnicode/settings.json</code>. Commands here are user-authored and run only when you explicitly start them.</> : 'Open a folder to configure workspace-specific behavior.'}</p>
             <textarea className="workspace-settings-json" aria-label="Workspace settings JSON" disabled={!workspacePath} spellCheck={false} value={workspaceJson} onChange={(event) => setWorkspaceJson(event.target.value)} />

@@ -1,13 +1,20 @@
 import { spawn } from 'node:child_process'
 import path from 'node:path'
 
-import type { GitFileChange, GitStatus } from '../../shared/contracts'
+import type { GitCloneProgress, GitFileChange, GitRepositoryInfo, GitStatus } from '../../shared/contracts'
 import { resolveShellEnvironment } from './shell-environment'
 
 const MAX_GIT_OUTPUT = 16 * 1024 * 1024
 
 interface GitRunOptions {
   allowedExitCodes?: number[]
+  signal?: AbortSignal
+  onStderr?(chunk: string): void
+}
+
+interface GitCloneOptions {
+  signal?: AbortSignal
+  onProgress?(progress: Pick<GitCloneProgress, 'phase' | 'message' | 'percent'>): void
 }
 
 function validatePaths(paths: string[]): void {
@@ -37,6 +44,42 @@ function parseBranchHeader(header: string): { branch: string; ahead: number; beh
   if (details.startsWith('Initial commit on ')) return { branch: details.slice('Initial commit on '.length), ahead, behind }
   if (details.startsWith('HEAD (no branch)')) return { branch: 'HEAD', ahead, behind }
   return { branch: details.split('...')[0]?.trim() || 'HEAD', ahead, behind }
+}
+
+export function validateRepositoryUrl(repositoryUrl: string): string {
+  const value = repositoryUrl.trim()
+  if (!value || value.startsWith('-') || /[\r\n\0]/u.test(value)) throw new Error('Enter a valid Git repository URL.')
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:/u.test(value) && !/^[^/@\s]+@[^/:\s]+:.+/u.test(value)) {
+    let url: URL
+    try { url = new URL(value) } catch { throw new Error('Enter a valid Git repository URL.') }
+    if (url.protocol !== 'https:' && url.protocol !== 'ssh:') throw new Error('Clone remote repositories with HTTPS or SSH.')
+    if (!url.hostname || url.password || (url.protocol === 'https:' && url.username) || url.search || url.hash) {
+      throw new Error('Repository URLs cannot contain embedded credentials, query tokens, or fragments.')
+    }
+  } else if (value.includes('@') || value.includes(':')) {
+    if (!/^[^/@\s]+@[^/:\s]+:[^\s]+$/u.test(value)) throw new Error('Enter a valid HTTPS or SSH Git repository URL.')
+  }
+  return value
+}
+
+export function parseGitCloneProgress(value: string): Pick<GitCloneProgress, 'phase' | 'message' | 'percent'> | null {
+  const candidates: Array<{ index: number; progress: Pick<GitCloneProgress, 'phase' | 'message' | 'percent'> }> = []
+  const addPercent = (pattern: RegExp, phase: GitCloneProgress['phase'], message: string): void => {
+    for (const match of value.matchAll(pattern)) {
+      const percent = Number(match[1])
+      if (Number.isFinite(percent)) candidates.push({
+        index: match.index,
+        progress: { phase, message, percent: Math.min(100, Math.max(0, percent)) }
+      })
+    }
+  }
+  addPercent(/Receiving objects:\s*(\d+)%/giu, 'receiving', 'Receiving repository objects…')
+  addPercent(/Resolving deltas:\s*(\d+)%/giu, 'resolving', 'Resolving repository history…')
+  addPercent(/(?:Updating files|Checking out files):\s*(\d+)%/giu, 'checking-out', 'Checking out repository files…')
+  for (const match of value.matchAll(/Cloning into\s+[^\r\n]+/giu)) {
+    candidates.push({ index: match.index, progress: { phase: 'starting', message: 'Connecting to the repository…' } })
+  }
+  return candidates.sort((left, right) => left.index - right.index).at(-1)?.progress ?? null
 }
 
 export function parseGitStatus(output: string): GitStatus {
@@ -77,15 +120,34 @@ export async function runGit(root: string, args: string[], options: GitRunOption
     let stdout = ''
     let stderr = ''
     let settled = false
+    let aborted = options.signal?.aborted === true
+    let forceKillTimer: NodeJS.Timeout | undefined
+    const cleanup = (): void => {
+      if (forceKillTimer) clearTimeout(forceKillTimer)
+      options.signal?.removeEventListener('abort', abort)
+    }
+    const abort = (): void => {
+      if (settled) return
+      aborted = true
+      child.kill('SIGTERM')
+      forceKillTimer = setTimeout(() => {
+        if (!settled) child.kill('SIGKILL')
+      }, 2_000)
+      forceKillTimer.unref()
+    }
     child.stdout.setEncoding('utf8')
     child.stderr.setEncoding('utf8')
     const append = (target: 'stdout' | 'stderr', data: string): void => {
       if (settled) return
       if (target === 'stdout') stdout += data
-      else stderr += data
+      else {
+        stderr += data
+        options.onStderr?.(data)
+      }
       if (stdout.length + stderr.length > MAX_GIT_OUTPUT) {
         settled = true
         child.kill('SIGKILL')
+        cleanup()
         reject(new Error('Git produced too much output. Run the command in the terminal for more detail.'))
       }
     }
@@ -94,29 +156,51 @@ export async function runGit(root: string, args: string[], options: GitRunOption
     child.on('error', (error) => {
       if (settled) return
       settled = true
-      reject((error as NodeJS.ErrnoException).code === 'ENOENT'
+      cleanup()
+      reject(aborted
+        ? new Error('Git operation was cancelled.')
+        : (error as NodeJS.ErrnoException).code === 'ENOENT'
         ? new Error('Git was not found. Install Xcode Command Line Tools with `xcode-select --install`.')
         : error)
     })
     child.on('close', (code) => {
       if (settled) return
       settled = true
-      if (code !== null && allowed.has(code)) resolve(stdout)
+      cleanup()
+      if (aborted) reject(new Error('Git operation was cancelled.'))
+      else if (code !== null && allowed.has(code)) resolve(stdout)
       else reject(new Error(redactGitOutput(stderr.trim()) || `Git exited with code ${code ?? 'unknown'}.`))
     })
+    options.signal?.addEventListener('abort', abort, { once: true })
+    if (aborted) abort()
   })
 }
 
 export class GitManager {
-  async clone(destinationParent: string, repositoryUrl: string): Promise<string> {
-    const url = repositoryUrl.trim()
-    if (!url || url.startsWith('-') || /[\r\n\0]/.test(url)) throw new Error('Enter a valid Git repository URL.')
+  async clone(destinationParent: string, repositoryUrl: string, options: GitCloneOptions = {}): Promise<string> {
+    const url = validateRepositoryUrl(repositoryUrl)
     const baseName = url.split('/').pop()?.replace(/\.git$/, '') || 'repository'
     if (!/^[\w.-]+$/.test(baseName) || baseName === '.' || baseName === '..') {
       throw new Error('The repository URL does not contain a safe folder name.')
     }
-    await runGit(destinationParent, ['clone', '--', url, baseName])
-    return path.join(path.resolve(destinationParent), baseName)
+    const destination = path.join(path.resolve(destinationParent), baseName)
+    let progressBuffer = ''
+    let lastProgress = ''
+    options.onProgress?.({ phase: 'starting', message: 'Starting Git clone…' })
+    await runGit(destinationParent, ['clone', '--progress', '--', url, baseName], {
+      signal: options.signal,
+      onStderr: (chunk) => {
+        progressBuffer = `${progressBuffer}${chunk}`.slice(-4_096)
+        const progress = parseGitCloneProgress(progressBuffer)
+        const key = progress ? `${progress.phase}:${progress.percent ?? ''}:${progress.message}` : ''
+        if (progress && key !== lastProgress) {
+          lastProgress = key
+          options.onProgress?.(progress)
+        }
+      }
+    })
+    options.onProgress?.({ phase: 'completed', message: 'Repository clone completed.', percent: 100 })
+    return destination
   }
 
   async status(root: string): Promise<GitStatus> {
@@ -126,6 +210,25 @@ export class GitManager {
       const message = error instanceof Error ? error.message : String(error)
       if (/not a git repository/i.test(message)) return { isRepository: false, branch: '', ahead: 0, behind: 0, changes: [] }
       return { isRepository: false, branch: '', ahead: 0, behind: 0, changes: [], error: message }
+    }
+  }
+
+  async inspect(root: string): Promise<GitRepositoryInfo> {
+    const status = await this.status(root)
+    if (!status.isRepository) return { isRepository: false, branch: '', host: 'none' }
+    let remoteUrl: string | undefined
+    try {
+      const value = (await runGit(root, ['remote', 'get-url', 'origin'])).trim()
+      if (value) remoteUrl = redactGitOutput(value).slice(0, 2_048)
+    } catch { /* A repository does not need an origin remote. */ }
+    const github = remoteUrl
+      ? /(?:^|[.@/:])github\.com(?=[:/]|$)/iu.test(remoteUrl)
+      : false
+    return {
+      isRepository: true,
+      branch: status.branch,
+      ...(remoteUrl ? { remoteUrl } : {}),
+      host: remoteUrl ? github ? 'github' : 'other' : 'none'
     }
   }
 

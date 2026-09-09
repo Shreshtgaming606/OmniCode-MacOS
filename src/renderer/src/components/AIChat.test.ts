@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ComponentProps, ReactElement } from 'react'
 import type { AIModel, AIModelPreferences } from '../../../shared/contracts'
+import type { AIModelCatalogResult, AIModelDescriptor, CloudAIProviderId } from '../../../shared/model-contracts'
+import { unknownModelCapabilities } from '../../../shared/model-contracts'
 
 // Exercise the component's initialization and event handlers without a browser
 // dependency. Effects run after each explicit render, just as in React.
@@ -75,11 +77,26 @@ function deferred<T>() {
 function discovery() {
   const models = deferred<AIModel[]>()
   const preferences = deferred<AIModelPreferences>()
+  const cloud = deferred<AIModelCatalogResult>()
   vi.stubGlobal('window', { omnicode: { ai: {
     models: () => models.promise,
-    modelPreferences: () => preferences.promise
+    modelPreferences: () => preferences.promise,
+    cloudModelCatalog: () => cloud.promise
   } } })
-  return { models, preferences }
+  return { models, preferences, cloud }
+}
+
+function cloudResult(provider: CloudAIProviderId, ids: string[]): AIModelCatalogResult {
+  const models: AIModelDescriptor[] = ids.map((id) => ({
+    id,
+    displayName: id,
+    provider,
+    local: false,
+    availability: 'available',
+    capabilities: { ...unknownModelCapabilities(), chat: { support: 'supported', evidence: 'provider-api' } },
+    metadataSource: 'provider-api'
+  }))
+  return { provider, models, fetchedAt: 0, checkedAt: 0, stale: false, truncated: false, source: 'provider-api', providerState: 'connected', message: 'Connected.' }
 }
 
 const flush = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve() }
@@ -95,7 +112,8 @@ describe('AIChat provider and model initialization', () => {
     render(cloud)
     const tree = render(cloud)
     expect(find(tree, 'AI provider')?.value).toBe('google')
-    expect(find(tree, 'AI model name')?.value).toBe('gemini-3.5-flash')
+    expect(find(tree, 'AI model')?.value).toBe('gemini-3.5-flash')
+    expect(find(tree, 'AI model name')).toBeUndefined()
   })
 
   it('does not apply stale local discovery after workspace defaults switch to cloud', async () => {
@@ -108,31 +126,31 @@ describe('AIChat provider and model initialization', () => {
     await flush()
     const tree = render(cloud)
     expect(find(tree, 'AI provider')?.value).toBe('anthropic')
-    expect(find(tree, 'AI model name')?.value).toBe('claude-sonnet-5')
+    expect(find(tree, 'AI model')?.value).toBe('claude-sonnet-5')
   })
 
-  it('preserves a manual cloud selection while initial local discovery is pending', async () => {
+  it('loads cloud models from the provider catalog when the user switches providers', async () => {
     const pending = discovery()
     const tree = render()
     const change = find(tree, 'AI provider')?.onChange as (event: { target: { value: string } }) => void
     change({ target: { value: 'openai' } })
+    pending.cloud.resolve(cloudResult('openai', ['gpt-current', 'gpt-fast']))
     pending.models.resolve([{ id: 'local:latest', name: 'Local', provider: 'ollama', local: true }])
     pending.preferences.resolve({ selectedModel: 'local:latest' })
     await flush()
     const next = render()
     expect(find(next, 'AI provider')?.value).toBe('openai')
-    expect(find(next, 'AI model name')?.value).toBe('gpt-5')
+    expect(find(next, 'AI model')?.value).toBe('gpt-current')
+    expect(find(next, 'AI model name')).toBeUndefined()
   })
 
-  it('preserves a manually typed model while discovery is pending', async () => {
+  it('preserves a selected local model while local discovery completes', async () => {
     const pending = discovery()
-    const tree = render()
-    const change = find(tree, 'AI model name')?.onChange as (event: { target: { value: string } }) => void
-    change({ target: { value: 'custom:latest' } })
-    pending.models.resolve([])
-    pending.preferences.resolve({ selectedModel: 'old:latest' })
+    render({ defaultModel: 'local:latest' })
+    pending.models.resolve([{ id: 'local:latest', name: 'Local', provider: 'ollama', local: true }])
+    pending.preferences.resolve({ selectedModel: 'local:latest' })
     await flush()
-    expect(find(render(), 'AI model name')?.value).toBe('custom:latest')
+    expect(find(render({ defaultModel: 'local:latest' }), 'AI model')?.value).toBe('local:latest')
   })
 
   it('handles local discovery failure and keeps cloud defaults usable', async () => {
@@ -141,9 +159,10 @@ describe('AIChat provider and model initialization', () => {
     render(cloud)
     pending.models.reject(new Error('Ollama is unavailable'))
     pending.preferences.resolve({})
+    pending.cloud.resolve(cloudResult('google', ['gemini-current']))
     await flush()
     const tree = render(cloud)
     expect(find(tree, 'AI provider')?.value).toBe('google')
-    expect(find(tree, 'AI model name')?.value).toBe('gemini-3.5-flash')
+    expect(find(tree, 'AI model')?.value).toBe('gemini-current')
   })
 })

@@ -1,36 +1,37 @@
 # OmniCode Release Readiness
 
-Last updated: 2026-09-08
+Last updated: 2026-09-09
 
 ## Overall Status
 
 **NOT READY for a signed public release.**
 
-The stabilization and repair work that can be completed on the current Intel
-macOS Sonoma host is complete. The final Intel package passed its executable
-smoke and extended audits, both architecture-specific distributions pass static
-package validation, and no tracked test currently fails. Public release remains
-blocked by Apple signing/notarization and matching-hardware Apple Silicon launch
-validation. Service/account-specific checks remain blocked where the required
-credential, authenticated repository, Ollama installation, model, or runtime is
-not available.
+The stabilization work that can be completed on the current Intel macOS Sonoma
+host remains green, and the new separate Work Mode core is implemented and
+verified. The 0.2.0 Intel package passed both the core executable smoke and a
+dedicated packaged Work smoke. Both architecture-specific distributions pass
+static package validation, and no tracked test currently fails. Public release
+remains blocked by Apple signing/notarization and matching-hardware Apple
+Silicon launch validation. Service/account checks remain blocked where the
+required OAuth client, credential, authenticated repository, Ollama service,
+model, or runtime is unavailable.
 
-The matrix result is 114 of 129 tracked behaviors passing (88.4%). Twelve are
-externally blocked, two accurately describe capabilities that are not
-implemented or claimed, and one is partially exercised. This is not a claim that
-blocked work passed.
+The matrix result is 139 of 156 tracked behaviors passing (89.1%). Thirteen are
+externally blocked, three accurately describe capabilities that are not
+implemented or claimed, and one is partially exercised. This is not a claim
+that blocked work passed.
 
 ## Test Summary
 
 | Result | Count | Meaning |
 | --- | ---: | --- |
-| Tests passed | 114 | Observed behavior met the stated expectation |
+| Tests passed | 139 | Observed behavior met the stated expectation |
 | Tests failed | 0 | No currently tracked test has a known failing result |
-| Tests blocked | 12 | External credential, service, hardware, runtime, repository, or certificate required |
-| Tests not run / not implemented | 2 | Streaming/stop generation and layout persistence are absent and not presented as complete |
+| Tests blocked | 13 | External credential, OAuth client, service, hardware, runtime, repository, or certificate required |
+| Tests not run / not implemented | 3 | Code Chat streaming/stop, rich-document attachment extraction, and layout persistence are absent and not presented as complete |
 | Tests partially run | 1 | Failure mapping is covered, but a physically disconnected-network E2E was not performed |
 
-Automated regression result: **247 passed, 1 intentionally skipped, 0 failed**.
+Automated regression result: **350 passed, 1 intentionally skipped, 0 failed**.
 The skipped test is the native Keychain integration inside the ordinary suite;
 that behavior was executed separately with disposable credentials and passed.
 
@@ -49,25 +50,29 @@ that behavior was executed separately with disposable credentials and passed.
 | OpenAI | 🔵 Blocked for successful live response | Adapter and real stored-invalid-key/redacted-auth path passed; valid funded credential required |
 | Claude | 🔵 Blocked for live response | Adapter request/error behavior passed; valid credential required |
 | Gemini | ✅ Ready | Existing Keychain credential authenticated; real Chat, Markdown, multi-file context, and Agent workflows returned correct results |
-| AI Chat | ✅ Ready for implemented behavior | Provider switching, messages, Markdown/code, clear, context and honest errors passed; streaming/stop and restart history are not implemented |
+| Code AI Chat | ✅ Ready for implemented behavior | Account-visible model selector, provider switching, messages, Markdown/code, clear, context and honest errors passed; Code Chat streaming/stop and restart history are not implemented |
+| Work Mode | ✅ Core ready | Separate surface, persistent conversations, history/search/pin, model selectors, streaming/Stop, Copy/Edit/Regenerate, text attachments, and packaged live Gemini passed |
+| Work Agent / Tools | ✅ Ready for registered tools | Bounded provider-native tool loop, registry, schemas, scopes, permissions, redaction, cancellation, local-model gate and a real Gemini browser tool turn passed |
+| Connected Apps | 🟡 Browser ready; OAuth blocked | Managed Browser real HTTPS connect/open/read/find/disconnect passed; Google/Microsoft/Discord require registered OAuth clients and consent |
 | Workspace Indexer | ✅ Ready | Watcher freshness, ranking, ignores, binary/sensitive exclusions and responsive 1,203-file workload passed |
 | AI Agent | ✅ Ready for implemented proposal workflow | Multi-file planning, staged review, accept/undo, safe command suggestion, native approval and PTY execution passed |
 | Diff System | ✅ Ready | Modify/create/delete staging, accept/reject, filesystem match, undo and traversal denial passed |
-| Settings | ✅ Ready | User and workspace settings validation, atomic persistence, restart restoration, corrupt-input handling and mode `0600` passed |
+| Settings | ✅ Ready | User/workspace persistence, corrupt-input handling, mode `0600`, Work Mode section, Connected Apps state/actions, and dynamic model dropdowns passed |
 | Keychain | ✅ Ready | Save/read/restart/update/delete passed with disposable credentials; final leak scan found no credential outside Keychain |
 | macOS Integration | 🟡 Partially ready | Menus, dialogs, shortcuts, Finder, window lifecycle, themes and file associations passed; notifications/public trust require signed build |
-| Production Build | 🟡 Installers verified, release gate blocked | Typecheck/build and four artifacts pass; Intel launch passed; Apple Silicon launch and Apple signing/notarization remain blocked |
+| Production Build | 🟡 Installers verified, release gate blocked | Typecheck/build and four 0.2.0 artifacts pass; Intel core + Work smokes passed; Apple Silicon launch and Apple signing/notarization remain blocked |
 
 ## Release Artifacts
 
 | Target | Artifact | Size | SHA-256 |
 | --- | --- | ---: | --- |
-| Apple Silicon installer | `dist/OmniCode-0.1.1-arm64.dmg` | 143,447,563 bytes | `57953af42f987b977e9292ad3bb4a4080ab398f08b5b25e3a175151a5c466aca` |
-| Apple Silicon archive | `dist/OmniCode-0.1.1-arm64.zip` | 141,453,054 bytes | `234f8b5f7ea5654ff121d62554efd7627c3caff864a8d81b1b69318b1a6b0036` |
-| Intel installer | `dist/OmniCode-0.1.1-x64.dmg` | 147,122,375 bytes | `cc6679f091a38d46c63861ab71c308645eef5bd57a39bef7abfcde9f25f47065` |
-| Intel archive | `dist/OmniCode-0.1.1-x64.zip` | 145,169,165 bytes | `dc01cc79d0026e4487d87a2ed49696ebd1b0d873bca68b3b7aba5c6a5045b409` |
+| Apple Silicon installer | `dist/OmniCode-0.2.0-arm64.dmg` | 143,509,140 bytes | `450678b12e2a6cdc784ffca0697871ed96b34621b16685ee4a65dbf030884842` |
+| Apple Silicon archive | `dist/OmniCode-0.2.0-arm64.zip` | 141,498,951 bytes | `6608bd38b912ca27d35203de899d9eebfe284660a7c604eb1b545d41b89ea376` |
+| Intel installer | `dist/OmniCode-0.2.0-x64.dmg` | 147,183,903 bytes | `8b18d77bede8a094ca3817861808ce2030b9477f06280f27d718a494d7e2e054` |
+| Intel archive | `dist/OmniCode-0.2.0-x64.zip` | 145,215,095 bytes | `da8d185acc802800f5b150b0de3affe09866846a7c00e90a75ede86dd9e946ac` |
 
-Checksums are also recorded in `dist/SHA256SUMS.txt`.
+Checksums are recorded in `dist/SHA256SUMS.txt` and the release-specific
+`dist/SHA256SUMS-0.2.0.txt`.
 
 ## Remaining Problems
 
@@ -92,11 +97,20 @@ Checksums are also recorded in `dist/SHA256SUMS.txt`.
 8. **Physically disconnected-network E2E:** transport/rate/timeout mappings and
    real provider failures are covered; disabling the machine's network was not
    performed because it would disrupt the host session.
+9. **OAuth connected apps:** Google Workspace, Microsoft 365, and Discord need
+   registered desktop OAuth clients, redirect configuration, explicit user
+   consent/scopes, and safe accounts. They are not shown as connected.
+10. **Rich Work attachments:** bounded text/source attachments are verified;
+    PDF, Word, spreadsheet, and image extraction needs dedicated parsers and is
+    explicitly unsupported in this build.
+11. **Code Chat streaming/persistence:** Work Mode implements and verifies
+    streaming, Stop, and persistent history; the older Code Chat remains final-
+    response-only and nonpersistent, without claiming otherwise.
 
 ## Conclusion
 
-OmniCode 0.1.1 is a verified **unsigned release candidate for Intel macOS
-Sonoma**, with statically verified Apple Silicon artifacts. It is ready for the
-external signing, notarization, Apple Silicon hardware, and configured-service
-validation gates listed above. It is not yet appropriate to label as a signed,
-notarized public macOS release.
+OmniCode 0.2.0 is a verified **unsigned release candidate for Intel macOS
+Sonoma**, including the separate Work Mode core, with statically verified Apple
+Silicon artifacts. It is ready for the external signing, notarization, Apple
+Silicon hardware, OAuth, and configured-service validation gates listed above.
+It is not yet appropriate to label as a signed, notarized public macOS release.

@@ -1,6 +1,6 @@
 # OmniCode Stabilization Test Matrix
 
-Last updated: 2026-09-08
+Last updated: 2026-09-09
 
 Results are changed to **Pass** only after the recorded behavior was observed.
 “Covered” means an existing automated test exercises the code path; it does not
@@ -102,7 +102,7 @@ substitute for a real integration test where one is required.
 | AI chat | Provider/model switching | Defaults and manual changes stay coherent | Pass | Renderer unit | Five regression tests |
 | AI chat | Conversation clear/errors | UI resets and surfaces failure | Pass | Packaged live E2E + unit | Real Gemini responses reached UI; New Chat removed all messages; invalid auth and transient provider 503 produced accurate visible errors |
 | AI chat | Markdown/code blocks | Render assistant response appropriately | Pass | Unit + packaged live E2E | Real Gemini response rendered an `h2`, list items, inline code, and a language-tagged fenced JavaScript block; raw HTML stays inert and no legacy assistant `<pre>` remains |
-| AI chat | Streaming/stop | Generation updates and cancellation | Not implemented | Inspection | No UI/backend support exists |
+| Code AI chat | Streaming/stop | Generation updates and cancellation | Not implemented | Inspection | Code Chat remains request/response; Work Mode has verified streaming and Stop |
 | Context | Current/open/selected files | Inspect exact outbound request | Pass | Packaged live E2E | Consent listed exact current/open/native-picked paths and 22-character selection; Gemini verified unique tokens from every category |
 | Context | Workspace retrieval | Multi-file relevance and actual payload | Pass | Unit + packaged live E2E | Exact outbound system context inspected in unit test; real Gemini derived undisclosed TTL/table/prefix across five retrieved files after consent |
 | Context | Terminal/problems/Git | Include only explicitly selected data | Pass | Packaged live E2E | Consent reported nonzero terminal/problems/Git payloads; Gemini verified terminal marker, real TypeScript diagnostic, and changed Git filename in one request |
@@ -132,8 +132,35 @@ substitute for a real integration test where one is required.
 | Performance | Startup/idle | Time, CPU, memory | Pass | Packaged three-launch soak | Cold shell/workspace 10.5/11.2 s; warm at most 4.0/4.6 s; settled CPU 1.4–1.8%, RSS 371–376 MiB, graceful quit/helper cleanup under one second |
 | Performance | Large workspace/index/search | Responsiveness and bounds | Pass | Packaged measurement | 1,203 files: workspace open 415 ms, index 1.53 s, search 47 ms; renderer stayed responsive and results/ignores were exact |
 | Performance | Cleanup/leaks | Listeners, PTYs, servers, AI operations | Pass | Packaged soak | 8 PTYs and 3 servers created/stopped; server was not left running, app RSS settled 397→422 MiB, median idle CPU 0%, and no renderer error was captured |
-| Production | Build | Typecheck and electron-vite build | Pass | Automated | Current 0.1.1 source, including command relay and Run Log repairs |
-| Production | Intel app | Launch and core smoke on Sonoma | Pass | Automated smoke | Final x86_64 package passed startup, workspace IPC, real zsh PTY, server/public-secret boundaries, blocked external navigation, custom run pipeline/Run Log, secret scan, zero renderer errors, and clean quit |
-| Production | Apple Silicon app | Correct executable/native slices | Pass | Automated inspection | Final app executable and active `node-pty` module are arm64; matching-hardware launch remains blocked |
-| Production | Archives | DMG/ZIP integrity and checksums | Pass | Automated | Final 0.1.1 Intel/Apple Silicon DMGs mounted and verified internal checksums; both ZIPs decompressed cleanly; fresh SHA-256 sums recorded in `dist/SHA256SUMS.txt` |
+| Production | Build | Typecheck and electron-vite build | Pass | Automated | Current 0.2.0 source; 3,111 renderer modules bundled successfully |
+| Production | Intel app | Launch and core smoke on Sonoma | Pass | Automated smoke | 0.2.0 x86_64 package passed startup, workspace IPC, real zsh PTY, server/public-secret boundaries, blocked external navigation, Work Mode smoke, live Gemini streaming, and zero renderer errors |
+| Production | Apple Silicon app | Correct executable/native slices | Pass | Automated inspection | 0.2.0 app executable and active `node-pty` module are arm64; matching-hardware launch remains blocked |
+| Production | Archives | DMG/ZIP integrity and checksums | Pass | Automated | 0.2.0 Intel/Apple Silicon DMGs verified and mounted; both ZIPs decompressed cleanly; embedded versions/icons and fresh SHA-256 sums passed |
 | Production | Signing/notarization | Gatekeeper-ready public release | Blocked | External | Developer ID certificate required |
+| Modes | Separate Code and Work modes | Switch both ways without replacing Code workbench | Pass | Unit + packaged E2E | Work rendered as an independent surface; Code remained mounted and returned with its state boundary intact |
+| Work conversations | CRUD/history | Create, reopen, rename, pin, search, and delete | Pass | Unit + packaged E2E | Real packaged conversation title/message persisted, search found it, and cleanup deleted it |
+| Work conversations | Store safety | Atomic private persistence, validation, corruption recovery, bounds | Pass | Unit | Concurrent writes, mode `0600`, backups, IDs, message/conversation/store limits, and recovery are covered |
+| Work messages | Response actions | Copy, edit user turn, regenerate, and retry without duplicate exchanges | Pass | Renderer unit + live E2E | Live Gemini copy/regenerate/edit-and-retry paths reused the same exchange IDs and preserved correct history |
+| Work AI | Streaming | Forward provider deltas into the visible and persisted response | Pass | Unit + packaged live E2E | Gemini 3.7 returned the exact `OmniCode Packaged Work Test Successful` marker and streamed content matched the final response |
+| Work AI | Stop generation | Cancel in-flight request and preserve an honest partial state | Pass | Unit + live E2E | Main request was sender-bound and aborted; partial response persisted as cancelled rather than completed |
+| Work AI | Tool loop | Provider proposes registered tool, result returns, final answer renders | Pass | Unit + live E2E | Gemini 3.7 used Managed Browser on Example Domain; activity metadata recorded the successful real tool call |
+| Work AI | Tool-call safety limits | Reject duplicate calls, unknown tools, bad inputs/results, over-limit calls and cancellation | Pass | Unit | Bounded 8-step/12-call loop, 64 KB input, 256 KB result, ID validation, redaction, and abort behavior covered |
+| Work AI | Local model tool gate | Keep unknown/unsupported/uninstalled Ollama models chat-only | Pass | Unit + main-process inspection | Connected-app schemas are exposed only to an installed exact local model with explicit `toolUse: true` metadata |
+| Models | Cloud catalog | Paginate/filter/cache OpenAI, Anthropic, and Gemini models | Pass | Unit + live integration | Auth, size/time/page bounds, stale cache, fallback and redaction covered; live Google returned 20 account-visible text models |
+| Models | Work selector | Provider/model dropdown, refresh, capability and stale/error states | Pass | Renderer unit + packaged E2E | Work packaged surface rendered both selectors and used the chosen Gemini 3.7 model |
+| Models | Code Chat selector | Replace manual cloud model ID with catalog dropdown | Pass | Renderer unit + live E2E | UI exposed no raw cloud model field; selecting Gemini 3.7 produced the exact Code selector verification response |
+| Models | Settings autocomplete selector | Use provider catalog instead of raw cloud model text | Pass | Renderer unit + live UI | Google selector showed the same 20 live models and retained an explicit refresh control |
+| Connectors | Registry/state | Register, connect, verify, refresh, disconnect and reject duplicates | Pass | Unit + packaged E2E | Managed Browser reached connected only after creating its isolated page, then returned to not-connected after cleanup |
+| Tools | Registry/permissions | Validate mode/schema/scope/action/timeout/result and confirmation policy | Pass | Unit | Renderer cannot register executors; sensitive/destructive policy is enforced in the trusted process |
+| Browser connector | Real public HTTPS page | Open/read/find on Example Domain | Pass | Packaged E2E | `browser.open`, `browser.read`, and `browser.find` were registered; real title and one matching excerpt returned |
+| Browser connector | Isolation/network safety | Block HTTP, credentials, private/local addresses, redirects, popups, downloads, permissions | Pass | Unit + integration | Dedicated persistent partition is separate from normal browser state; unsafe destinations/actions are denied |
+| Work attachments | Text/source import | Private copied attachment, opaque persisted metadata, bounded provider context | Pass | Unit + live E2E | Live Markdown hidden value reached Gemini; no original path persisted or reached the renderer conversation record |
+| Work attachments | Unsafe/unsupported input | Reject traversal, symlink, binary, oversize, empty, and excessive attachments | Pass | Unit | Text/source limit is 2 MB per file and 400 KB total extracted context; errors are explicit |
+| Work attachments | PDF/Word/spreadsheet/image extraction | Extract structured document/image content | Not implemented | Inspection | Formats requiring dedicated parsers are rejected honestly rather than sent as fake or binary text |
+| Connected Apps | Settings management | Display only registered connectors and run real connect/disconnect | Pass | Renderer unit + live UI | Settings showed Managed Browser with verified state; no placeholder services were presented as connected |
+| Connected Apps | Google/Microsoft/Discord OAuth | Authenticate and call service APIs | Blocked | External | Registered desktop OAuth clients, redirect configuration, user consent, scopes and safe test accounts are required |
+| Repository import | Open existing repository | Inspect branch/sanitized origin and switch to Code/Source Control | Pass | Unit + live E2E | Real Git folder opened in Source Control; an ordinary folder opened in Explorer without false repository state |
+| Git clone | Progress/final state | Parse real clone progress and report completion only after exit 0 | Pass | Unit + live E2E | Real local bare clone emitted starting through completed 100%, opened the exact checkout, and matched origin |
+| Git clone | Cancellation | Cancel sender-owned in-flight clone without fake success | Pass | Unit + live E2E | Starting progressed to cancelling/cancelled; cancel returned true and no cloned output remained |
+| Git clone | URL/error safety | Reject insecure/credential/query URLs and redact stderr | Pass | Unit + live E2E | Invalid HTTP URL reached failed state with a generic safe message and no raw process output |
+| Production | Work Mode packaged smoke | Surface, persistence, browser connector, live Gemini, Code preservation | Pass | Packaged live E2E | 0.2.0 Intel package passed every assertion with zero renderer/log exceptions |

@@ -1,5 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
+import { randomUUID } from 'node:crypto'
 
 import type {
   AIChatRequest,
@@ -15,9 +16,16 @@ import type {
   OllamaPullResult,
   OllamaStatus
 } from '../../shared/contracts'
+import type { JsonValue, ToolDescriptor, ToolValueSchema } from '../../shared/tool-contracts'
 import { CredentialManager, CredentialNotFoundError } from './credential-manager'
 import { WorkspaceIndexer, type IndexedFile } from './workspace-indexer'
 import { detectRuntimeTool } from './runtime-manager'
+import type {
+  AIToolCall,
+  AIToolConversationMessage,
+  AIToolTurnRequest,
+  AIToolTurnResult
+} from './ai-tool-types'
 
 const DEFAULT_OLLAMA_BASE_URL = 'http://127.0.0.1:11434'
 const GIBIBYTE = 1024 ** 3
@@ -29,6 +37,7 @@ const CLOUD_PROVIDER_NAMES: Record<Exclude<AIProviderId, 'ollama'>, string> = {
   google: 'Google Gemini'
 }
 const PROVIDER_CONNECTION_TIMEOUT_MS = 10_000
+const MAX_STREAM_OUTPUT_BYTES = 2 * 1024 * 1024
 
 interface InstalledOllamaModel {
   name: string
@@ -241,6 +250,7 @@ async function fetchJson<T>(
   const externalSignal = options?.signal
   const forwardAbort = (): void => controller.abort(externalSignal?.reason)
   externalSignal?.addEventListener('abort', forwardAbort, { once: true })
+  if (externalSignal?.aborted) controller.abort(externalSignal.reason)
   try {
     const response = await fetchImplementation(url, { ...options, signal: controller.signal })
     if (!response.ok) {
@@ -252,6 +262,93 @@ async function fetchJson<T>(
     clearTimeout(timeout)
     externalSignal?.removeEventListener('abort', forwardAbort)
   }
+}
+
+async function withStreamingResponse<T>(
+  fetchImplementation: typeof fetch,
+  url: string,
+  options: RequestInit,
+  consume: (response: Response) => Promise<T>,
+  timeoutMs = 120_000
+): Promise<T> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  const externalSignal = options.signal
+  const forwardAbort = (): void => controller.abort(externalSignal?.reason)
+  externalSignal?.addEventListener('abort', forwardAbort, { once: true })
+  if (externalSignal?.aborted) controller.abort(externalSignal.reason)
+  try {
+    const response = await fetchImplementation(url, { ...options, signal: controller.signal })
+    if (!response.ok) {
+      const detail = (await response.text()).slice(0, 600)
+      throw new Error(`AI provider returned ${response.status}${detail ? `: ${detail}` : ''}`)
+    }
+    if (!response.body) throw new Error('The AI provider returned an empty response stream.')
+    return await consume(response)
+  } finally {
+    clearTimeout(timeout)
+    externalSignal?.removeEventListener('abort', forwardAbort)
+  }
+}
+
+async function readStreamLines(
+  response: Response,
+  onLine: (line: string) => void
+): Promise<void> {
+  const reader = response.body?.getReader()
+  if (!reader) throw new Error('The AI provider returned an unreadable response stream.')
+  const decoder = new TextDecoder()
+  let buffer = ''
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      buffer += done ? decoder.decode() : decoder.decode(value, { stream: true })
+      const lines = buffer.split(/\r?\n/u)
+      buffer = lines.pop() ?? ''
+      for (const line of lines) onLine(line)
+      if (done) break
+    }
+    if (buffer) onLine(buffer)
+  } catch (error) {
+    await reader.cancel().catch(() => undefined)
+    throw error
+  } finally {
+    reader.releaseLock()
+  }
+}
+
+async function readSseData(
+  response: Response,
+  onData: (data: string) => void
+): Promise<void> {
+  let dataLines: string[] = []
+  const flush = (): void => {
+    if (dataLines.length) onData(dataLines.join('\n'))
+    dataLines = []
+  }
+  await readStreamLines(response, (line) => {
+    if (!line) return flush()
+    if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart())
+  })
+  flush()
+}
+
+function appendStreamDelta(
+  current: string,
+  delta: unknown,
+  onDelta: (delta: string) => void
+): string {
+  if (typeof delta !== 'string' || !delta) return current
+  const next = current + delta
+  if (Buffer.byteLength(next, 'utf8') > MAX_STREAM_OUTPUT_BYTES) {
+    throw new Error('The AI response exceeded OmniCode’s 2 MB streaming limit.')
+  }
+  onDelta(delta)
+  return next
+}
+
+function isAbortError(error: unknown): boolean {
+  return Boolean(error && typeof error === 'object' && 'name' in error && error.name === 'AbortError')
 }
 
 export function recommendationFor(
@@ -348,6 +445,228 @@ function searchText(model: AIModel): string {
     model.codingCapability,
     ...(model.capabilities ?? [])
   ].filter(Boolean).join(' ').toLowerCase()
+}
+
+interface WireTool {
+  descriptor: ToolDescriptor
+  name: string
+}
+
+function wireTools(tools: ToolDescriptor[]): WireTool[] {
+  return tools.map((descriptor, index) => ({
+    descriptor,
+    name: `omni_${index}_${descriptor.id.replace(/[^A-Za-z0-9_-]/gu, '_')}`.slice(0, 64)
+  }))
+}
+
+function normalizedToolInput(value: unknown): Record<string, JsonValue> {
+  let candidate = value
+  if (typeof candidate === 'string') {
+    try { candidate = JSON.parse(candidate) as unknown } catch { candidate = {} }
+  }
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return {}
+  const serialized = JSON.stringify(candidate)
+  if (Buffer.byteLength(serialized, 'utf8') > 64 * 1024) throw new Error('The AI model returned an oversized tool input.')
+  return JSON.parse(serialized) as Record<string, JsonValue>
+}
+
+function normalizedCall(
+  rawName: unknown,
+  rawInput: unknown,
+  rawId: unknown,
+  tools: WireTool[],
+  providerState?: AIToolCall['providerState']
+): AIToolCall | undefined {
+  if (typeof rawName !== 'string' || !rawName || rawName.length > 128) return undefined
+  const tool = tools.find((candidate) => candidate.name === rawName)
+  const callId = typeof rawId === 'string' && rawId && rawId.length <= 200 ? rawId : randomUUID()
+  return {
+    callId,
+    name: rawName,
+    toolId: tool?.descriptor.id,
+    input: normalizedToolInput(rawInput),
+    ...(providerState ? { providerState } : {})
+  }
+}
+
+function providerToolDefinitions(tools: WireTool[]): Array<Record<string, unknown>> {
+  return tools.map(({ descriptor, name }) => ({
+    type: 'function',
+    function: {
+      name,
+      description: descriptor.description,
+      parameters: descriptor.inputSchema
+    }
+  }))
+}
+
+function openAIToolMessages(system: string, messages: AIToolConversationMessage[]): Array<Record<string, unknown>> {
+  const output: Array<Record<string, unknown>> = [{ role: 'system', content: system }]
+  for (const message of messages) {
+    if (message.role === 'user' || message.role === 'assistant') {
+      output.push({ role: message.role, content: message.content })
+    } else if (message.role === 'assistant-tool') {
+      output.push({
+        role: 'assistant',
+        content: message.content || null,
+        tool_calls: message.calls.map((call) => ({
+          id: call.callId,
+          type: 'function',
+          function: { name: call.name, arguments: JSON.stringify(call.input) }
+        }))
+      })
+    } else if (message.role === 'tool') {
+      output.push({ role: 'tool', tool_call_id: message.callId, content: message.content })
+    }
+  }
+  return output
+}
+
+function ollamaToolMessages(system: string, messages: AIToolConversationMessage[]): Array<Record<string, unknown>> {
+  const output: Array<Record<string, unknown>> = [{ role: 'system', content: system }]
+  for (const message of messages) {
+    if (message.role === 'user' || message.role === 'assistant') {
+      output.push({ role: message.role, content: message.content })
+    } else if (message.role === 'assistant-tool') {
+      output.push({
+        role: 'assistant',
+        content: message.content,
+        tool_calls: message.calls.map((call) => ({
+          type: 'function',
+          function: { name: call.name, arguments: call.input }
+        }))
+      })
+    } else if (message.role === 'tool') {
+      output.push({ role: 'tool', tool_name: message.name, content: message.content })
+    }
+  }
+  return output
+}
+
+function anthropicToolMessages(messages: AIToolConversationMessage[]): Array<Record<string, unknown>> {
+  const output: Array<Record<string, unknown>> = []
+  for (let index = 0; index < messages.length; index++) {
+    const message = messages[index]
+    if (message.role === 'user' || message.role === 'assistant') {
+      output.push({ role: message.role, content: message.content })
+      continue
+    }
+    if (message.role === 'assistant-tool') {
+      output.push({
+        role: 'assistant',
+        content: [
+          ...(message.content ? [{ type: 'text', text: message.content }] : []),
+          ...message.calls.map((call) => ({ type: 'tool_use', id: call.callId, name: call.name, input: call.input }))
+        ]
+      })
+      const toolResults: Array<Record<string, unknown>> = []
+      while (messages[index + 1]?.role === 'tool') {
+        const result = messages[++index] as Extract<AIToolConversationMessage, { role: 'tool' }>
+        toolResults.push({ type: 'tool_result', tool_use_id: result.callId, content: result.content })
+      }
+      if (toolResults.length) output.push({ role: 'user', content: toolResults })
+    }
+  }
+  return output
+}
+
+/** Gemini's `parameters` field accepts its OpenAPI subset, not arbitrary JSON Schema keywords. */
+function googleToolSchema(schema: ToolValueSchema): Record<string, unknown> {
+  const common: Record<string, unknown> = {
+    type: schema.type,
+    ...(schema.description ? { description: schema.description } : {})
+  }
+  if (schema.type === 'string') {
+    return {
+      ...common,
+      ...(schema.minLength !== undefined ? { minLength: schema.minLength } : {}),
+      ...(schema.maxLength !== undefined ? { maxLength: schema.maxLength } : {}),
+      ...(schema.enum ? { enum: schema.enum } : {}),
+      ...(schema.format ? { format: schema.format } : {})
+    }
+  }
+  if (schema.type === 'number' || schema.type === 'integer') {
+    return {
+      ...common,
+      ...(schema.minimum !== undefined ? { minimum: schema.minimum } : {}),
+      ...(schema.maximum !== undefined ? { maximum: schema.maximum } : {})
+    }
+  }
+  if (schema.type === 'array') {
+    return {
+      ...common,
+      items: googleToolSchema(schema.items),
+      ...(schema.minItems !== undefined ? { minItems: schema.minItems } : {}),
+      ...(schema.maxItems !== undefined ? { maxItems: schema.maxItems } : {})
+    }
+  }
+  if (schema.type === 'object') {
+    return {
+      ...common,
+      properties: Object.fromEntries(
+        Object.entries(schema.properties).map(([name, value]) => [name, googleToolSchema(value)])
+      ),
+      ...(schema.required ? { required: schema.required } : {})
+    }
+  }
+  return common
+}
+
+function googleFunctionResponse(content: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(content) as unknown
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : { value: parsed }
+  } catch {
+    return { value: content }
+  }
+}
+
+function googleToolMessages(messages: AIToolConversationMessage[]): Array<Record<string, unknown>> {
+  const output: Array<Record<string, unknown>> = []
+  for (let index = 0; index < messages.length; index++) {
+    const message = messages[index]
+    if (message.role === 'user' || message.role === 'assistant') {
+      output.push({ role: message.role === 'assistant' ? 'model' : 'user', parts: [{ text: message.content }] })
+      continue
+    }
+    if (message.role === 'assistant-tool') {
+      const callsById = new Map(message.calls.map((call) => [call.callId, call]))
+      output.push({
+        role: 'model',
+        parts: [
+          ...(message.content ? [{ text: message.content }] : []),
+          ...message.calls.map((call) => ({
+            functionCall: {
+              ...(call.providerState?.googleFunctionCallId
+                ? { id: call.providerState.googleFunctionCallId }
+                : {}),
+              name: call.name,
+              args: call.input
+            },
+            ...(call.providerState?.googleThoughtSignature
+              ? { thoughtSignature: call.providerState.googleThoughtSignature }
+              : {})
+          }))
+        ]
+      })
+      const parts: Array<Record<string, unknown>> = []
+      while (messages[index + 1]?.role === 'tool') {
+        const result = messages[++index] as Extract<AIToolConversationMessage, { role: 'tool' }>
+        const providerCallId = callsById.get(result.callId)?.providerState?.googleFunctionCallId
+        parts.push({
+          functionResponse: {
+            ...(providerCallId ? { id: providerCallId } : {}),
+            name: result.name,
+            response: googleFunctionResponse(result.content)
+          }
+        })
+      }
+      if (parts.length) output.push({ role: 'user', parts })
+    }
+  }
+  return output
 }
 
 export class AIManager {
@@ -742,6 +1061,36 @@ export class AIManager {
     return { content, contextFiles: contextFiles.map((file) => file.path) }
   }
 
+  /**
+   * Stream a plain chat response using the provider's real streaming protocol.
+   * Work Agent tool rounds remain provider-native tool calls; this path is used
+   * when no connected Work tools are available.
+   */
+  async streamChat(
+    request: AIChatRequest,
+    onDelta: (delta: string) => void,
+    signal?: AbortSignal
+  ): Promise<AIChatResponse> {
+    if (!request || !['ollama', 'openai', 'anthropic', 'google'].includes(request.provider)) throw new Error('Choose a supported AI provider.')
+    if (typeof request.model !== 'string' || !MODEL_NAME_PATTERN.test(request.model.trim())) throw new Error('Select a valid AI model before sending a message.')
+    if (!Array.isArray(request.messages) || request.messages.length === 0 || request.messages.length > 100) throw new Error('The AI conversation is empty or too long.')
+    let messageBytes = 0
+    for (const message of request.messages) {
+      if (!message || !['system', 'user', 'assistant'].includes(message.role) || typeof message.content !== 'string' || message.content.includes('\0')) {
+        throw new Error('The AI conversation contains an invalid message.')
+      }
+      messageBytes += Buffer.byteLength(message.content, 'utf8')
+    }
+    if (messageBytes > 512 * 1024) throw new Error('The AI conversation exceeds the 512 KB request limit.')
+    if (request.attachedPaths?.length || request.attachWorkspaceContext) {
+      throw new Error('Streaming workspace attachments must be prepared through the shared chat context path.')
+    }
+    if (typeof onDelta !== 'function') throw new Error('A streaming response callback is required.')
+    if (signal?.aborted) throw signal.reason ?? new DOMException('Generation cancelled.', 'AbortError')
+    const content = await this.sendStream(request.provider, request.model.trim(), request.messages, onDelta, signal)
+    return { content, contextFiles: [] }
+  }
+
   setCredential(provider: Exclude<AIProviderId, 'ollama'>, key: string): Promise<void> {
     return this.credentials.set(cloudProvider(provider), key)
   }
@@ -818,6 +1167,326 @@ export class AIManager {
     return sections.join('\n\n')
   }
 
+  async toolTurn(
+    request: AIToolTurnRequest,
+    options: { signal?: AbortSignal } = {}
+  ): Promise<AIToolTurnResult> {
+    if (!request || !['ollama', 'openai', 'anthropic', 'google'].includes(request.provider)) throw new Error('Choose a supported Work AI provider.')
+    if (typeof request.model !== 'string' || !MODEL_NAME_PATTERN.test(request.model.trim())) throw new Error('Choose a valid Work AI model.')
+    if (typeof request.system !== 'string' || request.system.length > 32 * 1024 || request.system.includes('\0')) throw new Error('The Work agent instructions are invalid or too large.')
+    if (!Array.isArray(request.messages) || !request.messages.length || request.messages.length > 160) throw new Error('The Work agent conversation is empty or too long.')
+    if (!Array.isArray(request.tools) || !request.tools.length || request.tools.length > 64) throw new Error('The Work agent tool list is empty or too large.')
+    const payloadBytes = Buffer.byteLength(JSON.stringify({ messages: request.messages, tools: request.tools }), 'utf8')
+    if (payloadBytes > 1024 * 1024) throw new Error('The Work agent request exceeds the 1 MB safety limit.')
+
+    const tools = wireTools(request.tools)
+    const model = request.model.trim()
+    if (request.provider === 'ollama') {
+      try {
+        const response = await fetchJson<{
+          done_reason?: string
+          message?: {
+            content?: string
+            tool_calls?: Array<{ id?: unknown; function?: { name?: unknown; arguments?: unknown } }>
+          }
+        }>(this.#fetch, `${this.#ollamaBaseUrl}/api/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model,
+            stream: false,
+            messages: ollamaToolMessages(request.system, request.messages),
+            tools: providerToolDefinitions(tools)
+          }),
+          signal: options.signal
+        }, 180_000)
+        const rawCalls = Array.isArray(response.message?.tool_calls) ? response.message.tool_calls : []
+        const calls = rawCalls.slice(0, 16).flatMap((call) => {
+          const normalized = normalizedCall(call.function?.name, call.function?.arguments, call.id, tools)
+          return normalized ? [normalized] : []
+        })
+        const content = typeof response.message?.content === 'string' ? response.message.content : ''
+        if (!calls.length && !content.trim()) throw new Error(`Ollama returned no text or tool call${response.done_reason ? ` (${response.done_reason})` : ''}.`)
+        return { content, calls, stopReason: response.done_reason }
+      } catch (error) {
+        if (isAbortError(error) || options.signal?.aborted) throw error
+        if (error instanceof Error && (error.message.startsWith('AI provider returned ') || error.message.startsWith('Ollama returned '))) throw error
+        const status = await this.ollamaStatus().catch(() => ({ installed: false, available: false }))
+        throw new Error(status.installed
+          ? 'Ollama is installed, but its local service is unavailable. Start Ollama and try again.'
+          : 'Ollama is not installed. Install it from Setup or Tools & Runtimes before using Local AI.')
+      }
+    }
+
+    const provider = cloudProvider(request.provider)
+    const key = await this.cloudCredential(provider)
+    if (provider === 'openai') {
+      const response = await fetchJson<{
+        choices?: Array<{
+          finish_reason?: string
+          message?: {
+            content?: string | null
+            refusal?: string | null
+            tool_calls?: Array<{ id?: unknown; function?: { name?: unknown; arguments?: unknown } }>
+          }
+        }>
+      }>(this.#fetch, 'https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+        body: JSON.stringify({
+          model,
+          messages: openAIToolMessages(request.system, request.messages),
+          tools: providerToolDefinitions(tools),
+          tool_choice: 'auto'
+        }),
+        signal: options.signal
+      })
+      const choice = response.choices?.[0]
+      const rawCalls = Array.isArray(choice?.message?.tool_calls) ? choice.message.tool_calls : []
+      const calls = rawCalls.slice(0, 16).flatMap((call) => {
+        const normalized = normalizedCall(call.function?.name, call.function?.arguments, call.id, tools)
+        return normalized ? [normalized] : []
+      })
+      const content = choice?.message?.content || choice?.message?.refusal || ''
+      if (!calls.length) return { content: cloudReply(provider, content, choice?.finish_reason), calls: [], stopReason: choice?.finish_reason }
+      return { content, calls, stopReason: choice?.finish_reason }
+    }
+
+    if (provider === 'anthropic') {
+      const response = await fetchJson<{
+        stop_reason?: string
+        content?: Array<{ type?: unknown; text?: unknown; id?: unknown; name?: unknown; input?: unknown }>
+      }>(this.#fetch, 'https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({
+          model,
+          max_tokens: 4096,
+          system: request.system,
+          messages: anthropicToolMessages(request.messages),
+          tools: tools.map(({ descriptor, name }) => ({
+            name,
+            description: descriptor.description,
+            input_schema: descriptor.inputSchema
+          }))
+        }),
+        signal: options.signal
+      })
+      const blocks = Array.isArray(response.content) ? response.content : []
+      const content = blocks.filter((block) => block.type === 'text' && typeof block.text === 'string').map((block) => block.text as string).join('\n')
+      const calls = blocks.filter((block) => block.type === 'tool_use').slice(0, 16).flatMap((block) => {
+        const normalized = normalizedCall(block.name, block.input, block.id, tools)
+        return normalized ? [normalized] : []
+      })
+      if (!calls.length) return { content: cloudReply(provider, content, response.stop_reason), calls: [], stopReason: response.stop_reason }
+      return { content, calls, stopReason: response.stop_reason }
+    }
+
+    const response = await fetchJson<{
+      promptFeedback?: { blockReason?: string }
+      candidates?: Array<{
+        finishReason?: string
+        content?: { parts?: Array<{
+          text?: unknown
+          thought?: boolean
+          thoughtSignature?: unknown
+          functionCall?: { id?: unknown; name?: unknown; args?: unknown }
+        }> }
+      }>
+    }>(this.#fetch, `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: request.system }] },
+        contents: googleToolMessages(request.messages),
+        tools: [{ functionDeclarations: tools.map(({ descriptor, name }) => ({
+          name,
+          description: descriptor.description,
+          parameters: googleToolSchema(descriptor.inputSchema)
+        })) }],
+        toolConfig: { functionCallingConfig: { mode: 'AUTO' } }
+      }),
+      signal: options.signal
+    })
+    const candidate = response.candidates?.[0]
+    const parts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : []
+    const content = parts.filter((part) => typeof part.text === 'string' && !part.thought).map((part) => part.text as string).join('')
+    const calls = parts.filter((part) => part.functionCall).slice(0, 16).flatMap((part) => {
+      const googleFunctionCallId = typeof part.functionCall?.id === 'string' && part.functionCall.id && part.functionCall.id.length <= 200
+        ? part.functionCall.id
+        : undefined
+      const googleThoughtSignature = typeof part.thoughtSignature === 'string' && part.thoughtSignature && part.thoughtSignature.length <= 256 * 1024
+        ? part.thoughtSignature
+        : undefined
+      const providerState = googleFunctionCallId || googleThoughtSignature
+        ? { googleFunctionCallId, googleThoughtSignature }
+        : undefined
+      const normalized = normalizedCall(
+        part.functionCall?.name,
+        part.functionCall?.args,
+        googleFunctionCallId,
+        tools,
+        providerState
+      )
+      return normalized ? [normalized] : []
+    })
+    const stopReason = response.promptFeedback?.blockReason || candidate?.finishReason
+    if (!calls.length) return { content: cloudReply(provider, content, stopReason), calls: [], stopReason }
+    return { content, calls, stopReason }
+  }
+
+  private async cloudCredential(provider: Exclude<AIProviderId, 'ollama'>): Promise<string> {
+    try {
+      return await this.credentials.get(provider)
+    } catch (error) {
+      if (error instanceof CredentialNotFoundError) {
+        throw new Error(`No ${CLOUD_PROVIDER_NAMES[provider]} API key is stored. Add one in Settings → AI Providers.`)
+      }
+      const detail = error instanceof Error ? error.message : String(error)
+      throw new Error(`OmniCode could not read the ${CLOUD_PROVIDER_NAMES[provider]} API key from macOS Keychain: ${detail}`)
+    }
+  }
+
+  private async sendStream(
+    provider: AIProviderId,
+    model: string,
+    messages: AIMessage[],
+    onDelta: (delta: string) => void,
+    signal?: AbortSignal
+  ): Promise<string> {
+    let content = ''
+    const append = (delta: unknown): void => {
+      content = appendStreamDelta(content, delta, onDelta)
+    }
+
+    if (provider === 'ollama') {
+      try {
+        await withStreamingResponse(this.#fetch, `${this.#ollamaBaseUrl}/api/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model, messages, stream: true }),
+          signal
+        }, async (response) => {
+          await readStreamLines(response, (line) => {
+            if (!line.trim()) return
+            let wire: { error?: unknown; done_reason?: unknown; message?: { content?: unknown } }
+            try { wire = JSON.parse(line) as typeof wire } catch { throw new Error('Ollama returned malformed streaming data.') }
+            if (typeof wire.error === 'string' && wire.error.trim()) throw new Error(`Ollama returned an error: ${wire.error.trim().slice(0, 600)}`)
+            append(wire.message?.content)
+          })
+        }, 180_000)
+      } catch (error) {
+        if (isAbortError(error) || signal?.aborted) throw error
+        if (error instanceof Error && (error.message.startsWith('AI provider returned ') || error.message.startsWith('Ollama returned '))) throw error
+        const status = await this.ollamaStatus().catch(() => ({ installed: false, available: false }))
+        throw new Error(status.installed
+          ? 'Ollama is installed, but its local service is unavailable. Start Ollama and try again.'
+          : 'Ollama is not installed. Install it from Setup or Tools & Runtimes before using Local AI.')
+      }
+      if (!content.trim()) throw new Error('Ollama returned no text.')
+      return content
+    }
+
+    const cloud = cloudProvider(provider)
+    const key = await this.cloudCredential(cloud)
+    if (cloud === 'openai') {
+      let finishReason: string | undefined
+      await withStreamingResponse(this.#fetch, 'https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+        body: JSON.stringify({ model, messages, stream: true }),
+        signal
+      }, async (response) => {
+        await readSseData(response, (data) => {
+          if (data === '[DONE]') return
+          let wire: {
+            error?: { message?: unknown }
+            choices?: Array<{ finish_reason?: unknown; delta?: { content?: unknown; refusal?: unknown } }>
+          }
+          try { wire = JSON.parse(data) as typeof wire } catch { throw new Error('OpenAI returned malformed streaming data.') }
+          if (typeof wire.error?.message === 'string') throw new Error(`OpenAI streaming failed: ${wire.error.message.slice(0, 600)}`)
+          const choice = wire.choices?.[0]
+          if (typeof choice?.finish_reason === 'string') finishReason = choice.finish_reason
+          append(choice?.delta?.content ?? choice?.delta?.refusal)
+        })
+      })
+      return cloudReply(cloud, content, finishReason)
+    }
+
+    if (cloud === 'anthropic') {
+      const system = messages.filter((message) => message.role === 'system').map((message) => message.content).join('\n\n')
+      let stopReason: string | undefined
+      await withStreamingResponse(this.#fetch, 'https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({
+          model,
+          max_tokens: 4096,
+          system,
+          messages: messages.filter((message) => message.role !== 'system'),
+          stream: true
+        }),
+        signal
+      }, async (response) => {
+        await readSseData(response, (data) => {
+          let wire: {
+            type?: unknown
+            error?: { message?: unknown }
+            delta?: { type?: unknown; text?: unknown; stop_reason?: unknown }
+          }
+          try { wire = JSON.parse(data) as typeof wire } catch { throw new Error('Anthropic returned malformed streaming data.') }
+          if (wire.type === 'error') {
+            const detail = typeof wire.error?.message === 'string' ? wire.error.message.slice(0, 600) : 'unknown provider error'
+            throw new Error(`Anthropic streaming failed: ${detail}`)
+          }
+          if (wire.delta?.type === 'text_delta') append(wire.delta.text)
+          if (typeof wire.delta?.stop_reason === 'string') stopReason = wire.delta.stop_reason
+        })
+      })
+      return cloudReply(cloud, content, stopReason)
+    }
+
+    const system = messages.filter((message) => message.role === 'system').map((message) => message.content).join('\n\n')
+    let finishReason: string | undefined
+    await withStreamingResponse(
+      this.#fetch,
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+        body: JSON.stringify({
+          systemInstruction: system ? { parts: [{ text: system }] } : undefined,
+          contents: messages.filter((message) => message.role !== 'system').map((message) => ({
+            role: message.role === 'assistant' ? 'model' : 'user',
+            parts: [{ text: message.content }]
+          }))
+        }),
+        signal
+      },
+      async (response) => {
+        await readSseData(response, (data) => {
+          let wire: {
+            error?: { message?: unknown }
+            promptFeedback?: { blockReason?: unknown }
+            candidates?: Array<{
+              finishReason?: unknown
+              content?: { parts?: Array<{ text?: unknown; thought?: boolean }> }
+            }>
+          }
+          try { wire = JSON.parse(data) as typeof wire } catch { throw new Error('Google Gemini returned malformed streaming data.') }
+          if (typeof wire.error?.message === 'string') throw new Error(`Google Gemini streaming failed: ${wire.error.message.slice(0, 600)}`)
+          const candidate = wire.candidates?.[0]
+          if (typeof candidate?.finishReason === 'string') finishReason = candidate.finishReason
+          if (typeof wire.promptFeedback?.blockReason === 'string') finishReason = wire.promptFeedback.blockReason
+          for (const part of candidate?.content?.parts ?? []) {
+            if (!part.thought) append(part.text)
+          }
+        })
+      }
+    )
+    return cloudReply(cloud, content, finishReason)
+  }
+
   private async send(provider: AIProviderId, model: string, messages: AIMessage[]): Promise<string> {
     if (provider === 'ollama') {
       try {
@@ -835,16 +1504,7 @@ export class AIManager {
       }
     }
 
-    let key: string
-    try {
-      key = await this.credentials.get(provider)
-    } catch (error) {
-      if (error instanceof CredentialNotFoundError) {
-        throw new Error(`No ${CLOUD_PROVIDER_NAMES[provider]} API key is stored. Add one in Settings → AI Providers.`)
-      }
-      const detail = error instanceof Error ? error.message : String(error)
-      throw new Error(`OmniCode could not read the ${CLOUD_PROVIDER_NAMES[provider]} API key from macOS Keychain: ${detail}`)
-    }
+    const key = await this.cloudCredential(provider)
 
     if (provider === 'openai') {
       const response = await fetchJson<{ choices?: Array<{ finish_reason?: string; message?: { content?: string | null; refusal?: string | null } }> }>(this.#fetch, 'https://api.openai.com/v1/chat/completions', {
