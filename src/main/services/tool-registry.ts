@@ -113,7 +113,11 @@ export class ToolRegistry {
       .map((tool) => ({ ...tool, modes: [...tool.modes], requiredScopes: [...tool.requiredScopes] }))
   }
 
-  async execute(request: ToolExecutionRequest, authorization: ToolAuthorizationContext): Promise<ToolExecutionResult> {
+  async execute(
+    request: ToolExecutionRequest,
+    authorization: ToolAuthorizationContext,
+    options: { signal?: AbortSignal } = {}
+  ): Promise<ToolExecutionResult> {
     const registered = this.#tools.get(request.toolId)
     if (!registered) throw new Error('The requested Work tool is not registered.')
     if (!registered.descriptor.modes.includes(request.mode)) throw new Error(`${registered.descriptor.name} is not available in ${request.mode} mode.`)
@@ -130,13 +134,19 @@ export class ToolRegistry {
     await this.permissions.authorize(registered.descriptor, normalized as Record<string, JsonValue>, authorization)
 
     const controller = new AbortController()
+    const abortFromCaller = (): void => controller.abort(options.signal?.reason ?? new DOMException('Tool execution cancelled.', 'AbortError'))
+    if (options.signal?.aborted) abortFromCaller()
+    else options.signal?.addEventListener('abort', abortFromCaller, { once: true })
     const timeoutMs = registered.descriptor.timeoutMs ?? DEFAULT_TIMEOUT_MS
     const timeout = setTimeout(() => controller.abort(new Error('Tool execution timed out.')), timeoutMs)
     const startedAt = new Date().toISOString()
     try {
+      const aborted = controller.signal.aborted
+        ? Promise.reject(controller.signal.reason)
+        : new Promise<never>((_resolve, reject) => controller.signal.addEventListener('abort', () => reject(controller.signal.reason), { once: true }))
       const result = await Promise.race([
         registered.executor(normalized as Record<string, JsonValue>, { mode: request.mode, signal: controller.signal }),
-        new Promise<never>((_resolve, reject) => controller.signal.addEventListener('abort', () => reject(controller.signal.reason), { once: true }))
+        aborted
       ])
       const checked = registered.descriptor.resultSchema
         ? validateSchema(registered.descriptor.resultSchema, result, 'result')
@@ -153,6 +163,7 @@ export class ToolRegistry {
       return { toolId: request.toolId, startedAt, completedAt: new Date().toISOString(), result: checked }
     } finally {
       clearTimeout(timeout)
+      options.signal?.removeEventListener('abort', abortFromCaller)
     }
   }
 }

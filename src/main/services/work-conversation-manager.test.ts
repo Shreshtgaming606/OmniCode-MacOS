@@ -80,6 +80,10 @@ describe('WorkConversationManager', () => {
       name: 'Read document',
       status: 'succeeded',
       summary: 'Read the selected document.',
+      preview: {
+        kind: 'drive-file', label: 'Google Drive file', count: 1,
+        items: [{ title: 'agenda.pdf', subtitle: 'application/pdf', metadata: '42 KB' }]
+      },
       createdAt: 1_700_000_000_101,
       completedAt: 1_700_000_000_102
     }
@@ -97,7 +101,10 @@ describe('WorkConversationManager', () => {
     expect(reopened.messages[0]).toMatchObject({
       role: 'assistant', content: 'The launch date is Friday.', status: 'complete',
       attachments: [{ name: 'agenda.pdf', resourceId: 'drive-file-42' }],
-      toolActivities: [{ name: 'Read document', status: 'succeeded' }]
+      toolActivities: [{
+        name: 'Read document', status: 'succeeded',
+        preview: { kind: 'drive-file', items: [{ title: 'agenda.pdf' }] }
+      }]
     })
     expect(await manager.search({ query: 'LAUNCH DATE' })).toEqual([
       expect.objectContaining({ id: conversation.id, messageCount: 2 })
@@ -164,6 +171,12 @@ describe('WorkConversationManager', () => {
         id: 'activity-1', toolId: 'mail-send', name: 'Send mail', status: 'approved' as 'pending', createdAt: 1
       }]
     })).toThrow(/status is invalid/i)
+    expect(() => manager.addMessage(conversation.id, {
+      role: 'assistant', content: '', toolActivities: [{
+        id: 'activity-2', toolId: 'gmail.search', name: 'Search mail', status: 'succeeded', createdAt: 1,
+        preview: { kind: 'gmail-messages', label: 'Results', items: [{ title: 'Safe', messageId: 'must-not-persist' }] }
+      }]
+    } as never)).toThrow(/unsupported field: messageId/i)
   })
 
   it('enforces conversation and message count limits from persisted data', async () => {

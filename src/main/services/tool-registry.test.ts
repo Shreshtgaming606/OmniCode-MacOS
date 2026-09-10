@@ -74,4 +74,23 @@ describe('ToolRegistry', () => {
       { accessLevel: 'trusted', confirm: async () => true }
     )).rejects.toThrow(/not available in code mode/i)
   })
+
+  it('propagates caller cancellation to the main-process tool executor', async () => {
+    const registry = new ToolRegistry()
+    let executorSignal: AbortSignal | undefined
+    registry.register(browserTool(), async (_input, context) => {
+      executorSignal = context.signal
+      return new Promise((_resolve, reject) => context.signal.addEventListener('abort', () => reject(context.signal.reason), { once: true }))
+    })
+    const controller = new AbortController()
+    const execution = registry.execute(
+      { toolId: 'browser.open', mode: 'work', input: { url: 'https://example.com/' } },
+      { accessLevel: 'read-only', confirm: vi.fn() },
+      { signal: controller.signal }
+    )
+    controller.abort(new DOMException('Generation cancelled.', 'AbortError'))
+
+    await expect(execution).rejects.toThrow('Generation cancelled')
+    expect(executorSignal?.aborted).toBe(true)
+  })
 })

@@ -4,7 +4,7 @@ import type { CancellationToken, Position, editor, languages } from 'monaco-edit
 import {
   Bot, Bug, ChevronDown, CircleAlert, CircleDot, Code2, Command, Cpu, FileCode2, Files,
   GitBranch, Menu, PanelBottom, Play, Plus, Save, Search, Settings, Sparkles, TerminalSquare,
-  X, Boxes, FolderOpen, GitFork, Server, CheckCircle2, LoaderCircle
+  X, Boxes, FolderOpen, GitFork, Server, CheckCircle2, LoaderCircle, Info, TriangleAlert
 } from 'lucide-react'
 import type {
   AIModel, AIProviderId, DevServerOption, DiffProposal, FileNode, GitCloneProgress, GitStatus, OllamaPullProgress, PackageScript, ServerState, ThemePreference, ToolInfo, ToolInstallationProgress, WorkspaceSettings
@@ -37,6 +37,8 @@ interface OpenDocument {
 }
 
 interface CursorPosition { line: number; column: number }
+type ToastKind = 'success' | 'error' | 'warning' | 'info'
+interface ToastState { message: string; kind: ToastKind }
 interface ModalInput { title: string; label: string; value: string; confirmLabel: string; onConfirm(value: string): void; onCancel?(): void }
 interface InlineEditState {
   phase: 'prompt' | 'loading' | 'review'
@@ -86,6 +88,16 @@ function ActivityButton({ id, current, label, badge, onClick, children }: {
   return <button className={`activity-button ${current === id ? 'active' : ''}`} title={label} aria-label={label} aria-pressed={current === id} onClick={onClick}>{children}{badge ? <span className="activity-badge">{badge}</span> : null}</button>
 }
 
+function ToastNotice({ toast, onClose }: { toast: ToastState; onClose(): void }) {
+  const Icon = toast.kind === 'success' ? CheckCircle2 : toast.kind === 'warning' ? TriangleAlert : toast.kind === 'info' ? Info : CircleAlert
+  const label = toast.kind === 'success' ? 'Success' : toast.kind === 'warning' ? 'Warning' : toast.kind === 'info' ? 'Information' : 'Error'
+  return <div className={`toast ${toast.kind}`} role={toast.kind === 'error' ? 'alert' : 'status'} aria-live={toast.kind === 'error' ? 'assertive' : 'polite'}>
+    <Icon aria-hidden="true" />
+    <span><strong>{label}</strong><small>{toast.message}</small></span>
+    <button type="button" title="Dismiss notification" aria-label="Dismiss notification" onClick={onClose}><X /></button>
+  </div>
+}
+
 export function App() {
   const [appMode, setAppMode] = useState<AppMode>(() => storedAppMode(localStorage))
   const [workspacePath, setWorkspacePath] = useState<string | null>(null)
@@ -124,7 +136,7 @@ export function App() {
   const [problems, setProblems] = useState<editor.IMarker[]>([])
   const [outputs, setOutputs] = useState<string[]>(['OmniCode output channels are ready.'])
   const [terminalOutput, setTerminalOutput] = useState('')
-  const [toast, setToast] = useState<{ message: string; kind: 'error' | 'info' } | null>(null)
+  const [toast, setToast] = useState<ToastState | null>(null)
   const [cloneProgress, setCloneProgress] = useState<GitCloneProgress | null>(null)
   const [modalInput, setModalInput] = useState<ModalInput | null>(null)
   const [palette, setPalette] = useState<'commands' | 'files' | null>(null)
@@ -295,7 +307,7 @@ export function App() {
         message: unchangedWhileSaving
           ? `Saved ${fileName(path)}`
           : `Saved the prior version of ${fileName(path)}; save again to include edits made during the save.`,
-        kind: 'info'
+        kind: unchangedWhileSaving ? 'success' : 'warning'
       })
       return unchangedWhileSaving
     } catch (cause) {
@@ -340,7 +352,7 @@ export function App() {
     if (changedWhileSaving) throw new Error('A file changed while OmniCode was saving. Review the latest edits and try the Agent task again.')
     const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected')
     if (failure) throw failure.reason
-    setToast({ message: `Saved ${saved.length} file${saved.length === 1 ? '' : 's'} before Agent planning.`, kind: 'info' })
+    setToast({ message: `Saved ${saved.length} file${saved.length === 1 ? '' : 's'} before Agent planning.`, kind: 'success' })
   }, [documents])
 
   const closeDocument = useCallback((path = activePath): void => {
@@ -462,6 +474,24 @@ export function App() {
     return () => window.removeEventListener('keydown', handleKeyDown, true)
   }, [handleInlineAI])
 
+  useEffect(() => {
+    const dismissOverlay = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return
+      if (inlineEdit) {
+        event.preventDefault()
+        setInlineEdit(null)
+      } else if (showHelp) {
+        event.preventDefault()
+        setShowHelp(false)
+      } else if (palette) {
+        event.preventDefault()
+        setPalette(null)
+      }
+    }
+    window.addEventListener('keydown', dismissOverlay, true)
+    return () => window.removeEventListener('keydown', dismissOverlay, true)
+  }, [inlineEdit, palette, showHelp])
+
   const submitInlineAI = async (): Promise<void> => {
     if (!inlineEdit || !activeDocument) return
     const instruction = inlineEdit.instruction.trim()
@@ -580,7 +610,7 @@ export function App() {
       setActivity('source')
       setSidebarVisible(true)
       setCloneProgress(null)
-      setToast({ message: `Cloned and opened ${fileName(cloned)}.`, kind: 'info' })
+      setToast({ message: `Cloned and opened ${fileName(cloned)}.`, kind: 'success' })
       return true
     }
     catch (cause) {
@@ -601,7 +631,7 @@ export function App() {
         setActivity('source')
         setSidebarVisible(true)
         const remote = info.host === 'github' ? ' GitHub' : info.host === 'other' ? ' remote' : ''
-        setToast({ message: `Opened${remote} repository on ${info.branch || 'HEAD'}.`, kind: 'info' })
+        setToast({ message: `Opened${remote} repository on ${info.branch || 'HEAD'}.`, kind: 'success' })
       } else {
         setActivity('explorer')
         setToast({ message: 'Opened the folder normally; it is not a Git repository.', kind: 'info' })
@@ -1016,6 +1046,6 @@ export function App() {
     {inlineEdit && <div className="inline-ai-overlay"><div className={`inline-ai-dialog ${inlineEdit.phase === 'review' ? 'review' : ''}`}><header><Sparkles /><strong>OmniCode Inline Edit</strong><span className="privacy-badge local"><Cpu /> LOCAL</span><button onClick={() => setInlineEdit(null)}><X /></button></header>{inlineEdit.phase !== 'review' ? <><textarea autoFocus value={inlineEdit.instruction} disabled={inlineEdit.phase === 'loading'} onChange={(event) => setInlineEdit({ ...inlineEdit, instruction: event.target.value })} placeholder="Describe the change…" />{inlineEdit.error && <div className="inline-error">{inlineEdit.error}</div>}<footer><span>{inlineEdit.original.split('\n').length} selected line(s)</span><button onClick={() => setInlineEdit(null)}>Cancel</button><button className="primary-button" disabled={!inlineEdit.instruction.trim() || inlineEdit.phase === 'loading'} onClick={() => void submitInlineAI()}>{inlineEdit.phase === 'loading' ? 'Generating…' : 'Generate Diff'}</button></footer></> : <><div className="diff-host"><DiffEditor original={inlineEdit.original} modified={inlineEdit.proposal} language={activeDocument ? languageForPath(activeDocument.path) : 'plaintext'} theme={dark ? 'vs-dark' : 'light'} options={{ automaticLayout: true, readOnly: true, minimap: { enabled: false }, renderSideBySide: true, fontSize: 12 }} /></div><footer><span>Review the proposed replacement before applying.</span><button onClick={() => setInlineEdit(null)}>Reject</button><button className="primary-button" onClick={acceptInlineAI}>Accept Change</button></footer></>}</div></div>}
     {diffProposalId && <div className="change-review-overlay"><div className="change-review-dialog"><DiffReview proposalId={diffProposalId} onClose={() => setDiffProposalId(null)} onProposalChange={handleProposalChange} /></div></div>}
     {showSettings && <SettingsPanel workspacePath={workspacePath} theme={theme} autosave={autosave} permission={permission} aiAutocomplete={aiAutocomplete} autocompleteProvider={autocompleteProvider} autocompleteModel={autocompleteModel} onTheme={setTheme} onAutosave={setAutosave} onPermission={setPermission} onAIAutocomplete={setAiAutocomplete} onAutocompleteProvider={setAutocompleteProvider} onAutocompleteModel={setAutocompleteModel} onWorkspaceSettings={applyWorkspaceSettings} onClose={() => setShowSettings(false)} />}
-    {toast && <div className={`toast ${toast.kind}`}><CircleAlert />{toast.message}</div>}
+    {toast && <ToastNotice toast={toast} onClose={() => setToast(null)} />}
   </div>
 }

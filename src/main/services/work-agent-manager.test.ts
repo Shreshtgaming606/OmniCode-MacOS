@@ -16,6 +16,22 @@ const browserTool: ToolDescriptor = {
   inputSchema: { type: 'object', properties: {}, additionalProperties: false }
 }
 
+const gmailSearchTool: ToolDescriptor = {
+  ...browserTool,
+  id: 'gmail.search',
+  name: 'Search Gmail',
+  description: 'Search Gmail.',
+  connectorId: 'gmail'
+}
+
+const driveSearchTool: ToolDescriptor = {
+  ...browserTool,
+  id: 'drive.search',
+  name: 'Search Google Drive',
+  description: 'Search Drive.',
+  connectorId: 'google-drive'
+}
+
 describe('Work model tool boundary', () => {
   it('keeps unknown or unsupported local models chat-only', () => {
     expect(modelCanUseWorkTools('ollama', 'unknown-local', [
@@ -58,6 +74,53 @@ describe('WorkAgentManager', () => {
     expect(response.toolActivities).toMatchObject([{ toolId: 'browser.read', status: 'succeeded' }])
     expect(execute).toHaveBeenCalledWith({ toolId: 'browser.read', mode: 'work', input: {} })
     expect(response.toolActivities[0]).not.toHaveProperty('result')
+  })
+
+  it('projects Gmail results into bounded display cards without persisting internal IDs or raw bodies', async () => {
+    const toolTurn = vi.fn()
+      .mockResolvedValueOnce({ content: '', calls: [{ callId: 'call-1', name: 'tool_0_gmail_search', toolId: 'gmail.search', input: { query: 'launch', maximum: 10 } }] })
+      .mockResolvedValueOnce({ content: 'I found the launch message.', calls: [] })
+    const manager = new WorkAgentManager({ toolTurn } as unknown as AIManager)
+
+    const response = await manager.chat({
+      provider: 'google', model: 'gemini-test', messages: [{ role: 'user', content: 'Find the launch email.' }]
+    }, [gmailSearchTool], async () => ({
+      toolId: 'gmail.search', startedAt: '2026-01-01T00:00:00Z', completedAt: '2026-01-01T00:00:01Z',
+      result: {
+        messages: [{ id: 'internal-message-17', threadId: 'internal-thread-12', from: 'Alex <alex@example.com>', subject: 'Launch plan', date: 'Today', snippet: 'The release candidate is ready.', body: 'RAW BODY MUST NOT PERSIST' }],
+        resultSizeEstimate: 6,
+        untrustedContent: true
+      }
+    }))
+
+    expect(response.toolActivities[0]?.preview).toEqual({
+      kind: 'gmail-messages', label: 'Gmail results', count: 6, truncated: true,
+      items: [{ title: 'Launch plan', subtitle: 'Alex <alex@example.com>', detail: 'The release candidate is ready.', metadata: 'Today' }]
+    })
+    expect(JSON.stringify(response)).not.toContain('internal-message-17')
+    expect(JSON.stringify(response)).not.toContain('internal-thread-12')
+    expect(JSON.stringify(response)).not.toContain('RAW BODY MUST NOT PERSIST')
+  })
+
+  it('projects Drive results into file cards without persisting provider IDs or links', async () => {
+    const toolTurn = vi.fn()
+      .mockResolvedValueOnce({ content: '', calls: [{ callId: 'call-1', name: 'tool_0_drive_search', toolId: 'drive.search', input: { query: 'resume', maximum: 5 } }] })
+      .mockResolvedValueOnce({ content: 'I found your resume.', calls: [] })
+    const manager = new WorkAgentManager({ toolTurn } as unknown as AIManager)
+
+    const response = await manager.chat({
+      provider: 'google', model: 'gemini-test', messages: [{ role: 'user', content: 'Find my resume.' }]
+    }, [driveSearchTool], async () => ({
+      toolId: 'drive.search', startedAt: '2026-01-01T00:00:00Z', completedAt: '2026-01-01T00:00:01Z',
+      result: { files: [{ id: 'private-drive-id', name: 'Resume.pdf', mimeType: 'application/pdf', sizeBytes: 2048, modifiedTime: '2026-09-09', webViewLink: 'https://example.invalid/private' }], untrustedContent: true }
+    }))
+
+    expect(response.toolActivities[0]?.preview).toMatchObject({
+      kind: 'drive-files', label: 'Google Drive results', count: 1,
+      items: [{ title: 'Resume.pdf', subtitle: 'application/pdf', metadata: '2026-09-09 · 2 KB' }]
+    })
+    expect(JSON.stringify(response)).not.toContain('private-drive-id')
+    expect(JSON.stringify(response)).not.toContain('example.invalid')
   })
 
   it('feeds tool failures back to the model and never reports them as success', async () => {

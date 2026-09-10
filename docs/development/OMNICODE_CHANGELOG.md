@@ -3,6 +3,34 @@
 This log records repairs and audit milestones made during the no-new-features
 stabilization phase.
 
+## UI/UX and Google Workspace integration — 2026-09-09
+
+- Established `OMNICODE_DESIGN_SYSTEM.md` as the shared visual, motion,
+  accessibility, and component-state contract for Code and Work modes.
+- Reconfirmed the expansion baseline on `codex/work-mode`: the worktree was
+  clean at `4fe1e0c`; 350 automated tests passed, one native Keychain test was
+  intentionally skipped, and no test failed before this phase began.
+- Audited the existing Google boundary. Gemini API-key support is present, but
+  Gmail/Drive OAuth, Workspace tokens, and service tools do not yet exist;
+  connector UI must therefore remain honestly disconnected until a registered
+  Google desktop OAuth client and user consent are available.
+- Added the shared main-process Google OAuth account foundation: system-browser
+  loopback authorization, PKCE S256, anti-CSRF state validation, OAuth code
+  exchange, account verification, access-token refresh, revocation, and a
+  verified macOS Keychain record whose secret bytes never enter process argv.
+- Registered honest Gmail and Google Drive connector adapters. They report the
+  exact missing-client, missing-scope, expired-authentication, network, rate
+  limit, unavailable, and verified-account states; registration alone never
+  produces a Connected state.
+- Added main-process Gmail REST tools for bounded search, message/thread/text-
+  attachment reads, labels, drafts, send/reply, read state, archive, and label
+  changes. Send and reply are always confirmed with exact recipients, subject,
+  and body before the first network write.
+- Added main-process Drive REST tools for search, recent/folder lists, metadata,
+  bounded text reads, Google Docs/Sheets/Slides export, text upload, folder
+  creation, rename, move, copy, trash, and restore. Binary content is never
+  blindly injected into AI context and every write passes the permission layer.
+
 ## Work Mode expansion — 2026-09-09
 
 - Began a new expansion phase on `codex/work-mode` after the 0.1.1 stabilization

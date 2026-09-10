@@ -22,7 +22,7 @@ export function ModeSwitcher({
   onChange(mode: AppMode): void
   disabled?: boolean
 }) {
-  return <div className="mode-switcher" role="radiogroup" aria-label="OmniCode mode">
+  return <div className="mode-switcher" data-active-mode={value} role="radiogroup" aria-label="OmniCode mode">
     {MODES.map((mode) => {
       const Icon = mode.icon
       return <button

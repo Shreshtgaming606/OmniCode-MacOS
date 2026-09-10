@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { CheckCircle2, ExternalLink, LoaderCircle, Plug, ShieldCheck, Unplug, X } from 'lucide-react'
+import { ExternalLink, FolderClosed, Globe2, LoaderCircle, Mail, Plug, ShieldCheck, Unplug, X } from 'lucide-react'
 
 import type { AIModel, AIProviderId } from '../../../../shared/contracts'
 import type {
@@ -123,30 +123,44 @@ function ConnectedAppsDialog({
   busyId,
   onClose,
   onToggle,
-  onOpenBrowser
+  onOpenBrowser,
+  onManageGoogle
 }: {
   connectors: ConnectorDescriptor[]
   busyId: string | null
   onClose(): void
   onToggle(connector: ConnectorDescriptor): void
   onOpenBrowser(): void
+  onManageGoogle(): void
 }) {
+  useEffect(() => {
+    const dismiss = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      onClose()
+    }
+    window.addEventListener('keydown', dismiss, true)
+    return () => window.removeEventListener('keydown', dismiss, true)
+  }, [onClose])
   return <div className="modal-backdrop work-apps-backdrop" onMouseDown={(event) => {
     if (event.target === event.currentTarget) onClose()
   }}>
     <section className="work-apps-dialog" role="dialog" aria-modal="true" aria-label="Connected Apps">
-      <header><div><Plug /><span><h2>Connected Apps</h2><small>Only verified connections are shown as connected.</small></span></div><button type="button" title="Close Connected Apps" onClick={onClose}><X /></button></header>
-      <div className="work-apps-notice"><ShieldCheck /><span><strong>Permission boundary</strong><small>Connections and tool permissions are enforced in OmniCode’s main process. The first browser connector is read-only and isolated from your normal browser.</small></span></div>
+      <header><div><Plug /><span><h2>Connected Apps</h2><small>Only verified connections are shown as connected.</small></span></div><button type="button" autoFocus title="Close Connected Apps" onClick={onClose}><X /></button></header>
+      <div className="work-apps-notice"><ShieldCheck /><span><strong>Permission boundary</strong><small>Connections, OAuth tokens, and tool permissions stay in OmniCode’s main process. Read tools are bounded; account changes require confirmation, and email is never sent without exact-content approval.</small></span></div>
       <div className="work-apps-list">
         {connectors.map((connector) => {
           const connected = connector.status.state === 'connected'
           const busy = busyId === connector.id || connector.status.state === 'connecting'
+          const ConnectorIcon = connector.id === 'gmail' ? Mail : connector.id === 'google-drive' ? FolderClosed : connector.id === 'browser' ? Globe2 : Plug
+          const reconnect = connector.status.state === 'authentication-expired' || connector.status.state === 'permission-missing'
           return <article className="work-app-card" key={connector.id}>
-            <div className={`work-app-card-icon${connected ? ' connected' : ''}`}>{connected ? <CheckCircle2 /> : <Plug />}</div>
+            <div className={`work-app-card-icon${connected ? ' connected' : ''}`}>{busy ? <LoaderCircle className="spin" /> : <ConnectorIcon />}</div>
             <div className="work-app-card-copy"><div><h3>{connector.name}</h3><span className={`state-${connector.status.state}`}>{connectionLabel(connector)}</span></div><p>{connector.description}</p><ul>{connector.capabilities.map((capability) => <li key={capability}>{capability}</li>)}</ul><small>{connector.status.message}</small></div>
             <div className="work-app-card-actions">
               {connector.id === 'browser' && connected && <button type="button" onClick={onOpenBrowser}><ExternalLink />Open page</button>}
-              <button type="button" className={connected ? 'disconnect' : 'connect'} disabled={busy} onClick={() => onToggle(connector)}>{busy ? <LoaderCircle className="spin" /> : connected ? <Unplug /> : <Plug />}{busy ? 'Working…' : connected ? 'Disconnect' : 'Connect'}</button>
+              {(connector.id === 'gmail' || connector.id === 'google-drive') && connected && <button type="button" onClick={onManageGoogle}><ExternalLink />Manage permissions</button>}
+              <button type="button" className={connected ? 'disconnect' : 'connect'} disabled={busy} onClick={() => onToggle(connector)}>{busy ? <LoaderCircle className="spin" /> : connected ? <Unplug /> : <Plug />}{busy ? 'Working…' : connected ? 'Disconnect' : reconnect ? 'Reconnect' : 'Connect'}</button>
             </div>
           </article>
         })}
@@ -638,6 +652,6 @@ export function WorkMode({ active, onOpenSettings, onError, requestText }: WorkM
       onOpenConnectedApp={() => setShowConnectedApps(true)}
       onLinkError={(message) => onError(new Error(message))}
     />
-    {showConnectedApps && <ConnectedAppsDialog connectors={connectors} busyId={connectorBusyId} onClose={() => setShowConnectedApps(false)} onToggle={(connector) => void toggleConnector(connector)} onOpenBrowser={() => void openManagedBrowser()} />}
+    {showConnectedApps && <ConnectedAppsDialog connectors={connectors} busyId={connectorBusyId} onClose={() => setShowConnectedApps(false)} onToggle={(connector) => void toggleConnector(connector)} onOpenBrowser={() => void openManagedBrowser()} onManageGoogle={() => void window.omnicode.app.openExternal('https://myaccount.google.com/connections').catch(onError)} />}
   </>
 }

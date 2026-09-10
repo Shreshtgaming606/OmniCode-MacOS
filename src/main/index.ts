@@ -22,10 +22,15 @@ import { ModelCatalogManager } from './services/model-catalog-manager'
 import { ConnectorManager } from './services/connector-manager'
 import { ToolRegistry } from './services/tool-registry'
 import { BrowserConnector } from './connectors/browser-connector'
+import { GmailConnector } from './connectors/gmail-connector'
+import { GoogleDriveConnector } from './connectors/google-drive-connector'
+import { GoogleOAuthManager, readGoogleOAuthConfig } from './services/google-oauth-manager'
+import { SecureKeychainStore } from './services/secure-keychain-store'
 import type { ToolConfirmationRequest, ToolExecutionRequest } from '../shared/tool-contracts'
 import type { WorkAgentChatRequest, WorkAgentStreamEvent } from '../shared/work-contracts'
 import { modelCanUseWorkTools, WorkAgentManager } from './services/work-agent-manager'
 import { WorkAttachmentManager } from './services/work-attachment-manager'
+import { WorkTransferStore } from './services/work-transfer-store'
 import type { GitCloneProgress } from '../shared/contracts'
 
 let mainWindow: BrowserWindow | null = null
@@ -54,6 +59,7 @@ const workspaceHistory = new WorkspaceHistoryManager(path.join(app.getPath('user
 const diagnostics = new DiagnosticLogger(path.join(app.getPath('userData'), 'logs'))
 const workConversations = new WorkConversationManager(path.join(app.getPath('userData'), 'work-conversations.json'))
 const workAttachments = new WorkAttachmentManager(path.join(app.getPath('userData'), 'work-attachments'))
+const workTransfers = new WorkTransferStore(path.join(app.getPath('userData'), 'work-transfers'))
 const cloudModelCatalog = new ModelCatalogManager({
   getCredential: async (provider) => {
     try {
@@ -68,12 +74,29 @@ const cloudModelCatalog = new ModelCatalogManager({
 const workTools = new ToolRegistry()
 const workConnectors = new ConnectorManager()
 const browserConnector = new BrowserConnector()
+let googleOAuthConfig
+try {
+  googleOAuthConfig = readGoogleOAuthConfig()
+} catch (error) {
+  void diagnostics.failure('google-oauth:configuration', error).catch(() => undefined)
+}
+const googleOAuth = new GoogleOAuthManager(
+  googleOAuthConfig,
+  new SecureKeychainStore('com.omnicode.editor.oauth'),
+  { openExternal: (url) => shell.openExternal(url) }
+)
+const gmailConnector = new GmailConnector(googleOAuth, fetch, workTransfers, saveWorkTransfer)
+const googleDriveConnector = new GoogleDriveConnector(googleOAuth, fetch, workTransfers, saveWorkTransfer)
 const workAgent = new WorkAgentManager(ai)
 const activeWorkAgentRequests = new Map<string, { controller: AbortController; senderId: number }>()
 const activeGitCloneRequests = new Map<string, { controller: AbortController; senderId: number }>()
 const WORK_REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/u
 workConnectors.register(browserConnector)
+workConnectors.register(gmailConnector)
+workConnectors.register(googleDriveConnector)
 browserConnector.registerTools(workTools)
+gmailConnector.registerTools(workTools)
+googleDriveConnector.registerTools(workTools)
 const runtimeInstaller = new RuntimeInstaller({
   openPath: (target) => shell.openPath(target)
 })
@@ -87,6 +110,28 @@ function assertCurrentWorkspace(root: string): string {
   const current = fileSystem.getWorkspace()
   if (!current || path.resolve(root) !== path.resolve(current)) throw new Error('Workspace settings are limited to the currently open folder.')
   return current
+}
+
+async function saveWorkTransfer(transferId: string) {
+  const transfer = await workTransfers.get(transferId)
+  const options: Electron.SaveDialogOptions = {
+    title: `Save ${transfer.record.filename}`,
+    defaultPath: path.join(app.getPath('downloads'), transfer.record.filename),
+    buttonLabel: 'Save'
+  }
+  const result = mainWindow
+    ? await dialog.showSaveDialog(mainWindow, options)
+    : await dialog.showSaveDialog(options)
+  if (result.canceled || !result.filePath) {
+    return { saved: false, cancelled: true, filename: transfer.record.filename, sizeBytes: transfer.record.sizeBytes }
+  }
+  await fs.writeFile(result.filePath, transfer.data)
+  return {
+    saved: true,
+    cancelled: false,
+    filename: path.basename(result.filePath),
+    sizeBytes: transfer.record.sizeBytes
+  }
 }
 
 function assertWorkspacePath(target: string): string {
@@ -149,14 +194,35 @@ async function confirmWorkTool(
   event: Electron.IpcMainInvokeEvent,
   request: ToolConfirmationRequest
 ): Promise<boolean> {
+  const isEmailSend = request.toolId === 'gmail.send' || request.toolId === 'gmail.reply'
+  const emailRecipients = isEmailSend && Array.isArray(request.input.to)
+    ? request.input.to.filter((value): value is string => typeof value === 'string').join(', ')
+    : ''
+  const emailCc = isEmailSend && Array.isArray(request.input.cc)
+    ? request.input.cc.filter((value): value is string => typeof value === 'string').join(', ')
+    : ''
+  const emailSubject = isEmailSend && typeof request.input.subject === 'string' ? request.input.subject : ''
+  const emailBody = isEmailSend && typeof request.input.body === 'string' ? request.input.body : ''
+  const emailAttachments = isEmailSend && Array.isArray(request.input.transferIds)
+    ? (await Promise.all(request.input.transferIds.filter((value): value is string => typeof value === 'string').map(async (id) => {
+        try {
+          const transfer = await workTransfers.get(id)
+          return `${transfer.record.filename} (${transfer.record.sizeBytes.toLocaleString()} bytes)`
+        } catch {
+          return 'Unavailable attachment'
+        }
+      }))).join('\n')
+    : ''
   const options: Electron.MessageBoxOptions = {
     type: request.action === 'destructive' ? 'warning' : 'question',
-    buttons: ['Allow Once', 'Cancel'],
+    buttons: [isEmailSend ? 'Send Email' : 'Allow Once', 'Cancel'],
     defaultId: 1,
     cancelId: 1,
     noLink: true,
-    message: `Allow ${request.toolName}?`,
-    detail: `${request.summary}\n\nOmniCode will run this fixed, validated action once. Secret values are never shown in this confirmation.`
+    message: isEmailSend ? 'Review and send this email?' : `Allow ${request.toolName}?`,
+    detail: isEmailSend
+      ? `To: ${emailRecipients}\n${emailCc ? `Cc: ${emailCc}\n` : ''}Subject: ${emailSubject}\n${emailAttachments ? `Attachments:\n${emailAttachments}\n` : ''}\nExact message body:\n${emailBody}\n\nNothing is sent unless you choose Send Email.`
+      : `${request.summary}\n\nOmniCode will run this fixed, validated action once. Secret values are never shown in this confirmation.`
   }
   const owner = BrowserWindow.fromWebContents(event.sender)
   const response = owner
@@ -167,7 +233,8 @@ async function confirmWorkTool(
 
 async function executeWorkTool(
   event: Electron.IpcMainInvokeEvent,
-  request: ToolExecutionRequest
+  request: ToolExecutionRequest,
+  signal?: AbortSignal
 ) {
   if (!request || request.mode !== 'work') throw new Error('Connected-app tools are available only in Work Mode.')
   const tool = workTools.list('work').find((candidate) => candidate.id === request.toolId)
@@ -182,7 +249,25 @@ async function executeWorkTool(
   return workTools.execute(request, {
     accessLevel: connector.accessLevel,
     confirm: (confirmation) => confirmWorkTool(event, confirmation)
-  })
+  }, { signal })
+}
+
+function isGoogleConnector(id: string): boolean {
+  return id === 'gmail' || id === 'google-drive'
+}
+
+async function connectWorkConnector(id: string) {
+  const status = await workConnectors.connect(id)
+  if (!isGoogleConnector(id)) return status
+  const connectors = await workConnectors.list(true)
+  return connectors.find((connector) => connector.id === id)?.status ?? status
+}
+
+async function disconnectWorkConnector(id: string) {
+  const status = await workConnectors.disconnect(id)
+  if (!isGoogleConnector(id)) return status
+  const connectors = await workConnectors.list(true)
+  return connectors.find((connector) => connector.id === id)?.status ?? status
 }
 
 function isTrustedRendererUrl(value: string): boolean {
@@ -608,8 +693,8 @@ function registerIpc(): void {
   handle('work:conversations:clear-messages', (_event, id: string) => workConversations.clearMessages(id))
   handle('work:conversations:recover', () => workConversations.recoverCorruptStore())
   handle('work:connectors:list', (_event, refresh?: boolean) => workConnectors.list(refresh === true))
-  handle('work:connectors:connect', (_event, id: string) => workConnectors.connect(id))
-  handle('work:connectors:disconnect', (_event, id: string) => workConnectors.disconnect(id))
+  handle('work:connectors:connect', (_event, id: string) => connectWorkConnector(id))
+  handle('work:connectors:disconnect', (_event, id: string) => disconnectWorkConnector(id))
   handle('work:attachments:select', async () => {
     const options: Electron.OpenDialogOptions = {
       title: 'Attach files to Work Mode',
@@ -640,7 +725,7 @@ function registerIpc(): void {
       return await workAgent.chat(
         await attachWorkContext(request),
         tools,
-        (toolRequest) => executeWorkTool(event, toolRequest),
+        (toolRequest) => executeWorkTool(event, toolRequest, operation.controller.signal),
         {
           signal: operation.controller.signal,
           onDelta: (delta) => {
@@ -794,6 +879,7 @@ app.on('will-quit', (event) => {
   void Promise.allSettled([
     server.stop(),
     fileSystem.unwatch(),
+    workTransfers.clear(),
     workConnectors.disconnect('browser'),
     diagnostics.lifecycle('shutdown', 'OmniCode completed its shutdown sequence.')
   ]).finally(() => app.exit(0))

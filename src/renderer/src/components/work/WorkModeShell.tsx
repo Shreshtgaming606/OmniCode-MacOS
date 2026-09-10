@@ -7,8 +7,11 @@ import {
   Copy,
   Cpu,
   FileText,
+  FolderClosed,
+  Globe2,
   LoaderCircle,
   MessageSquareText,
+  Mail,
   Paperclip,
   Pencil,
   Pin,
@@ -34,7 +37,8 @@ import type {
   WorkConversation,
   WorkConversationSummary,
   WorkAttachment,
-  WorkMessage
+  WorkMessage,
+  WorkToolPreview
 } from '../../../../shared/work-contracts'
 import { MarkdownMessage } from '../MarkdownMessage'
 import './WorkModeShell.css'
@@ -105,12 +109,27 @@ const PROVIDER_NAMES: Record<AIProviderId, string> = {
 
 const PROVIDERS: readonly AIProviderId[] = ['ollama', 'openai', 'anthropic', 'google']
 
-const SUGGESTIONS = [
-  'Research something',
-  'Summarize a document',
-  'Draft an email',
-  'Help me plan a project'
+const GENERAL_SUGGESTIONS = [
+  'Create a focused action plan',
+  'Summarize an attached document',
+  'Draft a clear project brief',
+  'Help me think through a decision'
 ] as const
+
+const CONNECTOR_SUGGESTIONS: Readonly<Record<string, readonly string[]>> = {
+  browser: [
+    'Research a topic using the connected browser',
+    'Compare current information from several sources'
+  ],
+  gmail: [
+    'Summarize my unread Gmail messages',
+    'Draft a reply to a recent email'
+  ],
+  'google-drive': [
+    'Find a document in Google Drive',
+    'Summarize a file from Google Drive'
+  ]
+}
 
 function dateValue(value: string | number): number {
   return typeof value === 'number' ? value : Date.parse(value)
@@ -137,6 +156,38 @@ function connectionLabel(state: WorkConnectedAppState): string {
     case 'service-unavailable': return 'Unavailable'
     default: return 'Not connected'
   }
+}
+
+function conversationGroups(conversations: WorkConversationSummary[]): Array<{
+  label: string
+  items: WorkConversationSummary[]
+}> {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const todayStart = today.getTime()
+  const previousWeekStart = todayStart - (6 * 86_400_000)
+  return [
+    { label: 'Today', items: conversations.filter((conversation) => dateValue(conversation.updatedAt) >= todayStart) },
+    {
+      label: 'Previous 7 days',
+      items: conversations.filter((conversation) => {
+        const updatedAt = dateValue(conversation.updatedAt)
+        return updatedAt >= previousWeekStart && updatedAt < todayStart
+      })
+    },
+    { label: 'Older', items: conversations.filter((conversation) => dateValue(conversation.updatedAt) < previousWeekStart) }
+  ]
+}
+
+export function suggestionsForConnectedApps(connectedApps: WorkConnectedAppSummary[]): string[] {
+  const connected = connectedApps.filter((app) => app.state === 'connected')
+  const ids = new Set(connected.map((app) => app.id))
+  const connectedSuggestions = connected
+    .flatMap((app) => CONNECTOR_SUGGESTIONS[app.id] ?? [])
+  const crossConnector = ids.has('gmail') && ids.has('google-drive')
+    ? ['Find an email attachment and save it to Drive']
+    : []
+  return [...new Set([...crossConnector, ...connectedSuggestions, ...GENERAL_SUGGESTIONS])].slice(0, 4)
 }
 
 function ConversationList({
@@ -183,6 +234,22 @@ function ConversationList({
   </section>
 }
 
+function WorkResultPreview({ preview }: { preview: WorkToolPreview }) {
+  const gmail = preview.kind.startsWith('gmail')
+  const drive = preview.kind === 'drive-files' || preview.kind === 'drive-file'
+  return <section className={`work-result-preview kind-${preview.kind}`} aria-label={preview.label}>
+    <header>
+      {gmail ? <Mail /> : drive ? <FolderClosed /> : <FileText />}
+      <strong>{preview.label}</strong>
+      {preview.count !== undefined && <small>{preview.count}{preview.truncated ? '+' : ''}</small>}
+    </header>
+    <div>{preview.items.map((item, index) => <article key={`${item.title}-${index}`}>
+      <span>{gmail ? <Mail /> : <FileText />}</span>
+      <div><strong>{item.title}</strong>{item.subtitle && <small>{item.subtitle}</small>}{item.detail && <p>{item.detail}</p>}{item.metadata && <time>{item.metadata}</time>}</div>
+    </article>)}</div>
+  </section>
+}
+
 function WorkMessageView({
   message,
   canEdit,
@@ -212,7 +279,9 @@ function WorkMessageView({
       {!!message.toolActivities?.length && <div className="work-tool-activities" aria-label="Connected app activity">
         {message.toolActivities.map((activity) => <div className={`work-tool-activity state-${activity.status}`} key={activity.id}>
           {activity.status === 'succeeded' ? <CheckCircle2 /> : activity.status === 'failed' ? <CircleAlert /> : <LoaderCircle className={activity.status === 'running' ? 'spin' : ''} />}
-          <span><strong>{activity.name}</strong><small>{activity.summary ?? activity.status}</small></span>
+          <div><strong>{activity.name}</strong><small>{activity.summary ?? activity.status}</small>
+            {activity.preview && <WorkResultPreview preview={activity.preview} />}
+          </div>
         </div>)}
       </div>}
       <div className="work-message-actions">
@@ -264,6 +333,13 @@ export function WorkModeShell({
 }: WorkModeShellProps) {
   const pinned = useMemo(() => conversations.filter((conversation) => conversation.pinned), [conversations])
   const recent = useMemo(() => conversations.filter((conversation) => !conversation.pinned), [conversations])
+  const historyGroups = useMemo(
+    () => searchQuery.trim()
+      ? [{ label: 'Results', items: recent }]
+      : conversationGroups(recent),
+    [recent, searchQuery]
+  )
+  const suggestions = useMemo(() => suggestionsForConnectedApps(connectedApps), [connectedApps])
   const models = useMemo(() => modelCatalog.filter((model) => model.provider === selectedProvider), [modelCatalog, selectedProvider])
   const selectedModel = modelCatalog.find((model) => model.provider === selectedProvider && model.id === selectedModelId)
   const local = selectedModel?.local ?? selectedProvider === 'ollama'
@@ -293,15 +369,17 @@ export function WorkModeShell({
       <div className="work-history">
         {!conversations.length && <div className="work-history-empty"><MessageSquareText /><p>Your conversations will appear here.</p></div>}
         <ConversationList label="Pinned" items={pinned} selectedId={currentConversation?.id} onSelect={onSelectConversation} onRename={onRenameConversation} onDelete={onDeleteConversation} onTogglePin={onTogglePin} />
-        <ConversationList label={searchQuery.trim() ? 'Results' : 'Recent'} items={recent} selectedId={currentConversation?.id} onSelect={onSelectConversation} onRename={onRenameConversation} onDelete={onDeleteConversation} onTogglePin={onTogglePin} />
+        {historyGroups.map((group) => <ConversationList label={group.label} items={group.items} selectedId={currentConversation?.id} onSelect={onSelectConversation} onRename={onRenameConversation} onDelete={onDeleteConversation} onTogglePin={onTogglePin} key={group.label} />)}
       </div>
       <section className="work-connected-apps" aria-label="Connected Apps">
         <header><div><Plug /><strong>Connected Apps</strong></div><button type="button" onClick={onOpenConnectedApps}>Manage</button></header>
         {connectedApps.length
-          ? connectedApps.map((app) => <button type="button" className={`work-app-row state-${app.state}`} key={app.id} onClick={() => onOpenConnectedApp(app.id)}>
-            <span className="work-app-icon">{app.state === 'connected' ? <CheckCircle2 /> : app.state === 'connecting' ? <LoaderCircle className="spin" /> : <Plug />}</span>
+          ? connectedApps.map((app) => {
+            const AppIcon = app.id === 'gmail' ? Mail : app.id === 'google-drive' ? FolderClosed : app.id === 'browser' ? Globe2 : Plug
+            return <button type="button" className={`work-app-row state-${app.state}`} key={app.id} onClick={() => onOpenConnectedApp(app.id)}>
+            <span className="work-app-icon">{app.state === 'connecting' ? <LoaderCircle className="spin" /> : <AppIcon />}</span>
             <span><strong>{app.name}</strong><small>{app.detail ?? connectionLabel(app.state)}</small></span>
-          </button>)
+          </button>})
           : <button type="button" className="work-app-empty" onClick={onOpenConnectedApps}>No apps configured</button>}
       </section>
       <button type="button" className="work-settings-link" onClick={onOpenSettings}><Settings />Settings</button>
@@ -344,7 +422,7 @@ export function WorkModeShell({
             onLinkError={onLinkError}
             key={message.id}
           />)}{sending && <div className="work-thinking"><span /><span /><span />Working with {selectedModel?.displayName ?? selectedModelId}…</div>}</div>
-          : <div className="work-empty-state"><div className="work-empty-mark"><Sparkles /></div><h1>What can OmniCode help with?</h1><p>Start a focused conversation for research, writing, planning, or work with services you choose to connect.</p><div>{SUGGESTIONS.map((suggestion) => <button type="button" key={suggestion} onClick={() => onComposerChange(suggestion)}>{suggestion}</button>)}</div></div>}
+          : <div className="work-empty-state"><div className="work-empty-mark"><Sparkles /></div><h1>What can OmniCode help with?</h1><p>Start a focused conversation for research, writing, planning, or work with services you choose to connect.</p><div>{suggestions.map((suggestion) => <button type="button" key={suggestion} onClick={() => onComposerChange(suggestion)}>{suggestion}</button>)}</div></div>}
       </div>
 
       <div className="work-composer-wrap">

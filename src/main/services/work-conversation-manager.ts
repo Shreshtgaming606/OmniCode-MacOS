@@ -14,7 +14,8 @@ import type {
   WorkConversationSearchRequest,
   WorkConversationSummary,
   WorkMessage,
-  WorkToolActivity
+  WorkToolActivity,
+  WorkToolPreview
 } from '../../shared/work-contracts'
 import { WORK_CONVERSATION_LIMITS } from '../../shared/work-contracts'
 
@@ -25,6 +26,7 @@ const MESSAGE_STATUSES = new Set(['pending', 'streaming', 'complete', 'failed', 
 const ATTACHMENT_KINDS = new Set(['file', 'image', 'connected-resource'])
 const ATTACHMENT_SOURCES = new Set(['computer', 'connected-app'])
 const TOOL_STATUSES = new Set(['pending', 'running', 'awaiting-confirmation', 'succeeded', 'failed', 'cancelled'])
+const TOOL_PREVIEW_KINDS = new Set(['gmail-messages', 'gmail-message', 'gmail-draft', 'drive-files', 'drive-file', 'transferred-file'])
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u
 const TOOL_ID_PATTERN = /^[a-z][a-z0-9-]{0,31}\.[a-z][a-z0-9-]{0,63}$/u
 const MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,255}$/u
@@ -97,9 +99,30 @@ function validateAttachment(value: unknown, label: string): asserts value is Wor
   if (value.kind === 'connected-resource' && !value.resourceId) throw new Error(`${label} requires a resourceId for a connected resource.`)
 }
 
+function validateToolPreview(value: unknown, label: string): asserts value is WorkToolPreview {
+  if (!isRecord(value)) throw new Error(`${label} must be a preview object.`)
+  assertAllowedKeys(value, ['kind', 'label', 'items', 'count', 'truncated'], label)
+  if (typeof value.kind !== 'string' || !TOOL_PREVIEW_KINDS.has(value.kind)) throw new Error(`${label}.kind is invalid.`)
+  assertBoundedText(value.label, `${label}.label`, 120)
+  if (!Array.isArray(value.items) || value.items.length < 1 || value.items.length > 4) throw new Error(`${label}.items must contain one to four entries.`)
+  value.items.forEach((item, index) => {
+    const itemLabel = `${label}.items[${index}]`
+    if (!isRecord(item)) throw new Error(`${itemLabel} must be an object.`)
+    assertAllowedKeys(item, ['title', 'subtitle', 'detail', 'metadata'], itemLabel)
+    assertBoundedText(item.title, `${itemLabel}.title`, 300)
+    if (item.subtitle !== undefined) assertBoundedText(item.subtitle, `${itemLabel}.subtitle`, 400, true)
+    if (item.detail !== undefined) assertBoundedText(item.detail, `${itemLabel}.detail`, 400, true)
+    if (item.metadata !== undefined) assertBoundedText(item.metadata, `${itemLabel}.metadata`, 200, true)
+  })
+  if (value.count !== undefined && (!Number.isSafeInteger(value.count) || Number(value.count) < 0 || Number(value.count) > 10_000)) {
+    throw new Error(`${label}.count is invalid.`)
+  }
+  if (value.truncated !== undefined && typeof value.truncated !== 'boolean') throw new Error(`${label}.truncated is invalid.`)
+}
+
 function validateToolActivity(value: unknown, label: string): asserts value is WorkToolActivity {
   if (!isRecord(value)) throw new Error(`${label} must be a tool activity object.`)
-  assertAllowedKeys(value, ['id', 'toolId', 'name', 'status', 'createdAt', 'connectorId', 'summary', 'completedAt', 'errorCode'], label)
+  assertAllowedKeys(value, ['id', 'toolId', 'name', 'status', 'createdAt', 'connectorId', 'summary', 'preview', 'completedAt', 'errorCode'], label)
   assertId(value.id, `${label}.id`)
   if (typeof value.toolId !== 'string' || (!TOOL_ID_PATTERN.test(value.toolId) && !ID_PATTERN.test(value.toolId))) throw new Error(`${label}.toolId is invalid.`)
   assertBoundedText(value.name, `${label}.name`, 160)
@@ -107,6 +130,7 @@ function validateToolActivity(value: unknown, label: string): asserts value is W
   assertTimestamp(value.createdAt, `${label}.createdAt`)
   if (value.connectorId !== undefined) assertId(value.connectorId, `${label}.connectorId`)
   if (value.summary !== undefined) assertBoundedText(value.summary, `${label}.summary`, 2_000, true)
+  if (value.preview !== undefined) validateToolPreview(value.preview, `${label}.preview`)
   if (value.completedAt !== undefined) {
     assertTimestamp(value.completedAt, `${label}.completedAt`)
     if (value.completedAt < value.createdAt) throw new Error(`${label}.completedAt cannot precede its creation time.`)

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { CheckCircle2, KeyRound, LoaderCircle, Plug, RefreshCw, Shield, Trash2, Unplug, X } from 'lucide-react'
+import { CheckCircle2, ExternalLink, FolderClosed, Globe2, KeyRound, LoaderCircle, Mail, Plug, RefreshCw, Shield, Trash2, Unplug, X } from 'lucide-react'
 import type { AIModel, AIProviderConnectionStatus, AIProviderId, ThemePreference, WorkspaceSettings } from '../../../shared/contracts'
 import type { AIModelDescriptor, CloudAIProviderId } from '../../../shared/model-contracts'
 import type { ConnectorDescriptor } from '../../../shared/tool-contracts'
@@ -10,6 +10,25 @@ const PROVIDERS: Array<{ id: CloudProvider; name: string; placeholder: string }>
   { id: 'anthropic', name: 'Anthropic Claude', placeholder: 'sk-ant-…' },
   { id: 'google', name: 'Google Gemini', placeholder: 'API key' }
 ]
+
+function connectorStatusLabel(connector: ConnectorDescriptor): string {
+  switch (connector.status.state) {
+    case 'connected': return 'Connected & verified'
+    case 'connecting': return 'Connecting…'
+    case 'authentication-expired': return 'Reconnect required'
+    case 'permission-missing': return 'Permission required'
+    case 'network-error': return 'Network error'
+    case 'rate-limited': return 'Rate limited'
+    case 'service-unavailable': return 'Unavailable'
+    default: return 'Not connected'
+  }
+}
+
+function connectorScopeLabel(scope: string): string {
+  if (scope.endsWith('/auth/gmail.modify')) return 'Read, organize, draft, and send Gmail messages'
+  if (scope.endsWith('/auth/drive')) return 'View and manage Google Drive files'
+  return scope
+}
 
 export function SettingsPanel({
   workspacePath,
@@ -59,6 +78,15 @@ export function SettingsPanel({
   const [connectors, setConnectors] = useState<ConnectorDescriptor[]>([])
   const [connectorBusy, setConnectorBusy] = useState<string | null>(null)
   const [connectorError, setConnectorError] = useState('')
+  useEffect(() => {
+    const dismiss = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      onClose()
+    }
+    window.addEventListener('keydown', dismiss, true)
+    return () => window.removeEventListener('keydown', dismiss, true)
+  }, [onClose])
 
   const refreshCloudModels = async (provider: CloudProvider, forceRefresh = false): Promise<void> => {
     setCloudModelsBusy(provider)
@@ -244,7 +272,19 @@ export function SettingsPanel({
               {connectors.map((connector) => {
                 const connected = connector.status.state === 'connected'
                 const busy = connectorBusy === connector.id || connector.status.state === 'connecting'
-                return <article key={connector.id} className={`settings-connector state-${connector.status.state}`}><div><Plug /><span><strong>{connector.name}</strong><small>{connector.status.message}</small></span></div><p>{connector.description}</p><ul>{connector.capabilities.map((capability) => <li key={capability}>{capability}</li>)}</ul><button type="button" disabled={busy} className={connected ? 'disconnect' : 'primary-button'} onClick={() => void toggleConnector(connector)}>{busy ? <LoaderCircle className="spin" /> : connected ? <Unplug /> : <Plug />}{busy ? 'Working…' : connected ? 'Disconnect' : 'Connect'}</button></article>
+                const ConnectorIcon = connector.id === 'gmail' ? Mail : connector.id === 'google-drive' ? FolderClosed : connector.id === 'browser' ? Globe2 : Plug
+                const reconnect = connector.status.state === 'authentication-expired' || connector.status.state === 'permission-missing'
+                return <article key={connector.id} className={`settings-connector state-${connector.status.state}`}>
+                  <div className="settings-connector-heading"><span className="settings-connector-icon"><ConnectorIcon /></span><span><span className={`settings-connector-state state-${connector.status.state}`}>{connectorStatusLabel(connector)}</span><strong>{connector.name}</strong><small>{connector.status.message}</small></span></div>
+                  <p>{connector.description}</p>
+                  <ul>{connector.capabilities.map((capability) => <li key={capability}>{capability}</li>)}</ul>
+                  {!!connector.requestedScopes.length && <details className="settings-connector-permissions"><summary>Permissions requested</summary><ul>{connector.requestedScopes.map((scope) => <li key={scope}>{connectorScopeLabel(scope)}</li>)}</ul></details>}
+                  {(connector.id === 'gmail' || connector.id === 'google-drive') && <small className="settings-connector-note">Google revocation disconnects both Gmail and Drive from OmniCode.</small>}
+                  <div className="settings-connector-actions">
+                    {(connector.id === 'gmail' || connector.id === 'google-drive') && connected && <button type="button" onClick={() => void window.omnicode.app.openExternal('https://myaccount.google.com/connections').catch((cause) => setConnectorError(cause instanceof Error ? cause.message : String(cause)))}><ExternalLink />Manage permissions</button>}
+                    <button type="button" disabled={busy} className={connected ? 'disconnect' : 'primary-button'} onClick={() => void toggleConnector(connector)}>{busy ? <LoaderCircle className="spin" /> : connected ? <Unplug /> : <Plug />}{busy ? 'Working…' : connected ? 'Disconnect' : reconnect ? 'Reconnect' : 'Connect'}</button>
+                  </div>
+                </article>
               })}
               {!connectors.length && !connectorError && <div className="settings-empty-connector"><Plug /><span><strong>No connectors registered</strong><small>This build will not display simulated connected services.</small></span></div>}
             </div>

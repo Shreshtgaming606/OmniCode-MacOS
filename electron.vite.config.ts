@@ -4,7 +4,11 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()]
+    plugins: [externalizeDepsPlugin()],
+    define: {
+      __OMNICODE_GOOGLE_OAUTH_CLIENT_ID__: JSON.stringify(process.env.OMNICODE_GOOGLE_OAUTH_CLIENT_ID?.trim() ?? ''),
+      __OMNICODE_GOOGLE_OAUTH_CLIENT_SECRET__: JSON.stringify(process.env.OMNICODE_GOOGLE_OAUTH_CLIENT_SECRET?.trim() ?? '')
+    }
   },
   preload: {
     plugins: [externalizeDepsPlugin()],

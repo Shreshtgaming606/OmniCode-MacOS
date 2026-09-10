@@ -110,6 +110,22 @@ for (let run = 0; run < runs; run += 1) {
   })
 
   const cdp = await connect(port)
+  await waitFor(async () => cdp.evaluate(`return Boolean(window.omnicode && (document.querySelector('.app-shell') || document.querySelector('.onboarding')))`), 'first-launch surface')
+  const onboardingVisible = await cdp.evaluate(`return Boolean(document.querySelector('.onboarding'))`)
+  if (onboardingVisible) {
+    const onboarding = await cdp.evaluate(`return {
+      labelled: document.querySelector('.onboarding')?.getAttribute('aria-label') === 'Welcome to OmniCode',
+      steps: document.querySelectorAll('.onboarding__steps button').length
+    }`)
+    if (!onboarding.labelled || onboarding.steps < 6) {
+      throw new Error(`Run ${run + 1} rendered an incomplete onboarding surface: ${JSON.stringify(onboarding)}`)
+    }
+    await cdp.evaluate(`
+      localStorage.setItem('omnicode.onboardingComplete', 'true')
+      location.reload()
+      return true
+    `)
+  }
   await waitFor(async () => cdp.evaluate(`return Boolean(window.omnicode && document.querySelector('.app-shell'))`), 'workbench shell')
   const shellReadyMs = Date.now() - startedAt
   await waitFor(async () => cdp.evaluate(`return document.querySelector('.command-center span')?.textContent === ${JSON.stringify(path.basename(workspace))}`), 'launch workspace')
@@ -143,7 +159,7 @@ for (let run = 0; run < runs; run += 1) {
   const quitMs = Date.now() - quitStartedAt
   const seriousStderr = stderr.join('').split('\n').filter((line) => /UnhandledPromiseRejection|FATAL|uncaught exception|segmentation fault/iu.test(line))
   if (seriousStderr.length) throw new Error(`Run ${run + 1} stderr failure: ${seriousStderr.join(' | ')}`)
-  results.push({ run: run + 1, shellReadyMs, workspaceReadyMs, quitMs, idleCpu, rssMiB: idleEnd.rssMiB, processes: idleEnd.count, rendererErrors: unexpectedRendererErrors.length, seriousStderr: seriousStderr.length })
+  results.push({ run: run + 1, onboardingVisible, shellReadyMs, workspaceReadyMs, quitMs, idleCpu, rssMiB: idleEnd.rssMiB, processes: idleEnd.count, rendererErrors: unexpectedRendererErrors.length, seriousStderr: seriousStderr.length })
 }
 
 console.log(JSON.stringify({ runs: results }, null, 2))

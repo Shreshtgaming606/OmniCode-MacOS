@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto'
 
 import type { AIModel } from '../../shared/contracts'
-import type { ToolDescriptor, ToolExecutionRequest, ToolExecutionResult } from '../../shared/tool-contracts'
+import type { JsonValue, ToolDescriptor, ToolExecutionRequest, ToolExecutionResult } from '../../shared/tool-contracts'
 import type {
   WorkAgentChatRequest,
   WorkAgentChatResponse,
-  WorkToolActivity
+  WorkToolActivity,
+  WorkToolPreview,
+  WorkToolPreviewItem
 } from '../../shared/work-contracts'
 import type { AIToolCall, AIToolConversationMessage } from './ai-tool-types'
 import { AIManager } from './ai-manager'
@@ -78,6 +80,113 @@ function safeToolError(error: unknown): string {
     .replace(/([?&](?:key|api_key|access_token|refresh_token|token|client_secret)=)[^&#\s]+/giu, '$1••••')
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, ' ')
     .slice(0, 1_000)
+}
+
+function previewText(value: unknown, maximum: number): string {
+  return typeof value === 'string'
+    ? value.replace(/[\u0000-\u001f\u007f]/gu, ' ').replace(/\s+/gu, ' ').trim().slice(0, maximum)
+    : ''
+}
+
+function previewRecord(value: unknown): Record<string, JsonValue> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, JsonValue>
+    : undefined
+}
+
+function previewCount(value: unknown, fallback: number): number {
+  return Number.isSafeInteger(value) && Number(value) >= 0 ? Math.min(Number(value), 10_000) : fallback
+}
+
+function gmailPreviewItem(value: unknown): WorkToolPreviewItem | undefined {
+  const item = previewRecord(value)
+  if (!item) return undefined
+  const title = previewText(item.subject, 240) || '(No subject)'
+  const subtitle = previewText(item.from, 320)
+  const detail = previewText(item.snippet ?? item.body, 320)
+  const metadata = previewText(item.date, 120)
+  return {
+    title,
+    ...(subtitle ? { subtitle } : {}),
+    ...(detail ? { detail } : {}),
+    ...(metadata ? { metadata } : {})
+  }
+}
+
+function drivePreviewItem(value: unknown): WorkToolPreviewItem | undefined {
+  const item = previewRecord(value)
+  if (!item) return undefined
+  const title = previewText(item.name ?? item.filename, 300)
+  if (!title) return undefined
+  const mimeType = previewText(item.mimeType ?? item.exportedAs, 180)
+  const modified = previewText(item.modifiedTime, 120)
+  const size = Number.isSafeInteger(item.sizeBytes) && Number(item.sizeBytes) >= 0
+    ? `${Math.max(1, Math.ceil(Number(item.sizeBytes) / 1024)).toLocaleString()} KB`
+    : ''
+  return {
+    title,
+    ...(mimeType ? { subtitle: mimeType } : {}),
+    ...(modified || size ? { metadata: [modified, size].filter(Boolean).join(' · ') } : {})
+  }
+}
+
+function previewItems(values: unknown, project: (value: unknown) => WorkToolPreviewItem | undefined): WorkToolPreviewItem[] {
+  return Array.isArray(values) ? values.slice(0, 4).flatMap((value) => project(value) ?? []) : []
+}
+
+function toolPreview(toolId: string, input: Record<string, JsonValue>, result: JsonValue): WorkToolPreview | undefined {
+  const value = previewRecord(result)
+  if (!value) return undefined
+  if (toolId === 'gmail.search') {
+    const items = previewItems(value.messages, gmailPreviewItem)
+    return items.length ? {
+      kind: 'gmail-messages', label: 'Gmail results', items,
+      count: previewCount(value.resultSizeEstimate, items.length),
+      truncated: previewCount(value.resultSizeEstimate, items.length) > items.length
+    } : undefined
+  }
+  if (toolId === 'gmail.read') {
+    const item = gmailPreviewItem(value)
+    return item ? { kind: 'gmail-message', label: 'Gmail message', items: [item] } : undefined
+  }
+  if (toolId === 'gmail.thread') {
+    const items = previewItems(value.messages, gmailPreviewItem)
+    return items.length ? {
+      kind: 'gmail-messages', label: 'Gmail thread', items,
+      count: previewCount(Array.isArray(value.messages) ? value.messages.length : undefined, items.length),
+      truncated: value.truncated === true || (Array.isArray(value.messages) && value.messages.length > items.length)
+    } : undefined
+  }
+  if (['gmail.draft', 'gmail.send', 'gmail.reply'].includes(toolId)) {
+    const to = Array.isArray(input.to) ? input.to.map((recipient) => previewText(recipient, 320)).filter(Boolean).slice(0, 4).join(', ') : ''
+    const title = previewText(input.subject, 240) || '(No subject)'
+    const detail = previewText(input.body, 320)
+    return {
+      kind: toolId === 'gmail.draft' ? 'gmail-draft' : 'gmail-message',
+      label: toolId === 'gmail.draft' ? 'Gmail draft created' : toolId === 'gmail.reply' ? 'Gmail reply sent' : 'Gmail message sent',
+      items: [{ title, ...(to ? { subtitle: `To ${to}` } : {}), ...(detail ? { detail } : {}) }]
+    }
+  }
+  if (toolId.startsWith('gmail.') && (value.filename || value.name)) {
+    const item = drivePreviewItem(value)
+    return item ? { kind: 'transferred-file', label: 'Gmail attachment', items: [item] } : undefined
+  }
+  if (['drive.search', 'drive.recent', 'drive.folder'].includes(toolId)) {
+    const items = previewItems(value.files, drivePreviewItem)
+    return items.length ? {
+      kind: 'drive-files', label: 'Google Drive results', items,
+      count: Array.isArray(value.files) ? value.files.length : items.length,
+      truncated: Array.isArray(value.files) && value.files.length > items.length
+    } : undefined
+  }
+  const driveFile = previewRecord(value.file) ?? value
+  if (toolId.startsWith('drive.')) {
+    const item = drivePreviewItem(driveFile)
+    if (!item) return undefined
+    const transfer = ['drive.download', 'drive.save-local'].includes(toolId)
+    return { kind: transfer ? 'transferred-file' : 'drive-file', label: transfer ? 'Drive file ready' : 'Google Drive file', items: [item] }
+  }
+  return undefined
 }
 
 function validateTurnCalls(calls: AIToolCall[]): void {
@@ -204,6 +313,7 @@ export class WorkAgentManager {
           activity.status = 'succeeded'
           activity.completedAt = Date.now()
           activity.summary = `${descriptor.name} completed.`
+          activity.preview = toolPreview(descriptor.id, call.input, result.result)
           messages.push({ role: 'tool', callId: call.callId, name: call.name, content: toolResultContent(result, descriptor.id) })
         } catch (error) {
           if (options.signal?.aborted) throw options.signal.reason ?? error

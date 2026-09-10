@@ -620,3 +620,25 @@ lost. Secrets, tokens, and authorization headers must never be included here.
 - Current status: ✅ Resolved — the main process exposes tools to Ollama only
   when the exact installed model explicitly has `toolUse: true`; the UI shows an
   honest chat-only notice and focused regression tests cover the boundary.
+
+## OMI-039 — Google Workspace live authorization is externally blocked
+
+- Severity: High for Gmail/Drive release readiness
+- Reproduction: Open Connected Apps and connect Gmail or Google Drive in a build
+  without `OMNICODE_GOOGLE_OAUTH_CLIENT_ID`.
+- Expected: A registered OmniCode desktop OAuth client opens Google consent in
+  the system browser; after consent the account is verified and service tools
+  can perform real API operations.
+- Actual: OmniCode honestly reports that Google Workspace OAuth is not
+  configured. The protocol, Keychain, refresh/revoke, Gmail REST tools, Drive
+  REST tools, confirmation boundaries, and failure mapping pass automated tests,
+  but there is no publisher-issued OAuth client or user consent on this host.
+- Suspected cause: Google Cloud project setup, API enablement, consent-screen
+  configuration, OAuth verification, and a safe test account are external.
+- Relevant files: `src/main/services/google-oauth-manager.ts`,
+  `src/main/services/secure-keychain-store.ts`,
+  `src/main/connectors/gmail-connector.ts`,
+  `src/main/connectors/google-drive-connector.ts`,
+  `src/main/index.ts`.
+- Current status: 🔵 BLOCKED — USER CONFIGURATION REQUIRED. A Gemini API key is
+  not a Workspace OAuth credential and was not read, printed, or repurposed.

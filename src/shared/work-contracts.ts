@@ -14,6 +14,33 @@ export type WorkToolActivityStatus =
   | 'failed'
   | 'cancelled'
 
+export type WorkToolPreviewKind =
+  | 'gmail-messages'
+  | 'gmail-message'
+  | 'gmail-draft'
+  | 'drive-files'
+  | 'drive-file'
+  | 'transferred-file'
+
+export interface WorkToolPreviewItem {
+  title: string
+  subtitle?: string
+  detail?: string
+  metadata?: string
+}
+
+/**
+ * A deliberately small, display-only projection of a connector result. It
+ * excludes provider IDs, URLs, paths, opaque transfer IDs, and raw bodies.
+ */
+export interface WorkToolPreview {
+  kind: WorkToolPreviewKind
+  label: string
+  items: WorkToolPreviewItem[]
+  count?: number
+  truncated?: boolean
+}
+
 /**
  * Persisted attachment metadata. File bytes, OAuth tokens, temporary download
  * URLs, and connector response bodies intentionally do not belong here.
@@ -43,6 +70,7 @@ export interface WorkToolActivity {
   createdAt: number
   connectorId?: string
   summary?: string
+  preview?: WorkToolPreview
   completedAt?: number
   errorCode?: string
 }

@@ -16,22 +16,22 @@ Silicon launch validation. Service/account checks remain blocked where the
 required OAuth client, credential, authenticated repository, Ollama service,
 model, or runtime is unavailable.
 
-The matrix result is 139 of 156 tracked behaviors passing (89.1%). Thirteen are
+The matrix result is 143 of 165 tracked behaviors passing (86.7%). Seventeen are
 externally blocked, three accurately describe capabilities that are not
-implemented or claimed, and one is partially exercised. This is not a claim
+implemented or claimed, and two are partially exercised. This is not a claim
 that blocked work passed.
 
 ## Test Summary
 
 | Result | Count | Meaning |
 | --- | ---: | --- |
-| Tests passed | 139 | Observed behavior met the stated expectation |
+| Tests passed | 143 | Observed behavior met the stated expectation |
 | Tests failed | 0 | No currently tracked test has a known failing result |
-| Tests blocked | 13 | External credential, OAuth client, service, hardware, runtime, repository, or certificate required |
+| Tests blocked | 17 | External credential, OAuth client, service, hardware, runtime, repository, or certificate required |
 | Tests not run / not implemented | 3 | Code Chat streaming/stop, rich-document attachment extraction, and layout persistence are absent and not presented as complete |
-| Tests partially run | 1 | Failure mapping is covered, but a physically disconnected-network E2E was not performed |
+| Tests partially run | 2 | Failure mapping and refreshed UI source are covered, but physical-offline and packaged visual sweeps remain |
 
-Automated regression result: **350 passed, 1 intentionally skipped, 0 failed**.
+Automated regression result: **373 passed, 1 intentionally skipped, 0 failed**.
 The skipped test is the native Keychain integration inside the ordinary suite;
 that behavior was executed separately with disposable credentials and passed.
 
@@ -53,7 +53,9 @@ that behavior was executed separately with disposable credentials and passed.
 | Code AI Chat | ✅ Ready for implemented behavior | Account-visible model selector, provider switching, messages, Markdown/code, clear, context and honest errors passed; Code Chat streaming/stop and restart history are not implemented |
 | Work Mode | ✅ Core ready | Separate surface, persistent conversations, history/search/pin, model selectors, streaming/Stop, Copy/Edit/Regenerate, text attachments, and packaged live Gemini passed |
 | Work Agent / Tools | ✅ Ready for registered tools | Bounded provider-native tool loop, registry, schemas, scopes, permissions, redaction, cancellation, local-model gate and a real Gemini browser tool turn passed |
-| Connected Apps | 🟡 Browser ready; OAuth blocked | Managed Browser real HTTPS connect/open/read/find/disconnect passed; Google/Microsoft/Discord require registered OAuth clients and consent |
+| Connected Apps | 🟡 Browser live; Google implementation awaiting live OAuth | Managed Browser passed live. Google system-browser OAuth, Keychain refresh/revoke, 11 Gmail tools and 12 Drive tools pass focused integration tests; registered client, consent, and live service tests are blocked |
+| Gmail | 🔵 Live verification blocked | Real main-process REST tools and exact send/reply confirmation are implemented and tested without network side effects; Google OAuth client, Gmail API enablement, consent, and safe mailbox are required |
+| Google Drive | 🔵 Live verification blocked | Real main-process Drive v3 tools, export, bounded text upload, mutation policies and binary-context refusal are implemented and tested; OAuth client, API enablement, consent, and safe Drive are required |
 | Workspace Indexer | ✅ Ready | Watcher freshness, ranking, ignores, binary/sensitive exclusions and responsive 1,203-file workload passed |
 | AI Agent | ✅ Ready for implemented proposal workflow | Multi-file planning, staged review, accept/undo, safe command suggestion, native approval and PTY execution passed |
 | Diff System | ✅ Ready | Modify/create/delete staging, accept/reject, filesystem match, undo and traversal denial passed |
@@ -97,9 +99,10 @@ Checksums are recorded in `dist/SHA256SUMS.txt` and the release-specific
 8. **Physically disconnected-network E2E:** transport/rate/timeout mappings and
    real provider failures are covered; disabling the machine's network was not
    performed because it would disrupt the host session.
-9. **OAuth connected apps:** Google Workspace, Microsoft 365, and Discord need
-   registered desktop OAuth clients, redirect configuration, explicit user
-   consent/scopes, and safe accounts. They are not shown as connected.
+9. **Google Workspace live OAuth:** the secure system-browser/PKCE/Keychain
+   implementation and Gmail/Drive API tools now exist, but a publisher-issued
+   desktop OAuth client, enabled APIs, consent, and safe Gmail/Drive test data
+   are required. Microsoft 365 and Discord also remain external requirements.
 10. **Rich Work attachments:** bounded text/source attachments are verified;
     PDF, Word, spreadsheet, and image extraction needs dedicated parsers and is
     explicitly unsupported in this build.
