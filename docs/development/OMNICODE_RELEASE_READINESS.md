@@ -6,7 +6,7 @@ Last updated: 2026-09-13
 
 **NOT READY for a signed public release.**
 
-OmniCode 0.3.0 is a verified unsigned release candidate for Intel macOS Sonoma.
+OmniCode 0.3.1 is a verified unsigned release candidate for Intel macOS Sonoma.
 The separate Work Mode, Code Mode regression surface, real terminal, filesystem,
 Git, local server, provider adapters, Google OAuth boundary, Gmail/Drive tools,
 opaque cross-service transfers, and persisted connector result cards are covered
@@ -17,26 +17,30 @@ validation.
 
 Public release is still blocked by Apple signing/notarization, matching-hardware
 Apple Silicon execution, and external service/account gates. In particular, the
-current 0.3.0 installers intentionally contain no publisher-issued Google desktop
-OAuth client, so Gmail and Drive remain honestly disconnected. A Gemini API key
-cannot authorize Google Workspace.
+current 0.3.1 internal-test installers contain the publisher's Testing Desktop
+OAuth metadata in the trusted main process. Real consent, shared Gmail/Drive
+identity, restart persistence, and minimal read-only API calls passed with an
+approved test account. This Testing client is not a substitute for Google's
+production verification and is not available to arbitrary public users. A
+Gemini API key cannot authorize Google Workspace.
 
-The matrix result is **152 of 173 tracked behaviors passing (87.9%)**. Seventeen
-are externally blocked, three are accurately not implemented or claimed, and one
-is partially exercised. No blocked or absent capability is counted as passing.
+The matrix result is **157 of 177 tracked behaviors passing (88.7%)**. Fourteen
+are externally blocked, three are accurately not implemented or claimed, and
+three are partially exercised. No blocked, partial, or absent capability is
+counted as passing.
 
 ## Test Summary
 
 | Result | Count | Meaning |
 | --- | ---: | --- |
-| Tests passed | 152 | Observed behavior met the stated expectation |
+| Tests passed | 157 | Observed behavior met the stated expectation |
 | Tests failed | 0 | No currently tracked test has a known failing result |
-| Tests blocked | 17 | External credential, OAuth client, service, hardware, runtime, repository, or certificate required |
+| Tests blocked | 14 | External credential, service, hardware, runtime, repository, safe test data, or certificate required |
 | Tests not run / not implemented | 3 | Code Chat streaming/stop, rich-document attachment extraction, and layout persistence are absent and not presented as complete |
-| Tests partially run | 1 | Network/error mapping is covered, but physically disconnecting the host network was not performed |
+| Tests partially run | 3 | Gmail mutations, Drive mutations, and physical network disconnection were not performed; their safe/controlled paths are covered |
 
-Automated regression result: **395 passed, 1 intentionally skipped, 0 failed**
-across 47 test files. The skipped test is native Keychain integration inside the
+Automated regression result: **403 passed, 1 intentionally skipped, 0 failed**
+across 49 test files. The skipped test is native Keychain integration inside the
 ordinary suite; that behavior was run separately with disposable credentials and
 passed. TypeScript checking and x64/arm64 production builds also pass.
 
@@ -60,41 +64,43 @@ passed. TypeScript checking and x64/arm64 production builds also pass.
 | Workspace Indexer | ✅ Ready | Watcher freshness, ranking, ignores, binary/sensitive exclusions, and a responsive 1,203-file workload passed |
 | AI Agent | ✅ Ready for implemented proposal workflow | Multi-file planning, staged review, accept/undo, safe command suggestion, native approval, and PTY execution passed |
 | Work Agent / Tools | ✅ Ready for registered tools | Bounded provider-native tool loop, schemas, permissions, redaction, cancellation, local-model gate, and browser tool turn passed |
-| Connected Apps | 🟡 Browser live; Google account test blocked | Managed Browser passed live; Google OAuth protocol and 13 Gmail/15 Drive tools pass controlled integration, but publisher client/consent/live service tests are blocked |
-| Gmail | 🔵 Live verification blocked | Search/read/thread/attachment/label/draft/send/reply/state/archive tools and exact send confirmation pass controlled tests; live mailbox requires OAuth setup |
-| Google Drive | 🔵 Live verification blocked | Search/list/read/export/download/save/upload/organize/trash/restore tools pass controlled tests; live Drive requires OAuth setup |
+| Connected Apps | 🟡 Registered connectors operational | Managed Browser passed live; real shared Google consent, identity, restart persistence, Gmail labels, and Drive search passed. Full live Google mutations/transfers still need disposable data and confirmation |
+| Gmail | 🟡 Read path live; mutations controlled-only | Real packaged label listing passed. Search/read/thread/attachment/draft/send/reply/state/archive tools and exact send confirmation pass controlled tests; content-bearing live reads and writes were deliberately not performed |
+| Google Drive | 🟡 Read path live; mutations controlled-only | Real packaged Drive search passed. List/read/export/download/save/upload/organize/trash/restore paths pass controlled tests; live content reads and writes were deliberately not performed |
 | Google Workspace transfers | ✅ Ready at the trusted boundary | Gmail attachment→Drive and Drive file→Gmail draft preserved exact bytes through opaque expiring capabilities without model-visible base64 or paths |
 | Connector result cards | ✅ Ready | Bounded Gmail/Drive previews persist and render in dark and compact-light packaged runs without internal IDs, raw bodies, bytes, paths, or renderer errors |
 | Diff System | ✅ Ready | Modify/create/delete staging, accept/reject, filesystem match, undo, and traversal denial passed |
 | Settings | ✅ Ready | User/workspace persistence, corrupt-input handling, `0600` mode, Work/Connected Apps actions, and model dropdowns passed |
 | Keychain | ✅ Ready | Save/read/restart/update/delete passed with disposable credentials; leak scans found no credential outside Keychain |
 | macOS Integration | 🟡 Partially ready | Menus, dialogs, shortcuts, Finder, window lifecycle, themes, and file associations passed; notifications/public trust require signing |
-| Production Build | 🟡 Unsigned release candidate | Four 0.3.0 artifacts pass integrity/static validation and x64 packaged runtime tests; arm64 launch plus Apple signing/notarization remain blocked |
+| Production Build | 🟡 Unsigned release candidate | Four 0.3.1 artifacts pass integrity/static validation and x64 packaged runtime tests; arm64 launch plus Apple signing/notarization remain blocked |
 
 ## Release Artifacts
 
 | Target | Artifact | Size | SHA-256 |
 | --- | --- | ---: | --- |
-| Apple Silicon installer | `dist/OmniCode-0.3.0-arm64.dmg` | 143,539,257 bytes | `5fc4e9f96e7e13d97f3ad5f28bff3c60be46577d84b1c39d3f8b0010ee0b3890` |
-| Apple Silicon archive | `dist/OmniCode-0.3.0-arm64.zip` | 141,520,936 bytes | `854bae355108853f9e7832461721f18a4dbd99faab1aae4d63167c9e58f91361` |
-| Intel installer | `dist/OmniCode-0.3.0-x64.dmg` | 147,189,913 bytes | `d36d4cbf71b21e7a9c64ffe20225cb9b3d9ca73f8b718c83737dc10ba93fdf6b` |
-| Intel archive | `dist/OmniCode-0.3.0-x64.zip` | 145,237,053 bytes | `e720dc93e1ba3bdae426e90cc3847fdacd7178f60985de4654ab8f818dac00ad` |
+| Apple Silicon installer | `dist/OmniCode-0.3.1-arm64.dmg` | 143,542,748 bytes | `4f65205b631931a80d82eb47bc2cb1d3be5dd4a723997ffdf80111d080249768` |
+| Apple Silicon archive | `dist/OmniCode-0.3.1-arm64.zip` | 141,522,193 bytes | `b36e40a1e7a87225851a6f068dcaa31f7fae954010354578797536b1d94a1788` |
+| Intel installer | `dist/OmniCode-0.3.1-x64.dmg` | 147,200,611 bytes | `6e20bcdada61ae8d0600c245c368e97b8f570015adb5703466f028c4935193ce` |
+| Intel archive | `dist/OmniCode-0.3.1-x64.zip` | 145,238,378 bytes | `b90fbbb6e8a0934ef4c5d199be3b7796bc5d1d0afc13e873fda4fca59d0216dc` |
 
 Checksums are recorded in `dist/SHA256SUMS.txt` and the release-specific
-`dist/SHA256SUMS-0.3.0.txt`.
+`dist/SHA256SUMS-0.3.1.txt`.
 
 ## Remaining Problems
 
 1. **Apple signing/notarization:** a Developer ID Application certificate and
    notarization credentials are required. Gatekeeper trust and Notification
    Center delivery are not public-release-ready until this is completed.
-2. **Apple Silicon execution:** the 0.3.0 arm64 executable and active `node-pty`
+2. **Apple Silicon execution:** the 0.3.1 arm64 executable and active `node-pty`
    module are arm64 and its archives pass, but launch/smoke must run on a matching
    Apple Silicon Mac.
-3. **Google Workspace live OAuth:** a publisher-issued desktop OAuth client,
-   enabled Gmail/Drive APIs, consent-screen/test-user setup, user consent, and
-   safe test data are required. The present installers intentionally remain
-   unconfigured rather than pretending to connect.
+3. **Google public-production approval and full live service workflows:** the
+   Testing client passed real consent and read-only Gmail/Drive probes for an
+   approved tester. Public distribution still requires the verified production
+   project/client and any required Restricted Scope security assessment. Live
+   Gmail/Drive mutations and cross-service transfers still require disposable
+   test data and exact confirmations.
 4. **OpenAI and Claude live success:** valid credentials/account access are not
    configured. Adapter, Keychain, invalid-auth, redaction, and error paths pass.
 5. **Ollama model lifecycle/inference:** Ollama and a local model are absent on
@@ -118,7 +124,8 @@ Checksums are recorded in `dist/SHA256SUMS.txt` and the release-specific
 
 ## Conclusion
 
-OmniCode 0.3.0 is ready for controlled Intel macOS Sonoma testing as an unsigned
+OmniCode 0.3.1 is ready for controlled Intel macOS Sonoma testing as an unsigned
 release candidate, with statically verified Apple Silicon installers. It is not
 ready to be labeled a signed, notarized public macOS release until the external
-Apple, matching-hardware, OAuth, and configured-service gates above are completed.
+Apple, matching-hardware, Google-production-review, and configured-service gates
+above are completed.

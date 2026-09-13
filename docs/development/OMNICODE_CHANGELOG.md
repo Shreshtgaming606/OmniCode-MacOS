@@ -3,6 +3,50 @@
 This log records repairs and audit milestones made during the no-new-features
 stabilization phase.
 
+## OmniCode 0.3.1 Google OAuth publisher integration — 2026-09-13
+
+- Added a strict build-time loader for a publisher-owned Google Desktop OAuth
+  credentials JSON. The ignored local file is bounded and schema-validated;
+  matching Desktop public-client metadata enters only the trusted main bundle.
+- Treated the downloaded Desktop `client_secret` as extractable compatibility
+  metadata, never as a confidential server-side credential or security boundary.
+  Authorization and refresh use it only where expected by Google's endpoint and
+  retain Authorization Code flow with PKCE S256, random state, and a random
+  loopback callback.
+- Added explicit ignore rules and a safe `.env.example` for developer-only OAuth
+  build inputs. The supplied local credentials file was restricted to mode
+  `0600`; automated comparison confirmed its raw JSON and absolute path are
+  absent from compiled output and tracked source.
+- Unified Gmail and Google Drive authorization into one shared Google account
+  consent flow and shared status summary in Work Mode and Settings. Normal users
+  see only account connection language, never client files or Google Cloud
+  setup instructions.
+- Fixed a live-test bug that erased Google authorization timeout, cancellation,
+  test-user, and configuration failures during the post-connect service refresh.
+  The shared manager now retains the sanitized failure across both Google cards
+  until a successful retry or disconnect.
+- Added developer Testing-mode guidance for an account that is not authorized as
+  an OAuth test user without exposing that publisher-only wording in production
+  builds.
+- Added `GOOGLE_OAUTH_PRODUCTION.md` with the testing/production project split,
+  consent configuration, verification, Restricted Scope, data-disclosure,
+  security-assessment, signing, and release-checklist requirements.
+- Expanded the automated suite to 403 passing tests with one intentionally
+  skipped native Keychain test; TypeScript checking and production compilation
+  also pass.
+- Rebuilt and launched an isolated 0.3.1 x64 package during validation. After
+  the account was approved as a test user, the real system-browser consent and
+  token exchange completed, both Gmail and Drive reported the same verified
+  shared account, and the grant remained connected after a full app restart.
+- Fixed the real Google Desktop token exchange after the first approved consent
+  reached `invalid_request`: OmniCode now sends the matching extractable Desktop
+  client metadata during authorization-code exchange and refresh while retaining
+  PKCE as the authorization-code protection boundary.
+- Performed minimal read-only live API checks through the packaged app. Gmail
+  returned a valid label array and Drive returned a valid empty result for a
+  deliberately impossible query; the audit printed only counts and changed no
+  mailbox or Drive data.
+
 ## OmniCode 0.3.0 release-candidate verification — 2026-09-13
 
 - Added integrity-checked opaque Work transfers so Gmail attachments can move

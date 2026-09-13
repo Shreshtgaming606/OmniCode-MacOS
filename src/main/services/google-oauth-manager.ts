@@ -7,6 +7,7 @@ import { SecureItemNotFoundError, SecureKeychainStore } from './secure-keychain-
 
 declare const __OMNICODE_GOOGLE_OAUTH_CLIENT_ID__: string
 declare const __OMNICODE_GOOGLE_OAUTH_CLIENT_SECRET__: string
+declare const __OMNICODE_GOOGLE_OAUTH_TESTING__: boolean
 
 const AUTHORIZATION_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth'
 const TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token'
@@ -19,12 +20,14 @@ const DEFAULT_AUTHORIZATION_TIMEOUT_MS = 5 * 60_000
 export const GOOGLE_IDENTITY_SCOPES = ['openid', 'email', 'profile'] as const
 export const GOOGLE_GMAIL_SCOPES = ['https://www.googleapis.com/auth/gmail.modify'] as const
 export const GOOGLE_DRIVE_SCOPES = ['https://www.googleapis.com/auth/drive'] as const
+export const GOOGLE_WORKSPACE_SCOPES = [...GOOGLE_IDENTITY_SCOPES, ...GOOGLE_GMAIL_SCOPES, ...GOOGLE_DRIVE_SCOPES] as const
 
 export type GoogleWorkspaceService = 'gmail' | 'google-drive'
 
 export interface GoogleOAuthConfig {
   clientId: string
   clientSecret?: string
+  testing?: boolean
 }
 
 export interface GoogleAccountIdentity {
@@ -71,7 +74,7 @@ interface GoogleOAuthDependencies {
 
 class GoogleOAuthConfigurationError extends Error {
   constructor() {
-    super('Google Workspace OAuth is not configured in this build. Add the registered desktop OAuth client before connecting.')
+    super('Google sign-in is unavailable in this copy of OmniCode. Reinstall the official app or contact support.')
     this.name = 'GoogleOAuthConfigurationError'
   }
 }
@@ -90,6 +93,13 @@ class GoogleAuthenticationExpiredError extends Error {
   }
 }
 
+class GoogleOAuthAuthorizationError extends Error {
+  constructor(readonly connectorState: ConnectorConnectionState, message: string) {
+    super(message)
+    this.name = 'GoogleOAuthAuthorizationError'
+  }
+}
+
 function cleanConfigValue(value: string | undefined, label: string, maximum: number): string | undefined {
   if (value === undefined || value.trim() === '') return undefined
   const normalized = value.trim()
@@ -102,7 +112,15 @@ function cleanConfigValue(value: string | undefined, label: string, maximum: num
 function buildTimeGoogleOAuthConfig(): GoogleOAuthConfig | undefined {
   const clientId = typeof __OMNICODE_GOOGLE_OAUTH_CLIENT_ID__ === 'string' ? __OMNICODE_GOOGLE_OAUTH_CLIENT_ID__ : ''
   const clientSecret = typeof __OMNICODE_GOOGLE_OAUTH_CLIENT_SECRET__ === 'string' ? __OMNICODE_GOOGLE_OAUTH_CLIENT_SECRET__ : ''
-  return clientId ? { clientId, ...(clientSecret ? { clientSecret } : {}) } : undefined
+  const testing = typeof __OMNICODE_GOOGLE_OAUTH_TESTING__ === 'boolean' && __OMNICODE_GOOGLE_OAUTH_TESTING__
+  return clientId ? { clientId, ...(clientSecret ? { clientSecret } : {}), testing } : undefined
+}
+
+function parseTestingFlag(value: string | undefined): boolean {
+  const normalized = value?.trim().toLowerCase()
+  if (!normalized || normalized === '0' || normalized === 'false') return false
+  if (normalized === '1' || normalized === 'true') return true
+  throw new Error('Google OAuth testing flag must be 1, 0, true, or false.')
 }
 
 export function readGoogleOAuthConfig(
@@ -111,16 +129,20 @@ export function readGoogleOAuthConfig(
 ): GoogleOAuthConfig | undefined {
   const runtimeClientId = cleanConfigValue(environment.OMNICODE_GOOGLE_OAUTH_CLIENT_ID, 'Google OAuth client ID', 512)
   const clientId = runtimeClientId ?? cleanConfigValue(packagedConfig?.clientId, 'Google OAuth client ID', 512)
-  const clientSecret = cleanConfigValue(
-    runtimeClientId ? environment.OMNICODE_GOOGLE_OAUTH_CLIENT_SECRET : environment.OMNICODE_GOOGLE_OAUTH_CLIENT_SECRET ?? packagedConfig?.clientSecret,
-    'Google OAuth client secret',
-    2_048
-  )
   if (!clientId) return undefined
   if (!/^[A-Za-z0-9._-]+\.apps\.googleusercontent\.com$/u.test(clientId)) {
     throw new Error('Google OAuth client ID is not a registered Google desktop client identifier.')
   }
-  return { clientId, ...(clientSecret ? { clientSecret } : {}) }
+  const clientSecret = cleanConfigValue(
+    runtimeClientId ? environment.OMNICODE_GOOGLE_OAUTH_CLIENT_SECRET : packagedConfig?.clientSecret,
+    'Google OAuth Desktop client metadata',
+    2_048
+  )
+  return {
+    clientId,
+    ...(clientSecret ? { clientSecret } : {}),
+    testing: runtimeClientId ? parseTestingFlag(environment.OMNICODE_GOOGLE_OAUTH_TESTING) : Boolean(packagedConfig?.testing)
+  }
 }
 
 export function scopesForGoogleService(service: GoogleWorkspaceService): readonly string[] {
@@ -207,7 +229,8 @@ function callbackPage(success: boolean): string {
 
 async function openLoopbackCallback(
   expectedState: string,
-  timeoutMs: number
+  timeoutMs: number,
+  testing: boolean
 ): Promise<{ redirectUri: string; code: Promise<string>; close(): Promise<void> }> {
   let settleResolve: ((code: string) => void) | undefined
   let settleReject: ((error: Error) => void) | undefined
@@ -231,7 +254,7 @@ async function openLoopbackCallback(
     if (!safeEqual(state, expectedState)) {
       response.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
       response.end(callbackPage(false))
-      settle(new Error('Google OAuth state validation failed. No account was connected.'))
+      settle(new GoogleOAuthAuthorizationError('service-unavailable', 'Google OAuth state validation failed. No account was connected.'))
       return
     }
     const oauthError = requestUrl.searchParams.get('error')
@@ -239,8 +262,17 @@ async function openLoopbackCallback(
     const success = Boolean(authorizationCode && !oauthError)
     response.writeHead(success ? 200 : 400, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
     response.end(callbackPage(success))
-    if (oauthError) settle(new Error(oauthError === 'access_denied' ? 'Google authorization was cancelled.' : 'Google did not authorize the requested access.'))
-    else if (!authorizationCode || authorizationCode.length > 4_096) settle(new Error('Google returned an invalid authorization code.'))
+    if (oauthError) {
+      const message = testing && oauthError === 'access_denied'
+        ? 'Google authorization was denied. This developer build is in Testing mode; sign in with an authorized OAuth test user or add the account in Google Auth Platform.'
+        : oauthError === 'access_denied'
+          ? 'Google authorization was cancelled.'
+          : 'Google did not authorize the requested access.'
+      settle(new GoogleOAuthAuthorizationError('not-connected', message))
+    }
+    else if (!authorizationCode || authorizationCode.length > 4_096) {
+      settle(new GoogleOAuthAuthorizationError('service-unavailable', 'Google returned an invalid authorization code.'))
+    }
     else settle(undefined, authorizationCode)
   })
   server.on('clientError', (_error, socket) => socket.destroy())
@@ -249,7 +281,10 @@ async function openLoopbackCallback(
     server.listen(0, '127.0.0.1', () => { server.off('error', reject); resolve() })
   })
   const address = server.address() as AddressInfo
-  timer = setTimeout(() => settle(new Error('Google authorization timed out. Try connecting again.')), timeoutMs)
+  const timeoutMessage = testing
+    ? 'Google authorization timed out. This developer build is in Testing mode; use an authorized OAuth test user or add the account in Google Auth Platform, then try again.'
+    : 'Google authorization timed out. Try connecting again.'
+  timer = setTimeout(() => settle(new GoogleOAuthAuthorizationError('service-unavailable', timeoutMessage)), timeoutMs)
   timer.unref()
   return {
     redirectUri: `http://127.0.0.1:${address.port}${CALLBACK_PATH}`,
@@ -267,6 +302,7 @@ export class GoogleOAuthManager {
   readonly #randomBytes: (size: number) => Buffer
   readonly #authorizationTimeoutMs: number
   #connecting = false
+  #lastConnectionFailure: GoogleServiceVerification | undefined
 
   constructor(
     private readonly config: GoogleOAuthConfig | undefined,
@@ -281,28 +317,35 @@ export class GoogleOAuthManager {
 
   isConfigured(): boolean { return Boolean(this.config?.clientId) }
 
-  async connect(service: GoogleWorkspaceService): Promise<GoogleAccountIdentity> {
+  async connect(_service: GoogleWorkspaceService): Promise<GoogleAccountIdentity> {
     if (this.#connecting) throw new Error('A Google account connection is already in progress.')
     this.#connecting = true
     try {
-      return await this.#connect(service)
+      const account = await this.#connect()
+      this.#lastConnectionFailure = undefined
+      return account
+    } catch (error) {
+      const state = this.#stateForError(error)
+      this.#lastConnectionFailure = {
+        state,
+        message: this.#messageForError(error, state),
+        checkedAt: new Date(this.#now()).toISOString(),
+        grantedScopes: []
+      }
+      throw error
     } finally {
       this.#connecting = false
     }
   }
 
-  async #connect(service: GoogleWorkspaceService): Promise<GoogleAccountIdentity> {
+  async #connect(): Promise<GoogleAccountIdentity> {
     const config = this.#requireConfig()
     const previous = await this.#loadOptional()
-    const scopes = uniqueScopes([
-      ...GOOGLE_IDENTITY_SCOPES,
-      ...(previous?.scopes ?? []),
-      ...scopesForGoogleService(service)
-    ])
+    const scopes = uniqueScopes([...GOOGLE_WORKSPACE_SCOPES, ...(previous?.scopes ?? [])])
     const verifier = this.#randomBytes(64).toString('base64url')
     const challenge = createHash('sha256').update(verifier, 'ascii').digest('base64url')
     const state = this.#randomBytes(32).toString('base64url')
-    const callback = await openLoopbackCallback(state, this.#authorizationTimeoutMs)
+    const callback = await openLoopbackCallback(state, this.#authorizationTimeoutMs, Boolean(config.testing))
     try {
       const authorizationUrl = new URL(AUTHORIZATION_ENDPOINT)
       authorizationUrl.search = new URLSearchParams({
@@ -343,9 +386,12 @@ export class GoogleOAuthManager {
     try {
       const record = await this.#loadOptional()
       if (!record) {
+        if (this.#lastConnectionFailure) {
+          return { ...this.#lastConnectionFailure, checkedAt, grantedScopes: [] }
+        }
         return {
           state: 'not-connected',
-          message: this.isConfigured() ? 'Connect a Google account to continue.' : 'Google Workspace OAuth is not configured in this build.',
+          message: 'Connect a Google account to continue.',
           checkedAt,
           grantedScopes: []
         }
@@ -421,6 +467,7 @@ export class GoogleOAuthManager {
     const record = await this.#loadOptional()
     if (!record) {
       await this.store.delete(KEYCHAIN_ACCOUNT)
+      this.#lastConnectionFailure = undefined
       return
     }
     const token = record.refreshToken ?? record.accessToken
@@ -431,6 +478,7 @@ export class GoogleOAuthManager {
     })
     if (!response.ok && response.status !== 400) throw await responseError(response)
     await this.store.delete(KEYCHAIN_ACCOUNT)
+    this.#lastConnectionFailure = undefined
   }
 
   async #exchangeCode(code: string, verifier: string, redirectUri: string): Promise<{
@@ -504,6 +552,7 @@ export class GoogleOAuthManager {
   }
 
   #stateForError(error: unknown): ConnectorConnectionState {
+    if (error instanceof GoogleOAuthAuthorizationError) return error.connectorState
     if (error instanceof GoogleAuthenticationExpiredError) return 'authentication-expired'
     if (error instanceof GoogleOAuthConfigurationError) return 'not-connected'
     if (error instanceof GoogleOAuthHttpError) {
@@ -517,7 +566,7 @@ export class GoogleOAuthManager {
   }
 
   #messageForError(error: unknown, state: ConnectorConnectionState): string {
-    if (error instanceof GoogleOAuthConfigurationError || error instanceof GoogleAuthenticationExpiredError || error instanceof GoogleOAuthHttpError) {
+    if (error instanceof GoogleOAuthAuthorizationError || error instanceof GoogleOAuthConfigurationError || error instanceof GoogleAuthenticationExpiredError || error instanceof GoogleOAuthHttpError) {
       return error.message
     }
     if (state === 'network-error') return 'Google could not be reached. Check the network and try again.'

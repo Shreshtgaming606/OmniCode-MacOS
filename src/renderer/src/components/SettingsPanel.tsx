@@ -3,6 +3,7 @@ import { CheckCircle2, ExternalLink, FolderClosed, Globe2, KeyRound, LoaderCircl
 import type { AIModel, AIProviderConnectionStatus, AIProviderId, ThemePreference, WorkspaceSettings } from '../../../shared/contracts'
 import type { AIModelDescriptor, CloudAIProviderId } from '../../../shared/model-contracts'
 import type { ConnectorDescriptor } from '../../../shared/tool-contracts'
+import { googleAccountSummary } from '../lib/google-account-status'
 
 type CloudProvider = Exclude<AIProviderId, 'ollama'>
 const PROVIDERS: Array<{ id: CloudProvider; name: string; placeholder: string }> = [
@@ -221,6 +222,7 @@ export function SettingsPanel({
       setConnectorBusy(null)
     }
   }
+  const googleAccount = googleAccountSummary(connectors)
   return <div className="settings-overlay" role="dialog" aria-modal="true" aria-label="Settings">
     <div className="settings-panel">
       <header><div><h1>Settings</h1><p>User settings · stored locally</p></div><button onClick={onClose} title="Close settings"><X /></button></header>
@@ -268,6 +270,7 @@ export function SettingsPanel({
             <div className="work-settings-summary"><Shield /><span><strong>Tool permissions stay in the main process</strong><small>AI-generated tool requests are schema-validated and checked before a connector can run. Write and high-impact actions require confirmation.</small></span></div>
           </section>
           <section id="connected-apps"><h2>Work Mode · Connected Apps</h2><p>Only real registered connectors appear here. A connector is shown as connected only after its own connection verification succeeds.</p>
+            {googleAccount && <div className={`settings-google-account state-${googleAccount.state}`}><span>{googleAccount.state === 'connected' ? <Shield /> : <Plug />}</span><span><strong>Google account</strong><small>{googleAccount.message}</small></span></div>}
             <div className="settings-connectors">
               {connectors.map((connector) => {
                 const connected = connector.status.state === 'connected'

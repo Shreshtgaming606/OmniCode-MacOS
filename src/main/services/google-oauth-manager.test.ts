@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import {
+  GOOGLE_DRIVE_SCOPES,
   GOOGLE_GMAIL_SCOPES,
   GoogleOAuthManager,
   readGoogleOAuthConfig,
@@ -33,7 +34,8 @@ function memoryStore(): SecureKeychainStore {
 
 const config = {
   clientId: '123456789-test.apps.googleusercontent.com',
-  clientSecret: 'installed-client-secret'
+  clientSecret: 'desktop-public-value',
+  testing: false
 }
 
 describe('GoogleOAuthManager', () => {
@@ -49,7 +51,7 @@ describe('GoogleOAuthManager', () => {
           refresh_token: 'refresh-token-value',
           expires_in: 3_600,
           token_type: 'Bearer',
-          scope: `openid email profile ${GOOGLE_GMAIL_SCOPES[0]}`
+          scope: `openid email profile ${GOOGLE_GMAIL_SCOPES[0]} ${GOOGLE_DRIVE_SCOPES[0]}`
         }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }
       if (url === 'https://openidconnect.googleapis.com/v1/userinfo') {
@@ -80,11 +82,16 @@ describe('GoogleOAuthManager', () => {
     expect(authorizationUrl?.searchParams.get('state')).toMatch(/^[A-Za-z0-9_-]{40,}$/u)
     expect(authorizationUrl?.searchParams.get('redirect_uri')).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/oauth2\/callback$/u)
     expect(authorizationUrl?.searchParams.get('scope')).toContain(GOOGLE_GMAIL_SCOPES[0])
-    expect(authorizationUrl?.toString()).not.toContain(config.clientSecret)
+    expect(authorizationUrl?.searchParams.get('scope')).toContain(GOOGLE_DRIVE_SCOPES[0])
+    expect(authorizationUrl?.toString()).not.toContain('desktop-public-value')
     expect(new URLSearchParams(tokenBody).get('code_verifier')).toMatch(/^[A-Za-z0-9_-]{43,128}$/u)
-    expect(new URLSearchParams(tokenBody).get('client_secret')).toBe(config.clientSecret)
+    expect(new URLSearchParams(tokenBody).get('client_secret')).toBe('desktop-public-value')
 
     await expect(manager.verify('gmail')).resolves.toMatchObject({
+      state: 'connected',
+      message: 'Connected as person@example.com.'
+    })
+    await expect(manager.verify('google-drive')).resolves.toMatchObject({
       state: 'connected',
       message: 'Connected as person@example.com.'
     })
@@ -100,7 +107,11 @@ describe('GoogleOAuthManager', () => {
       state: 'not-connected',
       grantedScopes: []
     })
-    await expect(manager.connect('google-drive')).rejects.toThrow('not configured')
+    await expect(manager.connect('google-drive')).rejects.toThrow('unavailable')
+    await expect(manager.verify('gmail')).resolves.toMatchObject({
+      state: 'not-connected',
+      message: expect.stringContaining('unavailable')
+    })
   })
 
   it('rejects a callback whose anti-CSRF state does not match', async () => {
@@ -116,6 +127,31 @@ describe('GoogleOAuthManager', () => {
     await expect(manager.connect('gmail')).rejects.toThrow('state validation failed')
   })
 
+  it('explains the authorized test-user requirement only in developer Testing builds', async () => {
+    const manager = new GoogleOAuthManager({ ...config, testing: true }, memoryStore(), {
+      fetch: vi.fn() as unknown as typeof fetch,
+      authorizationTimeoutMs: 2_000,
+      openExternal: async (url) => {
+        const parsed = new URL(url)
+        const callback = parsed.searchParams.get('redirect_uri') as string
+        const state = parsed.searchParams.get('state') as string
+        queueMicrotask(() => {
+          void globalThis.fetch(`${callback}?error=access_denied&state=${encodeURIComponent(state)}`)
+        })
+      }
+    })
+
+    await expect(manager.connect('gmail')).rejects.toThrow('authorized OAuth test user')
+    await expect(manager.verify('gmail')).resolves.toMatchObject({
+      state: 'not-connected',
+      message: expect.stringContaining('authorized OAuth test user')
+    })
+    await expect(manager.verify('google-drive')).resolves.toMatchObject({
+      state: 'not-connected',
+      message: expect.stringContaining('authorized OAuth test user')
+    })
+  })
+
   it('prevents simultaneous Google authorization windows from racing the shared grant', async () => {
     let release: (() => void) | undefined
     const opened = new Promise<void>((resolve) => { release = resolve })
@@ -129,6 +165,24 @@ describe('GoogleOAuthManager', () => {
     await expect(manager.connect('google-drive')).rejects.toThrow('already in progress')
     release?.()
     await expect(first).rejects.toThrow('timed out')
+    await expect(manager.verify('google-drive')).resolves.toMatchObject({
+      state: 'service-unavailable',
+      message: expect.stringContaining('timed out')
+    })
+  })
+
+  it('explains test-user setup when Google leaves a Testing-build authorization on its browser error page', async () => {
+    const manager = new GoogleOAuthManager({ ...config, testing: true }, memoryStore(), {
+      fetch: vi.fn() as unknown as typeof fetch,
+      authorizationTimeoutMs: 25,
+      openExternal: async () => undefined
+    })
+
+    await expect(manager.connect('google-drive')).rejects.toThrow('authorized OAuth test user')
+    await expect(manager.verify('gmail')).resolves.toMatchObject({
+      state: 'service-unavailable',
+      message: expect.stringContaining('Google Auth Platform')
+    })
   })
 
   it('refreshes an expired access token and revokes the grant on disconnect', async () => {
@@ -144,6 +198,7 @@ describe('GoogleOAuthManager', () => {
           token_type: 'Bearer', scope: `openid email profile ${GOOGLE_GMAIL_SCOPES[0]}`
         }), { status: 200, headers: { 'Content-Type': 'application/json' } })
         expect(new URLSearchParams(String(init?.body)).get('refresh_token')).toBe('refresh-value')
+        expect(new URLSearchParams(String(init?.body)).get('client_secret')).toBe('desktop-public-value')
         return new Response(JSON.stringify({ access_token: 'refreshed-access', expires_in: 3_600, token_type: 'Bearer' }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' }
@@ -186,10 +241,14 @@ describe('GoogleOAuthManager', () => {
 
 describe('Google OAuth configuration', () => {
   it('accepts only a registered Google client ID and maps the minimum service scopes', () => {
-    expect(readGoogleOAuthConfig({ OMNICODE_GOOGLE_OAUTH_CLIENT_ID: config.clientId })).toEqual({ clientId: config.clientId })
+    expect(readGoogleOAuthConfig({ OMNICODE_GOOGLE_OAUTH_CLIENT_ID: config.clientId })).toEqual({ clientId: config.clientId, testing: false })
     expect(readGoogleOAuthConfig({}, config)).toEqual(config)
-    expect(readGoogleOAuthConfig({ OMNICODE_GOOGLE_OAUTH_CLIENT_ID: '999-runtime.apps.googleusercontent.com' }, config)).toEqual({
-      clientId: '999-runtime.apps.googleusercontent.com'
+    expect(readGoogleOAuthConfig({
+      OMNICODE_GOOGLE_OAUTH_CLIENT_ID: '999-runtime.apps.googleusercontent.com',
+      OMNICODE_GOOGLE_OAUTH_TESTING: 'true'
+    }, config)).toEqual({
+      clientId: '999-runtime.apps.googleusercontent.com',
+      testing: true
     })
     expect(() => readGoogleOAuthConfig({ OMNICODE_GOOGLE_OAUTH_CLIENT_ID: 'not-a-google-client' })).toThrow('registered Google')
     expect(scopesForGoogleService('gmail')).toEqual(GOOGLE_GMAIL_SCOPES)

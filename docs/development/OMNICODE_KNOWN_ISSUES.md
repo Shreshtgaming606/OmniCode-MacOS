@@ -624,28 +624,33 @@ lost. Secrets, tokens, and authorization headers must never be included here.
   when the exact installed model explicitly has `toolUse: true`; the UI shows an
   honest chat-only notice and focused regression tests cover the boundary.
 
-## OMI-039 — Google Workspace live authorization is externally blocked
+## OMI-039 — Google Workspace live authorization was externally blocked — Resolved
 
 - Severity: High for Gmail/Drive release readiness
-- Reproduction: Open Connected Apps and connect Gmail or Google Drive in a build
-  without `OMNICODE_GOOGLE_OAUTH_CLIENT_ID`.
+- Reproduction: Open Connected Apps in the developer-client build, connect Gmail
+  or Google Drive, and complete consent with an account that has not been added
+  to the Google Cloud OAuth test-user list.
 - Expected: A registered OmniCode desktop OAuth client opens Google consent in
   the system browser; after consent the account is verified and service tools
   can perform real API operations.
-- Actual: OmniCode honestly reports that Google Workspace OAuth is not
-  configured. The protocol, Keychain, refresh/revoke, Gmail REST tools, Drive
-  REST tools, confirmation boundaries, and failure mapping pass automated tests,
-  but there is no publisher-issued OAuth client or user consent on this host.
-- Suspected cause: Google Cloud project setup, API enablement, consent-screen
-  configuration, OAuth verification, and a safe test account are external.
+- Actual: The first attempt correctly reached Google's `403 access_denied` page.
+  After the account was added as an approved tester, the packaged 0.3.1 app
+  completed consent, verified the identity, connected both Gmail and Drive,
+  retained the Keychain grant across restart, and completed minimal read-only
+  calls to both APIs.
+- Suspected cause: The Google Cloud project was in Testing mode and initially
+  lacked the selected account in its explicit test-user list.
 - Relevant files: `src/main/services/google-oauth-manager.ts`,
   `src/main/services/secure-keychain-store.ts`,
   `src/main/connectors/gmail-connector.ts`,
   `src/main/connectors/google-drive-connector.ts`,
-  `electron.vite.config.ts`,
+  `electron.vite.config.ts`, `src/build/google-oauth-build-config.ts`,
   `src/main/index.ts`.
-- Current status: 🔵 BLOCKED — USER CONFIGURATION REQUIRED. A Gemini API key is
-  not a Workspace OAuth credential and was not read, printed, or repurposed.
+- Current status: ✅ Resolved — the account was approved, real consent and API
+  access passed, and no token/account data entered logs or renderer storage.
+  Full write/mutation checks remain deliberately unrun without disposable data
+  and exact per-action confirmation; that does not invalidate the resolved OAuth
+  connection defect.
 
 ## OMI-040 — Connector success activity lacked useful result cards — Resolved
 
@@ -679,11 +684,12 @@ lost. Secrets, tokens, and authorization headers must never be included here.
 - Relevant files: `electron.vite.config.ts`,
   `src/main/services/google-oauth-manager.ts`,
   `src/main/services/google-oauth-manager.test.ts`.
-- Current status: ✅ Resolved — publisher values can be embedded at build time
-  into the trusted main bundle, runtime overrides remain available, and tests
-  prevent a different runtime client ID from inheriting a packaged secret. The
-  current 0.3.0 build intentionally contains no publisher client and therefore
-  reports the external OMI-039 block honestly.
+- Current status: ✅ Resolved — an ignored Desktop JSON is validated at build
+  time; its matching public-client metadata and Testing marker enter only the
+  trusted main bundle while the raw JSON/path remain absent from compiled output
+  and tracked source. The Desktop secret is assumed extractable and is not a
+  security boundary. Runtime overrides cannot mix client identities; normal
+  users receive no publisher configuration UI.
 
 ## OMI-042 — Fresh-profile startup soak misclassified onboarding as a timeout — Resolved
 
@@ -700,3 +706,44 @@ lost. Secrets, tokens, and authorization headers must never be included here.
   surface, advances safely, and records separate cold shell/workspace timing.
   All three 0.3.0 x64 cycles completed with zero renderer/fatal errors and full
   child-process cleanup.
+
+## OMI-043 — Google authorization failures disappeared after refresh — Resolved
+
+- Severity: High for diagnosability and honest connection state
+- Reproduction: Start a Google connection, then cancel it, use an unauthorized
+  test account, submit an invalid callback, or allow the callback to time out.
+- Expected: Gmail and Drive retain the sanitized failure so the user can see why
+  the shared account did not connect.
+- Actual: Connector Manager first recorded the real failure, but the subsequent
+  shared-service verification found no Keychain token and replaced both cards
+  with the generic Connect a Google account state.
+- Suspected cause: Transient authorization failure state lived only on the
+  individual connector entry while the shared OAuth manager remained unaware of
+  it.
+- Relevant files: `src/main/services/google-oauth-manager.ts`,
+  `src/main/services/google-oauth-manager.test.ts`, `src/main/index.ts`.
+- Current status: ✅ Resolved — the shared manager retains a bounded, sanitized
+  failure across Gmail and Drive verification until a successful retry or
+  disconnect. Regression assertions cover missing publisher configuration,
+  Testing-mode access denial, and timeout retention.
+
+## OMI-044 — Approved Google Desktop consent failed at token exchange — Resolved
+
+- Severity: High for Google Workspace connectivity
+- Reproduction: Complete approved Google consent with the registered Desktop
+  client while sending only the client ID and PKCE verifier to the token endpoint.
+- Expected: The authorization code exchanges for a token and the verified shared
+  account connects Gmail and Drive.
+- Actual: Google redirected successfully, but this registered client returned a
+  sanitized `invalid_request` from its token endpoint.
+- Suspected cause: Although installed applications cannot keep a confidential
+  secret and PKCE remains the meaningful code protection, this Desktop client
+  registration expects its matching extractable `client_secret` metadata on
+  token exchange and refresh.
+- Relevant files: `src/build/google-oauth-build-config.ts`,
+  `electron.vite.config.ts`, `src/main/services/google-oauth-manager.ts`,
+  `src/main/services/google-oauth-manager.test.ts`.
+- Current status: ✅ Resolved — the build loader passes matching Desktop client
+  metadata only to the trusted main bundle, the OAuth manager supplies it to
+  exchange/refresh requests, renderer/source/leak audits pass, and a subsequent
+  real packaged authorization plus restart completed successfully.

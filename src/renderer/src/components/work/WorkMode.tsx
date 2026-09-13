@@ -18,6 +18,7 @@ import type {
   WorkMessage
 } from '../../../../shared/work-contracts'
 import { storedAIProvider } from '../../lib/preferences'
+import { googleAccountSummary } from '../../lib/google-account-status'
 import { WorkModeShell, type WorkConnectedAppSummary } from './WorkModeShell'
 import './WorkMode.css'
 
@@ -142,6 +143,7 @@ function ConnectedAppsDialog({
     window.addEventListener('keydown', dismiss, true)
     return () => window.removeEventListener('keydown', dismiss, true)
   }, [onClose])
+  const googleAccount = googleAccountSummary(connectors)
   return <div className="modal-backdrop work-apps-backdrop" onMouseDown={(event) => {
     if (event.target === event.currentTarget) onClose()
   }}>
@@ -149,6 +151,7 @@ function ConnectedAppsDialog({
       <header><div><Plug /><span><h2>Connected Apps</h2><small>Only verified connections are shown as connected.</small></span></div><button type="button" autoFocus title="Close Connected Apps" onClick={onClose}><X /></button></header>
       <div className="work-apps-notice"><ShieldCheck /><span><strong>Permission boundary</strong><small>Connections, OAuth tokens, and tool permissions stay in OmniCode’s main process. Read tools are bounded; account changes require confirmation, and email is never sent without exact-content approval.</small></span></div>
       <div className="work-apps-list">
+        {googleAccount && <div className={`work-google-account state-${googleAccount.state}`}><span>{googleAccount.state === 'connected' ? <ShieldCheck /> : <Plug />}</span><span><strong>Google account</strong><small>{googleAccount.message}</small></span></div>}
         {connectors.map((connector) => {
           const connected = connector.status.state === 'connected'
           const busy = busyId === connector.id || connector.status.state === 'connecting'

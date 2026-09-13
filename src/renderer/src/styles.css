@@ -682,6 +682,15 @@ kbd { min-width: 23px; padding: 2px 5px; border: 1px solid var(--border); border
 .work-settings-summary span { display: grid; gap: 3px; }
 .work-settings-summary small { color: var(--text-muted); line-height: 1.4; }
 .settings-connectors { display: grid; gap: var(--space-3); }
+.settings-google-account { margin-bottom: var(--space-3); padding: 11px 13px; display: grid; grid-template-columns: 30px minmax(0, 1fr); align-items: center; gap: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-editor); }
+.settings-google-account > span:first-child { width: 30px; height: 30px; display: grid; place-items: center; border-radius: var(--radius-md); color: var(--text-muted); background: var(--bg-hover); }
+.settings-google-account > span:first-child svg { width: 16px; height: 16px; }
+.settings-google-account > span:last-child { min-width: 0; display: grid; gap: 2px; }
+.settings-google-account strong { font-size: var(--font-sm); }
+.settings-google-account small { color: var(--text-secondary); line-height: 1.4; overflow-wrap: anywhere; }
+.settings-google-account.state-connected { border-color: color-mix(in srgb, var(--success) 34%, var(--border)); background: color-mix(in srgb, var(--success) 7%, var(--bg-editor)); }
+.settings-google-account.state-connected > span:first-child { color: var(--success); background: color-mix(in srgb, var(--success) 12%, transparent); }
+.settings-google-account.state-network-error, .settings-google-account.state-service-unavailable, .settings-google-account.state-authentication-expired { border-color: color-mix(in srgb, var(--danger) 30%, var(--border)); }
 .settings-connector { padding: var(--space-4); display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-raised); box-shadow: var(--shadow-xs); }
 .settings-connector:hover { border-color: var(--border-strong); box-shadow: var(--shadow-sm); }
 .settings-connector-heading { display: flex; align-items: center; gap: var(--space-3); }

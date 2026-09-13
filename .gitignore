@@ -7,4 +7,10 @@ release/
 .env
 .env.*
 !.env.example
+# Developer-only Google OAuth build inputs. Official client identity is read at
+# build time; raw downloaded credential files must never enter source control.
+.env.local
+client_secret_*.apps.googleusercontent.com.json
+google-oauth-client*.json
+.omnicode-oauth/
 .omnicode/cache/

@@ -3,12 +3,16 @@
 ## Status
 
 The production connector code, permission boundary, opaque transfer layer, and
-automated integration coverage are implemented. Live account verification is
-externally blocked. OmniCode's Gemini API-key integration is separate: a Gemini
-API key is not a Google Workspace OAuth credential and cannot authorize Gmail
-or Drive. Gmail and Drive remain honestly disconnected until a registered
-desktop OAuth client is supplied and the user grants consent in their system
-browser.
+automated integration coverage are implemented. A real publisher-owned Desktop
+OAuth client is now configured locally as an ignored developer build input; its
+downloaded JSON is not part of source, Git, or packaged app resources. Its
+Desktop public-client metadata is compiled only into the trusted main bundle
+and is not treated as confidential. A listed test account completed real
+system-browser consent, both services verified the same account, the grant
+survived app restart through Keychain, and minimal read-only Gmail and Drive API
+calls passed. OmniCode's Gemini API-key integration is separate: a Gemini API
+key is not a Google Workspace OAuth credential and cannot authorize Gmail or
+Drive.
 
 Gmail registers 13 real tools and Drive registers 15. Results are projected into
 small email/file cards using display-only fields; internal Gmail/Drive IDs,
@@ -51,8 +55,10 @@ Official references:
 ## Scope policy
 
 Google's installed-app documentation explicitly states that incremental
-authorization is not supported for installed apps. OmniCode therefore does not
-claim it can silently add one scope at a time. It follows this policy:
+authorization is not supported for installed apps. OmniCode therefore requests
+the complete currently implemented Google Workspace permission set when the
+user connects either Gmail or Drive. One verified account grant serves both
+services. It follows this policy:
 
 - Identity: `openid`, `email`, and `profile`, used to display the connected
   account and verify the token belongs to a real Google user.
@@ -66,28 +72,26 @@ claim it can silently add one scope at a time. It follows this policy:
 
 Both service scopes are classified as restricted by Google and require the
 appropriate OAuth consent configuration, public-app verification, and possibly
-additional review. If a second service is enabled after the first, OmniCode
-reauthorizes with the complete union of the already granted scopes and the new
-service scope.
+additional review.
 
 ## OAuth client configuration
 
 The desktop application requires a Google Cloud OAuth client ID created for an
-installed/desktop application with the Gmail and Drive APIs enabled. Developer
-launches read:
+installed/Desktop application with the Gmail and Drive APIs enabled. Publisher
+development builds can read an ignored, absolute credentials-file path through
+`OMNICODE_GOOGLE_OAUTH_CREDENTIALS_FILE`; protected CI can supply the public
+`OMNICODE_GOOGLE_OAUTH_CLIENT_ID` directly. `OMNICODE_GOOGLE_OAUTH_TESTING=1`
+enables the accurate unauthorized-test-user explanation for a Testing client.
 
-- `OMNICODE_GOOGLE_OAUTH_CLIENT_ID`
-- `OMNICODE_GOOGLE_OAUTH_CLIENT_SECRET` (optional for installed clients)
-
-Installed applications cannot keep a client secret confidential. No user token
-or API credential should be placed in these variables. During `npm run build`
-or either architecture-specific distribution command, electron-vite embeds the
-same publisher-supplied desktop client values into the trusted main-process
-bundle. Runtime environment values take precedence for development, and a
-runtime client ID never inherits a secret from a different embedded client.
-The renderer cannot read this configuration. A production OAuth client ID must
-still be supplied by the OmniCode publisher before Gmail/Drive live verification
-can pass.
+Installed applications cannot keep a client secret confidential. OmniCode's
+build loader validates the downloaded Desktop JSON and extracts the matching
+client ID plus optional Desktop client secret. The JSON path and JSON body are
+never defined into the app. Google's Desktop secret cannot be confidential in a
+distributed app, so it is used only as token-endpoint compatibility metadata;
+PKCE, state, and user consent remain the security boundary. The renderer cannot
+read the client metadata or user tokens. Normal users see only Connect Google account and never see these
+publisher settings. See `GOOGLE_OAUTH_PRODUCTION.md` for testing, verification,
+security-assessment, and public-release requirements.
 
 ## Permission and confirmation boundary
 
@@ -104,10 +108,10 @@ can pass.
 
 ## Connection states
 
-The Google adapters distinguish:
+The shared Google-account summary and service adapters distinguish:
 
 - not connected;
-- OAuth client not configured;
+- publisher sign-in unavailable without exposing developer configuration;
 - connecting in the system browser;
 - connected and verified as a named account;
 - missing required permission;
@@ -118,11 +122,16 @@ The Google adapters distinguish:
 
 Registration or a stored token alone is never presented as Connected.
 
-## Live verification requirements
+## Live verification status and remaining release work
 
-Before release, a test account must complete the system-browser consent flow.
-The audit must then verify token persistence across restart, automatic refresh,
-reconnect after revocation, Gmail and Drive reads, exact confirmation before
-email send, Drive mutation confirmation, cross-connector workflows, and absence
-of tokens in logs or persisted conversations. Until the OAuth client and user
-consent exist, these checks are **BLOCKED — USER CONFIGURATION REQUIRED**.
+The locally configured Testing client has now completed real system-browser
+consent with an approved test account. Verified identity, shared Gmail/Drive
+state, Keychain-backed restart persistence, Gmail label listing, Drive search,
+renderer-token isolation, and build-input leakage checks passed in the packaged
+0.3.1 app. The live probe printed only counts and changed no user data.
+
+Before public release, the publisher must still test automatic refresh,
+revocation/reconnect, Gmail draft/send and mutation flows, Drive write/organize
+flows, and cross-connector transfers using disposable data and the exact native
+confirmations. Those tests also need to be repeated with the verified production
+client in signed/notarized Intel and Apple Silicon builds.
