@@ -229,7 +229,7 @@ const previewConversationId = await evaluate(`
   })
   return conversation.id
 `)
-await evaluate(`location.reload(); return true`).catch(() => undefined)
+await evaluate(`setTimeout(() => location.reload(), 0); return true`)
 await waitFor(`document.querySelector('.work-mode-host')?.getAttribute('aria-hidden') === 'false' && document.querySelectorAll('.work-result-preview').length === 2`)
 const resultPreviews = await evaluate(`return {
   cards: document.querySelectorAll('.work-result-preview').length,

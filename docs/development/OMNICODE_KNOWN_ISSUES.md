@@ -1,6 +1,6 @@
 # OmniCode Known Issues
 
-Last updated: 2026-09-09
+Last updated: 2026-09-13
 
 Resolved issues remain in this file with a resolution so audit history is not
 lost. Secrets, tokens, and authorization headers must never be included here.
@@ -97,7 +97,7 @@ lost. Secrets, tokens, and authorization headers must never be included here.
 - Severity: High for public distribution; Low for local testing
 - Reproduction: Inspect build identities or distribute the DMG to another Mac.
 - Expected: Public release is signed, notarized, and stapled.
-- Actual: Final Intel and Apple Silicon 0.2.0 installers build and pass archive
+- Actual: Final Intel and Apple Silicon 0.3.0 installers build and pass archive
   validation, but no valid Developer ID Application identity is installed, so
   they are unsigned and unnotarized.
 - Suspected cause: Apple developer credentials are an external requirement.
@@ -159,7 +159,7 @@ lost. Secrets, tokens, and authorization headers must never be included here.
 - Severity: Medium
 - Reproduction: Attempt to run the arm64 app on the x86_64 Sonoma build host.
 - Expected: Architecture-specific app launches on matching Apple hardware.
-- Actual: The final 0.2.0 arm64 app executable and active `node-pty` module are arm64,
+- Actual: The final 0.3.0 arm64 app executable and active `node-pty` module are arm64,
   its ZIP decompresses cleanly, and its DMG mounts with a valid internal
   checksum; native execution is not possible on this Intel host.
 - Suspected cause: External hardware requirement.
@@ -551,23 +551,26 @@ lost. Secrets, tokens, and authorization headers must never be included here.
 - Current status: ✅ Resolved — it is now `Run Log`; a rebuilt packaged custom
   task populated it with exact real pre/build/run/post output and exit code.
 
-## OMI-035 — OAuth service connectors require registered applications
+## OMI-035 — Connected Apps exposed no real Google service implementation — Resolved
 
-- Severity: Medium
-- Reproduction: Attempt to connect Gmail/Drive/Calendar, Microsoft 365, or
-  Discord from the current Connected Apps surface.
-- Expected: OmniCode starts Authorization Code + PKCE, stores tokens in
-  Keychain, verifies the selected service, and requests only needed scopes.
-- Actual: Only the real read-only Managed Browser connector is registered. No
-  OAuth service is shown as connected or simulated.
-- Suspected cause: Google, Microsoft, and Discord desktop client IDs, redirect
-  configuration, user consent, scopes, and safe test accounts are external
-  deployment requirements. A Gemini API key is not a Google Workspace OAuth
-  credential.
-- Relevant files: `src/main/services/connector-manager.ts`,
-  `src/renderer/src/components/SettingsPanel.tsx`,
-  `src/renderer/src/components/work/WorkMode.tsx`.
-- Current status: 🔵 BLOCKED — REGISTERED OAUTH CLIENTS AND USER CONSENT REQUIRED.
+- Severity: High
+- Reproduction: Attempt to connect Gmail or Google Drive in the original Work
+  Mode Connected Apps surface.
+- Expected: OmniCode starts Authorization Code + PKCE, stores refresh material
+  in Keychain, verifies the selected account, and exposes only real scoped tools.
+- Actual: The original surface had only the real read-only Managed Browser;
+  Gmail and Drive were not registered and never simulated a connection.
+- Suspected cause: The service adapters and shared Google account boundary had
+  not yet been implemented.
+- Relevant files: `src/main/services/google-oauth-manager.ts`,
+  `src/main/connectors/gmail-connector.ts`,
+  `src/main/connectors/google-drive-connector.ts`,
+  `src/main/services/connector-manager.ts`.
+- Current status: ✅ Resolved — Google now has a system-browser loopback flow,
+  PKCE/state validation, Keychain persistence, identity/refresh/revoke handling,
+  and real Gmail/Drive REST tools. Live account verification remains separately
+  and honestly blocked in OMI-039. Unimplemented Microsoft/Discord services are
+  not shown as connected or claimed as part of this Google repair.
 
 ## OMI-036 — Rich Work attachment extraction is not implemented
 
@@ -639,6 +642,61 @@ lost. Secrets, tokens, and authorization headers must never be included here.
   `src/main/services/secure-keychain-store.ts`,
   `src/main/connectors/gmail-connector.ts`,
   `src/main/connectors/google-drive-connector.ts`,
+  `electron.vite.config.ts`,
   `src/main/index.ts`.
 - Current status: 🔵 BLOCKED — USER CONFIGURATION REQUIRED. A Gemini API key is
   not a Workspace OAuth credential and was not read, printed, or repurposed.
+
+## OMI-040 — Connector success activity lacked useful result cards — Resolved
+
+- Severity: Medium
+- Reproduction: Let a Work tool complete a Gmail search or Drive file listing.
+- Expected: The conversation shows a readable provider-specific summary while
+  internal service identifiers and binary-transfer capabilities remain private.
+- Actual: The activity row showed only a generic completion message even though
+  the trusted tool result contained useful bounded metadata.
+- Suspected cause: Tool activity had no safe display projection contract.
+- Relevant files: `src/shared/work-contracts.ts`,
+  `src/main/services/work-agent-manager.ts`,
+  `src/main/services/work-conversation-manager.ts`,
+  `src/renderer/src/components/work/WorkModeShell.tsx`.
+- Current status: ✅ Resolved — trusted Gmail/Drive/file previews are bounded,
+  validated, persisted, and rendered as distinct cards. Unit, renderer, dark,
+  and compact-light packaged tests verified card reload and absence of internal
+  IDs, URLs, transfer IDs, raw bodies, bytes, and local paths.
+
+## OMI-041 — Finder-launched builds could lose Google OAuth configuration — Resolved
+
+- Severity: High for deployed Google connections
+- Reproduction: Package OmniCode with an OAuth client available only in the
+  publisher shell, then launch the app normally from Finder.
+- Expected: The trusted main process can initialize the publisher's desktop
+  OAuth client without relying on Finder to inherit a terminal environment.
+- Actual: The first implementation read only runtime environment variables, so
+  an otherwise correctly prepared production app could appear unconfigured.
+- Suspected cause: Deployment configuration was treated as development runtime
+  configuration.
+- Relevant files: `electron.vite.config.ts`,
+  `src/main/services/google-oauth-manager.ts`,
+  `src/main/services/google-oauth-manager.test.ts`.
+- Current status: ✅ Resolved — publisher values can be embedded at build time
+  into the trusted main bundle, runtime overrides remain available, and tests
+  prevent a different runtime client ID from inheriting a packaged secret. The
+  current 0.3.0 build intentionally contains no publisher client and therefore
+  reports the external OMI-039 block honestly.
+
+## OMI-042 — Fresh-profile startup soak misclassified onboarding as a timeout — Resolved
+
+- Severity: Medium for release evidence
+- Reproduction: Run the reusable three-launch packaged soak against a genuinely
+  empty profile.
+- Expected: The first cycle recognizes and completes onboarding before measuring
+  workbench readiness; later cycles verify warm startup.
+- Actual: The harness initially waited only for the workbench and could time out
+  even when the app had launched correctly into first-run setup.
+- Suspected cause: The soak assumed prior onboarding state.
+- Relevant files: `scripts/audit-startup-soak.mjs`.
+- Current status: ✅ Resolved — the first cycle now validates the actual setup
+  surface, advances safely, and records separate cold shell/workspace timing.
+  All three 0.3.0 x64 cycles completed with zero renderer/fatal errors and full
+  child-process cleanup.

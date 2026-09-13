@@ -3,6 +3,40 @@
 This log records repairs and audit milestones made during the no-new-features
 stabilization phase.
 
+## OmniCode 0.3.0 release-candidate verification — 2026-09-13
+
+- Added integrity-checked opaque Work transfers so Gmail attachments can move
+  to Drive and Drive files can move into Gmail drafts without exposing bytes,
+  base64, transfer capabilities, or local paths to the model. Native downloads
+  use an actual macOS Save dialog and return only safe filename/size metadata.
+- Expanded Gmail to 13 real tools and Google Drive to 15 real tools, including
+  bounded threads, HTML-only mail fallback, MIME/header-injection defenses,
+  exact attachment transfer, Google document export, binary-context refusal,
+  folder/file mutations, network error mapping, and request cancellation.
+- Added four multi-turn Work-agent integration workflows for Gmail attachment to
+  Drive, Drive file to Gmail draft, Gmail summary, and Drive analysis. All four
+  passed their confirmation, byte-integrity, and model-boundary assertions.
+- Added trusted, bounded Gmail/Drive/file result projections and polished Work
+  result cards. Dark and compact-light packaged smokes verified persistence,
+  reload, readable content, zero internal-ID leakage, and zero renderer errors.
+- Added Connected Apps permission-management links and keyboard dismissal while
+  preserving honest connected, disconnected, and externally blocked states.
+- Fixed Google OAuth deployment configuration so a publisher client can be
+  embedded in the trusted production main bundle for Finder launches. Runtime
+  overrides remain supported and cannot accidentally combine one client ID with
+  another client's secret. The current build intentionally remains unconfigured
+  until a registered publisher client is supplied.
+- Repaired the fresh-profile startup soak so first-launch onboarding is measured
+  rather than misreported as a workbench timeout. Three packaged x64 cycles
+  passed startup, idle-resource, quit, and helper-cleanup bounds.
+- Expanded the automated suite to 395 passing tests with one intentionally
+  skipped native Keychain test and no failures. TypeScript and both production
+  architecture builds pass.
+- Built OmniCode 0.3.0 Intel and Apple Silicon DMG/ZIP artifacts. Both ZIPs fully
+  decompress, both DMGs verify and mount, embedded versions and executable/native
+  terminal architectures match their labels, and packaged icons remain byte-
+  identical to the original `build/icon.icns`.
+
 ## UI/UX and Google Workspace integration — 2026-09-09
 
 - Established `OMNICODE_DESIGN_SYSTEM.md` as the shared visual, motion,
