@@ -9,7 +9,7 @@ import type {
   CloudAIProviderId
 } from '../../../../shared/model-contracts'
 import { unknownModelCapabilities } from '../../../../shared/model-contracts'
-import type { ConnectorDescriptor } from '../../../../shared/tool-contracts'
+import type { ConnectorDescriptor, WorkApprovalMode, WorkApprovalRequest, WorkPermissionSettings } from '../../../../shared/tool-contracts'
 import type {
   WorkAgentChatRequest,
   WorkAttachment,
@@ -20,6 +20,9 @@ import type {
 import { storedAIProvider } from '../../lib/preferences'
 import { googleAccountSummary } from '../../lib/google-account-status'
 import { WorkModeShell, type WorkConnectedAppSummary } from './WorkModeShell'
+import { FullAccessWarning } from './FullAccessWarning'
+import { WorkApprovalCard } from './WorkApprovalCard'
+import { WorkActivityDialog } from './WorkActivityDialog'
 import './WorkMode.css'
 
 const CLOUD_PROVIDERS = new Set<AIProviderId>(['openai', 'anthropic', 'google'])
@@ -28,6 +31,7 @@ export interface WorkModeProps {
   active: boolean
   onOpenSettings(): void
   onError(error: unknown): void
+  onRequireAttention?(): void
   requestText(options: { title: string; label: string; value?: string; confirmLabel: string }): Promise<string | null>
 }
 
@@ -173,7 +177,7 @@ function ConnectedAppsDialog({
   </div>
 }
 
-export function WorkMode({ active, onOpenSettings, onError, requestText }: WorkModeProps) {
+export function WorkMode({ active, onOpenSettings, onError, onRequireAttention, requestText }: WorkModeProps) {
   const initialProvider = storedAIProvider(localStorage, 'omnicode.workProvider', 'ollama')
   const [conversations, setConversations] = useState<WorkConversationSummary[]>([])
   const [currentConversation, setCurrentConversation] = useState<WorkConversation | null>(null)
@@ -191,11 +195,21 @@ export function WorkMode({ active, onOpenSettings, onError, requestText }: WorkM
   const [connectorBusyId, setConnectorBusyId] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | undefined>()
+  const [permissionSettings, setPermissionSettings] = useState<WorkPermissionSettings>({
+    version: 1, globalMode: 'ask', connectorOverrides: {}, fullAccessWarningAcknowledged: false
+  })
+  const [pendingApproval, setPendingApproval] = useState<WorkApprovalRequest | null>(null)
+  const [approvalBusy, setApprovalBusy] = useState(false)
+  const [showFullAccessWarning, setShowFullAccessWarning] = useState(false)
+  const [showActivity, setShowActivity] = useState(false)
   const mounted = useRef(true)
+  const requireAttention = useRef(onRequireAttention)
   const modelRequest = useRef(0)
   const activeRequest = useRef<{ requestId: string; conversationId: string; messageId: string } | null>(null)
   const streamedContent = useRef('')
   const cancelRequested = useRef(new Set<string>())
+
+  useEffect(() => { requireAttention.current = onRequireAttention }, [onRequireAttention])
 
   useEffect(() => {
     mounted.current = true
@@ -220,6 +234,21 @@ export function WorkMode({ active, onOpenSettings, onError, requestText }: WorkM
       }
     })
   }), [])
+
+  useEffect(() => {
+    void window.omnicode.work.permissions.get().then(setPermissionSettings).catch(onError)
+    const removePermissions = window.omnicode.work.permissions.onChanged(setPermissionSettings)
+    const removeApproval = window.omnicode.work.approvals.onRequest((request) => {
+      setPendingApproval(request)
+      setApprovalBusy(false)
+      requireAttention.current?.()
+    })
+    const removeSettled = window.omnicode.work.approvals.onSettled((id) => {
+      setPendingApproval((current) => current?.id === id ? null : current)
+      setApprovalBusy(false)
+    })
+    return () => { removePermissions(); removeApproval(); removeSettled() }
+  }, [onError])
 
   const refreshConversationList = useCallback(async (query = searchQuery): Promise<WorkConversationSummary[]> => {
     const next = query.trim()
@@ -616,6 +645,29 @@ export function WorkMode({ active, onOpenSettings, onError, requestText }: WorkM
 
   const connectedApps = useMemo(() => connectorSummaries(connectors), [connectors])
 
+  const changeApprovalMode = async (mode: WorkApprovalMode, acknowledged = false): Promise<void> => {
+    if (mode === 'full' && !permissionSettings.fullAccessWarningAcknowledged && !acknowledged) {
+      setShowFullAccessWarning(true)
+      return
+    }
+    try {
+      setPermissionSettings(await window.omnicode.work.permissions.setGlobal(mode, acknowledged))
+      setShowFullAccessWarning(false)
+    } catch (cause) { onError(cause) }
+  }
+
+  const resolveApproval = async (approved: boolean): Promise<void> => {
+    if (!pendingApproval || approvalBusy) return
+    setApprovalBusy(true)
+    try {
+      const resolved = await window.omnicode.work.approvals.resolve(pendingApproval.id, approved)
+      if (!resolved) setPendingApproval(null)
+    } catch (cause) {
+      setApprovalBusy(false)
+      onError(cause)
+    }
+  }
+
   return <>
     <WorkModeShell
       conversations={conversations}
@@ -632,6 +684,7 @@ export function WorkMode({ active, onOpenSettings, onError, requestText }: WorkM
       modelsStale={modelState?.stale}
       modelError={modelError}
       error={error}
+      approvalMode={permissionSettings.globalMode}
       onSearchChange={setSearchQuery}
       onComposerChange={setComposerValue}
       onCreateConversation={() => void createConversation()}
@@ -653,8 +706,13 @@ export function WorkMode({ active, onOpenSettings, onError, requestText }: WorkM
       onOpenSettings={onOpenSettings}
       onOpenConnectedApps={() => setShowConnectedApps(true)}
       onOpenConnectedApp={() => setShowConnectedApps(true)}
+      onApprovalModeChange={(mode) => void changeApprovalMode(mode)}
+      onOpenActivity={() => setShowActivity(true)}
       onLinkError={(message) => onError(new Error(message))}
     />
     {showConnectedApps && <ConnectedAppsDialog connectors={connectors} busyId={connectorBusyId} onClose={() => setShowConnectedApps(false)} onToggle={(connector) => void toggleConnector(connector)} onOpenBrowser={() => void openManagedBrowser()} onManageGoogle={() => void window.omnicode.app.openExternal('https://myaccount.google.com/connections').catch(onError)} />}
+    {showActivity && <WorkActivityDialog onClose={() => setShowActivity(false)} onError={onError} />}
+    {showFullAccessWarning && <FullAccessWarning onCancel={() => setShowFullAccessWarning(false)} onEnable={() => void changeApprovalMode('full', true)} />}
+    {pendingApproval && <WorkApprovalCard request={pendingApproval} busy={approvalBusy} onResolve={(approved) => void resolveApproval(approved)} />}
   </>
 }

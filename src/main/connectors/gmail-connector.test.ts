@@ -156,12 +156,12 @@ describe('GmailConnector', () => {
     const input = { to: ['recipient@example.com'], cc: ['copy@example.com'], subject: 'Exact subject', body: 'Exact body\nSecond line' }
     const cancel = vi.fn(async () => false)
 
-    await expect(registry.execute({ toolId: 'gmail.send', mode: 'work', input }, { accessLevel: 'ask-before-changes', confirm: cancel })).rejects.toThrow('cancelled')
+    await expect(registry.execute({ toolId: 'gmail.send', mode: 'work', input }, { accessLevel: 'ask-before-changes', approvalMode: 'auto', confirm: cancel })).rejects.toThrow('cancelled')
     expect(fetchMock).not.toHaveBeenCalled()
-    expect(cancel).toHaveBeenCalledWith(expect.objectContaining({ toolId: 'gmail.send', input }))
+    expect(cancel).toHaveBeenCalledWith(expect.objectContaining({ toolId: 'gmail.send', input }), undefined)
 
     const approve = vi.fn(async () => true)
-    await expect(registry.execute({ toolId: 'gmail.send', mode: 'work', input }, { accessLevel: 'ask-before-changes', confirm: approve })).resolves.toMatchObject({ result: { id: 'sent-1' } })
+    await expect(registry.execute({ toolId: 'gmail.send', mode: 'work', input }, { accessLevel: 'ask-before-changes', approvalMode: 'auto', confirm: approve })).resolves.toMatchObject({ result: { id: 'sent-1' } })
     expect(raw).toContain('To: recipient@example.com\r\n')
     expect(raw).toContain('Cc: copy@example.com\r\n')
     expect(raw).toContain('Subject: Exact subject\r\n')
@@ -230,8 +230,12 @@ describe('GmailConnector', () => {
       'gmail.draft', 'gmail.send', 'gmail.reply', 'gmail.read-state', 'gmail.archive',
       'gmail.modify-labels'
     ])
-    expect(tools.find((tool) => tool.id === 'gmail.send')).toMatchObject({ action: 'sensitive', confirmation: 'always' })
-    expect(tools.find((tool) => tool.id === 'gmail.search')).toMatchObject({ action: 'read', confirmation: 'never' })
+    expect(tools.find((tool) => tool.id === 'gmail.send')).toMatchObject({
+      action: 'sensitive', confirmation: 'policy', category: 'communication', risk: 'medium', reversible: false, externalSideEffect: true
+    })
+    expect(tools.find((tool) => tool.id === 'gmail.search')).toMatchObject({
+      action: 'read', confirmation: 'never', category: 'read', risk: 'low', reversible: true, externalSideEffect: false
+    })
   })
 
   it('rejects header injection before any Gmail request', async () => {

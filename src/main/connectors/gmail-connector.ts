@@ -437,32 +437,35 @@ export class GmailConnector implements ConnectorAdapter {
   registerTools(registry: ToolRegistry): void {
     const requiredScopes = [...GOOGLE_GMAIL_SCOPES]
     const base = { connectorId: 'gmail', modes: ['work'] as const, requiredScopes }
+    const readSafety = { category: 'read' as const, risk: 'low' as const, reversible: true, externalSideEffect: false }
+    const routineWrite = { category: 'write' as const, risk: 'low' as const, reversible: true, externalSideEffect: true }
+    const communication = { category: 'communication' as const, risk: 'medium' as const, reversible: false, externalSideEffect: true }
     registry.register({
-      ...base, id: 'gmail.search', name: 'Search Gmail', description: 'Search the connected Gmail mailbox and return bounded message metadata.', action: 'read', confirmation: 'never',
+      ...base, ...readSafety, id: 'gmail.search', name: 'Search Gmail', description: 'Search the connected Gmail mailbox and return bounded message metadata.', action: 'read', confirmation: 'never',
       inputSchema: { type: 'object', properties: { query: { type: 'string', minLength: 1, maxLength: 1_000 }, maximum: { type: 'integer', minimum: 1, maximum: 20 } }, required: ['query', 'maximum'], additionalProperties: false }
     }, async (input, context) => this.search(String(input.query), Number(input.maximum), context.signal))
     registry.register({
-      ...base, id: 'gmail.read', name: 'Read Gmail message', description: 'Read one Gmail message including bounded plain-text content and attachment metadata.', action: 'read', confirmation: 'never',
+      ...base, ...readSafety, id: 'gmail.read', name: 'Read Gmail message', description: 'Read one Gmail message including bounded plain-text content and attachment metadata.', action: 'read', confirmation: 'never',
       inputSchema: { type: 'object', properties: { messageId: { type: 'string', minLength: 1, maxLength: 256 } }, required: ['messageId'], additionalProperties: false }
     }, async (input, context) => this.readMessage(String(input.messageId), context.signal))
     registry.register({
-      ...base, id: 'gmail.thread', name: 'Read Gmail thread', description: 'Read a bounded Gmail conversation thread.', action: 'read', confirmation: 'never',
+      ...base, ...readSafety, id: 'gmail.thread', name: 'Read Gmail thread', description: 'Read a bounded Gmail conversation thread.', action: 'read', confirmation: 'never',
       inputSchema: { type: 'object', properties: { threadId: { type: 'string', minLength: 1, maxLength: 256 } }, required: ['threadId'], additionalProperties: false }
     }, async (input, context) => this.readThread(String(input.threadId), context.signal))
     registry.register({
-      ...base, id: 'gmail.attachment', name: 'Read Gmail text attachment', description: 'Read bounded text from a Gmail attachment. Binary bytes are not sent to the AI.', action: 'read', confirmation: 'never',
+      ...base, ...readSafety, id: 'gmail.attachment', name: 'Read Gmail text attachment', description: 'Read bounded text from a Gmail attachment. Binary bytes are not sent to the AI.', action: 'read', confirmation: 'never',
       inputSchema: { type: 'object', properties: { messageId: { type: 'string', minLength: 1, maxLength: 256 }, attachmentId: { type: 'string', minLength: 1, maxLength: 256 } }, required: ['messageId', 'attachmentId'], additionalProperties: false }
     }, async (input, context) => this.readAttachment(String(input.messageId), String(input.attachmentId), context.signal))
     registry.register({
-      ...base, id: 'gmail.download-attachment', name: 'Prepare Gmail attachment', description: 'Download a Gmail attachment into an opaque, short-lived app-private transfer for another connected app. File bytes and local paths are never sent to the AI.', action: 'read', confirmation: 'never', timeoutMs: 120_000,
+      ...base, ...readSafety, id: 'gmail.download-attachment', name: 'Prepare Gmail attachment', description: 'Download a Gmail attachment into an opaque, short-lived app-private transfer for another connected app. File bytes and local paths are never sent to the AI.', action: 'read', confirmation: 'never', timeoutMs: 120_000,
       inputSchema: { type: 'object', properties: { messageId: { type: 'string', minLength: 1, maxLength: 256 }, attachmentId: { type: 'string', minLength: 1, maxLength: 256 } }, required: ['messageId', 'attachmentId'], additionalProperties: false }
     }, async (input, context) => this.downloadAttachment(String(input.messageId), String(input.attachmentId), context.signal))
     registry.register({
-      ...base, id: 'gmail.save-attachment', name: 'Save Gmail attachment to Mac', description: 'Download a Gmail attachment and ask the user to choose its local destination in the native macOS save dialog.', action: 'write', confirmation: 'always', timeoutMs: 120_000,
+      ...base, ...routineWrite, risk: 'medium', id: 'gmail.save-attachment', name: 'Save Gmail attachment to Mac', description: 'Download a Gmail attachment and ask the user to choose its local destination in the native macOS save dialog.', action: 'write', confirmation: 'always', timeoutMs: 120_000,
       inputSchema: { type: 'object', properties: { messageId: { type: 'string', minLength: 1, maxLength: 256 }, attachmentId: { type: 'string', minLength: 1, maxLength: 256 } }, required: ['messageId', 'attachmentId'], additionalProperties: false }
     }, async (input, context) => this.saveAttachment(String(input.messageId), String(input.attachmentId), context.signal))
     registry.register({
-      ...base, id: 'gmail.labels', name: 'List Gmail labels', description: 'List labels in the connected Gmail mailbox.', action: 'read', confirmation: 'never',
+      ...base, ...readSafety, id: 'gmail.labels', name: 'List Gmail labels', description: 'List labels in the connected Gmail mailbox.', action: 'read', confirmation: 'never',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false }
     }, async (_input, context) => this.labels(context.signal))
     const mailFields = {
@@ -473,27 +476,27 @@ export class GmailConnector implements ConnectorAdapter {
       transferIds: { type: 'array' as const, items: { type: 'string' as const, minLength: 36, maxLength: 36 }, maxItems: 10 }
     }
     registry.register({
-      ...base, id: 'gmail.draft', name: 'Create Gmail draft', description: 'Create a Gmail draft without sending it.', action: 'write', confirmation: 'policy',
+      ...base, ...routineWrite, id: 'gmail.draft', name: 'Create Gmail draft', description: 'Create a Gmail draft without sending it.', action: 'write', confirmation: 'policy',
       inputSchema: { type: 'object', properties: mailFields, required: ['to', 'subject', 'body'], additionalProperties: false }
     }, async (input, context) => this.createDraft(input, context.signal))
     registry.register({
-      ...base, id: 'gmail.send', name: 'Send Gmail message', description: 'Send an email with the exact recipients, subject, and body shown in confirmation.', action: 'sensitive', confirmation: 'always',
+      ...base, ...communication, id: 'gmail.send', name: 'Send Gmail message', description: 'Send an email using the exact validated recipients, subject, and body.', action: 'sensitive', confirmation: 'policy',
       inputSchema: { type: 'object', properties: mailFields, required: ['to', 'subject', 'body'], additionalProperties: false }
     }, async (input, context) => this.send(input, false, context.signal))
     registry.register({
-      ...base, id: 'gmail.reply', name: 'Reply in Gmail', description: 'Send a reply in an existing thread after exact-content confirmation.', action: 'sensitive', confirmation: 'always',
+      ...base, ...communication, id: 'gmail.reply', name: 'Reply in Gmail', description: 'Send a reply in an existing Gmail thread.', action: 'sensitive', confirmation: 'policy',
       inputSchema: { type: 'object', properties: { ...mailFields, threadId: { type: 'string', minLength: 1, maxLength: 256 }, inReplyTo: { type: 'string', minLength: 1, maxLength: 998 } }, required: ['to', 'subject', 'body', 'threadId', 'inReplyTo'], additionalProperties: false }
     }, async (input, context) => this.send(input, true, context.signal))
     registry.register({
-      ...base, id: 'gmail.read-state', name: 'Change Gmail read state', description: 'Mark a Gmail message read or unread.', action: 'write', confirmation: 'policy',
+      ...base, ...routineWrite, id: 'gmail.read-state', name: 'Change Gmail read state', description: 'Mark a Gmail message read or unread.', action: 'write', confirmation: 'policy',
       inputSchema: { type: 'object', properties: { messageId: { type: 'string', minLength: 1, maxLength: 256 }, unread: { type: 'boolean' } }, required: ['messageId', 'unread'], additionalProperties: false }
     }, async (input, context) => this.modify(String(input.messageId), input.unread ? ['UNREAD'] : [], input.unread ? [] : ['UNREAD'], context.signal))
     registry.register({
-      ...base, id: 'gmail.archive', name: 'Archive Gmail message', description: 'Archive a Gmail message by removing it from the inbox.', action: 'write', confirmation: 'policy',
+      ...base, ...routineWrite, id: 'gmail.archive', name: 'Archive Gmail message', description: 'Archive a Gmail message by removing it from the inbox.', action: 'write', confirmation: 'policy',
       inputSchema: { type: 'object', properties: { messageId: { type: 'string', minLength: 1, maxLength: 256 } }, required: ['messageId'], additionalProperties: false }
     }, async (input, context) => this.modify(String(input.messageId), [], ['INBOX'], context.signal))
     registry.register({
-      ...base, id: 'gmail.modify-labels', name: 'Change Gmail labels', description: 'Add or remove selected labels on a Gmail message.', action: 'write', confirmation: 'policy',
+      ...base, ...routineWrite, id: 'gmail.modify-labels', name: 'Change Gmail labels', description: 'Add or remove selected labels on a Gmail message.', action: 'write', confirmation: 'policy',
       inputSchema: { type: 'object', properties: { messageId: { type: 'string', minLength: 1, maxLength: 256 }, addLabelIds: { type: 'array', items: { type: 'string', minLength: 1, maxLength: 256 }, maxItems: 50 }, removeLabelIds: { type: 'array', items: { type: 'string', minLength: 1, maxLength: 256 }, maxItems: 50 } }, required: ['messageId', 'addLabelIds', 'removeLabelIds'], additionalProperties: false }
     }, async (input, context) => this.modify(String(input.messageId), input.addLabelIds as string[], input.removeLabelIds as string[], context.signal))
   }

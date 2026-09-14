@@ -4,11 +4,25 @@ import type {
   TerminalDataEvent, TerminalExitEvent, ToolInstallationProgress
 } from '../shared/contracts'
 import { createAppCommandRelay } from './command-relay'
+import type { WorkApprovalRequest } from '../shared/tool-contracts'
 
 function subscribe<T>(channel: string, callback: (payload: T) => void): () => void {
   const listener = (_event: Electron.IpcRendererEvent, payload: T): void => callback(payload)
   ipcRenderer.on(channel, listener)
   return () => ipcRenderer.removeListener(channel, listener)
+}
+
+let workApprovalSubscribers = 0
+function subscribeWorkApprovals(callback: (payload: WorkApprovalRequest) => void): () => void {
+  const listener = (_event: Electron.IpcRendererEvent, payload: WorkApprovalRequest): void => callback(payload)
+  ipcRenderer.on('work:approval-request', listener)
+  workApprovalSubscribers++
+  if (workApprovalSubscribers === 1) ipcRenderer.send('work:approvals:ready')
+  return () => {
+    ipcRenderer.removeListener('work:approval-request', listener)
+    workApprovalSubscribers = Math.max(0, workApprovalSubscribers - 1)
+    if (workApprovalSubscribers === 0) ipcRenderer.send('work:approvals:not-ready')
+  }
 }
 
 const appCommands = createAppCommandRelay()
@@ -122,6 +136,23 @@ const api: OmniCodeAPI = {
       list: (refresh) => ipcRenderer.invoke('work:connectors:list', refresh),
       connect: (id) => ipcRenderer.invoke('work:connectors:connect', id),
       disconnect: (id) => ipcRenderer.invoke('work:connectors:disconnect', id)
+    },
+    permissions: {
+      get: () => ipcRenderer.invoke('work:permissions:get'),
+      setGlobal: (mode, acknowledgeFullAccess) => ipcRenderer.invoke('work:permissions:set-global', mode, acknowledgeFullAccess),
+      setConnector: (id, mode, acknowledgeFullAccess) => ipcRenderer.invoke('work:permissions:set-connector', id, mode, acknowledgeFullAccess),
+      onChanged: (callback) => subscribe('work:permissions-changed', callback)
+    },
+    approvals: {
+      resolve: (id, approved) => ipcRenderer.invoke('work:approvals:resolve', id, approved),
+      onRequest: (callback) => subscribeWorkApprovals(callback),
+      onSettled: (callback) => subscribe<string>('work:approval-settled', callback)
+    },
+    activity: {
+      list: (limit) => ipcRenderer.invoke('work:activity:list', limit),
+      clear: () => ipcRenderer.invoke('work:activity:clear'),
+      onChanged: (callback) => subscribe('work:activity-changed', callback),
+      onCleared: (callback) => subscribe<void>('work:activity-cleared', callback)
     },
     attachments: {
       select: () => ipcRenderer.invoke('work:attachments:select'),

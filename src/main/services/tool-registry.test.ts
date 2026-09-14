@@ -11,6 +11,10 @@ function browserTool(overrides: Partial<ToolDescriptor> = {}): ToolDescriptor {
     connectorId: 'browser',
     modes: ['work'],
     action: 'read',
+    category: 'read',
+    risk: 'low',
+    reversible: true,
+    externalSideEffect: false,
     confirmation: 'never',
     requiredScopes: [],
     inputSchema: {
@@ -42,7 +46,7 @@ describe('ToolRegistry', () => {
     const execute = vi.fn(async (input) => ({ title: String(input.url) }))
     const registry = new ToolRegistry()
     registry.register(browserTool(), execute)
-    const authorization = { accessLevel: 'read-only' as const, confirm: vi.fn(async () => false) }
+    const authorization = { accessLevel: 'read-only' as const, approvalMode: 'ask' as const, confirm: vi.fn(async () => false) }
     await expect(registry.execute({ toolId: 'browser.open', mode: 'work', input: { url: 'file:///etc/passwd' } }, authorization)).rejects.toThrow(/HTTPS/i)
     await expect(registry.execute({ toolId: 'browser.open', mode: 'work', input: { url: 'https://user:secret@example.com/' } }, authorization)).rejects.toThrow(/credential-free/i)
     const result = await registry.execute({ toolId: 'browser.open', mode: 'work', input: { url: 'https://example.com/' } }, authorization)
@@ -53,15 +57,15 @@ describe('ToolRegistry', () => {
   it('enforces read-only, ask-before-changes, trusted, and always-confirm policies in the main-process path', async () => {
     const registry = new ToolRegistry()
     const execute = vi.fn(async () => ({ title: 'done' }))
-    registry.register(browserTool({ id: 'browser.type', name: 'Type text', action: 'write', confirmation: 'policy' }), execute)
+    registry.register(browserTool({ id: 'browser.type', name: 'Type text', action: 'write', category: 'write', externalSideEffect: true, confirmation: 'policy' }), execute)
     const input = { url: 'https://example.com/' }
-    await expect(registry.execute({ toolId: 'browser.type', mode: 'work', input }, { accessLevel: 'read-only', confirm: vi.fn() })).rejects.toThrow(/read only/i)
+    await expect(registry.execute({ toolId: 'browser.type', mode: 'work', input }, { accessLevel: 'read-only', approvalMode: 'ask', confirm: vi.fn() })).rejects.toThrow(/read only/i)
     const cancel = vi.fn(async () => false)
-    await expect(registry.execute({ toolId: 'browser.type', mode: 'work', input }, { accessLevel: 'ask-before-changes', confirm: cancel })).rejects.toThrow(/cancelled/i)
+    await expect(registry.execute({ toolId: 'browser.type', mode: 'work', input }, { accessLevel: 'ask-before-changes', approvalMode: 'ask', confirm: cancel })).rejects.toThrow(/cancelled/i)
     expect(cancel).toHaveBeenCalledOnce()
     const approve = vi.fn(async () => true)
-    await registry.execute({ toolId: 'browser.type', mode: 'work', input }, { accessLevel: 'ask-before-changes', confirm: approve })
-    await registry.execute({ toolId: 'browser.type', mode: 'work', input }, { accessLevel: 'trusted', confirm: approve })
+    await registry.execute({ toolId: 'browser.type', mode: 'work', input }, { accessLevel: 'ask-before-changes', approvalMode: 'ask', confirm: approve })
+    await registry.execute({ toolId: 'browser.type', mode: 'work', input }, { accessLevel: 'trusted', approvalMode: 'full', confirm: approve })
     expect(approve).toHaveBeenCalledOnce()
     expect(execute).toHaveBeenCalledTimes(2)
   })
@@ -71,7 +75,7 @@ describe('ToolRegistry', () => {
     registry.register(browserTool(), async () => ({ title: 'Example' }))
     await expect(registry.execute(
       { toolId: 'browser.open', mode: 'code', input: { url: 'https://example.com/' } },
-      { accessLevel: 'trusted', confirm: async () => true }
+      { accessLevel: 'trusted', approvalMode: 'full', confirm: async () => true }
     )).rejects.toThrow(/not available in code mode/i)
   })
 
@@ -85,7 +89,7 @@ describe('ToolRegistry', () => {
     const controller = new AbortController()
     const execution = registry.execute(
       { toolId: 'browser.open', mode: 'work', input: { url: 'https://example.com/' } },
-      { accessLevel: 'read-only', confirm: vi.fn() },
+      { accessLevel: 'read-only', approvalMode: 'ask', confirm: vi.fn() },
       { signal: controller.signal }
     )
     controller.abort(new DOMException('Generation cancelled.', 'AbortError'))

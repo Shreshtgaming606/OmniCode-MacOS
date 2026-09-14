@@ -144,7 +144,7 @@ const stress = await evaluate(`
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
   await pause(80)
   const appsClosed = !document.querySelector('.work-apps-dialog')
-  document.querySelector('.work-settings-link')?.click()
+  ;[...document.querySelectorAll('.work-sidebar-footer .work-settings-link')].find((button) => button.textContent?.includes('Settings'))?.click()
   await pause(80)
   const settingsOpened = Boolean(document.querySelector('.settings-panel'))
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))

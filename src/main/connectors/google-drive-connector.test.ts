@@ -187,11 +187,13 @@ describe('GoogleDriveConnector', () => {
       'drive.copy', 'drive.trash', 'drive.restore'
     ])
     expect(tools.find((tool) => tool.id === 'drive.read')).toMatchObject({ action: 'read', confirmation: 'never' })
-    expect(tools.find((tool) => tool.id === 'drive.trash')).toMatchObject({ action: 'destructive', confirmation: 'always' })
+    expect(tools.find((tool) => tool.id === 'drive.trash')).toMatchObject({
+      action: 'destructive', confirmation: 'policy', category: 'destructive', risk: 'high', reversible: true, externalSideEffect: true
+    })
 
     await expect(registry.execute(
       { toolId: 'drive.trash', mode: 'work', input: { fileId: 'file-1' } },
-      { accessLevel: 'ask-before-changes', confirm: async () => false }
+      { accessLevel: 'ask-before-changes', approvalMode: 'auto', confirm: async () => false }
     )).rejects.toThrow('cancelled')
     expect(fetchMock).not.toHaveBeenCalled()
   })

@@ -7,7 +7,11 @@ import type {
   ConnectorDescriptor,
   ToolDescriptor,
   ToolExecutionRequest,
-  ToolExecutionResult
+  ToolExecutionResult,
+  WorkActionHistoryEntry,
+  WorkApprovalMode,
+  WorkApprovalRequest,
+  WorkPermissionSettings
 } from './tool-contracts'
 import type {
   CreateWorkConversationRequest,
@@ -483,6 +487,23 @@ export interface WorkAPI {
     list(refresh?: boolean): Promise<ConnectorDescriptor[]>
     connect(id: string): Promise<ConnectorDescriptor['status']>
     disconnect(id: string): Promise<ConnectorDescriptor['status']>
+  }
+  permissions: {
+    get(): Promise<WorkPermissionSettings>
+    setGlobal(mode: WorkApprovalMode, acknowledgeFullAccess?: boolean): Promise<WorkPermissionSettings>
+    setConnector(id: string, mode: WorkApprovalMode | null, acknowledgeFullAccess?: boolean): Promise<WorkPermissionSettings>
+    onChanged(callback: (settings: WorkPermissionSettings) => void): () => void
+  }
+  approvals: {
+    resolve(id: string, approved: boolean): Promise<boolean>
+    onRequest(callback: (request: WorkApprovalRequest) => void): () => void
+    onSettled(callback: (id: string) => void): () => void
+  }
+  activity: {
+    list(limit?: number): Promise<WorkActionHistoryEntry[]>
+    clear(): Promise<void>
+    onChanged(callback: (entry: WorkActionHistoryEntry) => void): () => void
+    onCleared(callback: () => void): () => void
   }
   attachments: {
     select(): Promise<WorkAttachment[]>

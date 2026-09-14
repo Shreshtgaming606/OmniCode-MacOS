@@ -14,6 +14,7 @@ const props: WorkModeShellProps = {
   modelCatalog: [],
   connectedApps: [],
   pendingAttachments: [],
+  approvalMode: 'ask',
   onSearchChange: () => undefined,
   onComposerChange: () => undefined,
   onCreateConversation: () => undefined,
@@ -35,6 +36,8 @@ const props: WorkModeShellProps = {
   onOpenSettings: () => undefined,
   onOpenConnectedApps: () => undefined,
   onOpenConnectedApp: () => undefined,
+  onApprovalModeChange: () => undefined,
+  onOpenActivity: () => undefined,
   onLinkError: () => undefined
 }
 
@@ -49,6 +52,10 @@ describe('WorkModeShell', () => {
     expect(html).not.toContain('processed on this Mac')
     expect(html).not.toContain('using the connected browser')
     expect(html).not.toContain('Gmail')
+    expect(html).toContain('Work action approvals: Ask for approval')
+    expect(html).toContain('Approve for me')
+    expect(html).toContain('Full access')
+    expect(html).toContain('Activity')
   })
 
   it('offers connector-specific suggestions only for actually connected services', () => {

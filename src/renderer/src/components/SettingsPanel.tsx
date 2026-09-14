@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react'
 import { CheckCircle2, ExternalLink, FolderClosed, Globe2, KeyRound, LoaderCircle, Mail, Plug, RefreshCw, Shield, Trash2, Unplug, X } from 'lucide-react'
 import type { AIModel, AIProviderConnectionStatus, AIProviderId, ThemePreference, WorkspaceSettings } from '../../../shared/contracts'
 import type { AIModelDescriptor, CloudAIProviderId } from '../../../shared/model-contracts'
-import type { ConnectorDescriptor } from '../../../shared/tool-contracts'
+import type { ConnectorDescriptor, WorkApprovalMode, WorkPermissionSettings } from '../../../shared/tool-contracts'
 import { googleAccountSummary } from '../lib/google-account-status'
+import { WORK_APPROVAL_MODES, WORK_APPROVAL_MODE_COPY } from '../lib/work-approval-mode'
+import { FullAccessWarning } from './work/FullAccessWarning'
 
 type CloudProvider = Exclude<AIProviderId, 'ollama'>
 const PROVIDERS: Array<{ id: CloudProvider; name: string; placeholder: string }> = [
@@ -79,15 +81,21 @@ export function SettingsPanel({
   const [connectors, setConnectors] = useState<ConnectorDescriptor[]>([])
   const [connectorBusy, setConnectorBusy] = useState<string | null>(null)
   const [connectorError, setConnectorError] = useState('')
+  const [workPermissions, setWorkPermissions] = useState<WorkPermissionSettings>({
+    version: 1, globalMode: 'ask', connectorOverrides: {}, fullAccessWarningAcknowledged: false
+  })
+  const [permissionBusy, setPermissionBusy] = useState(false)
+  const [fullAccessTarget, setFullAccessTarget] = useState<{ scope: 'global' | 'connector'; connectorId?: string } | null>(null)
   useEffect(() => {
     const dismiss = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape') return
       event.preventDefault()
-      onClose()
+      if (fullAccessTarget) setFullAccessTarget(null)
+      else onClose()
     }
     window.addEventListener('keydown', dismiss, true)
     return () => window.removeEventListener('keydown', dismiss, true)
-  }, [onClose])
+  }, [fullAccessTarget, onClose])
 
   const refreshCloudModels = async (provider: CloudProvider, forceRefresh = false): Promise<void> => {
     setCloudModelsBusy(provider)
@@ -143,6 +151,12 @@ export function SettingsPanel({
   }, [])
   useEffect(() => {
     void refreshConnectors(true)
+  }, [])
+  useEffect(() => {
+    void window.omnicode.work.permissions.get().then(setWorkPermissions).catch((cause) => {
+      setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause))
+    })
+    return window.omnicode.work.permissions.onChanged(setWorkPermissions)
   }, [])
   useEffect(() => {
     if (autocompleteProvider !== 'ollama' && !cloudModels[autocompleteProvider]) {
@@ -222,8 +236,34 @@ export function SettingsPanel({
       setConnectorBusy(null)
     }
   }
+  const setGlobalWorkPermission = async (mode: WorkApprovalMode, acknowledge = false): Promise<void> => {
+    if (mode === 'full' && !workPermissions.fullAccessWarningAcknowledged && !acknowledge) {
+      setFullAccessTarget({ scope: 'global' })
+      return
+    }
+    setPermissionBusy(true)
+    try {
+      setWorkPermissions(await window.omnicode.work.permissions.setGlobal(mode, acknowledge))
+      setFullAccessTarget(null)
+    } catch (cause) {
+      setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause))
+    } finally { setPermissionBusy(false) }
+  }
+  const setConnectorWorkPermission = async (connectorId: string, mode: WorkApprovalMode | null, acknowledge = false): Promise<void> => {
+    if (mode === 'full' && !workPermissions.fullAccessWarningAcknowledged && !acknowledge) {
+      setFullAccessTarget({ scope: 'connector', connectorId })
+      return
+    }
+    setPermissionBusy(true)
+    try {
+      setWorkPermissions(await window.omnicode.work.permissions.setConnector(connectorId, mode, acknowledge))
+      setFullAccessTarget(null)
+    } catch (cause) {
+      setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause))
+    } finally { setPermissionBusy(false) }
+  }
   const googleAccount = googleAccountSummary(connectors)
-  return <div className="settings-overlay" role="dialog" aria-modal="true" aria-label="Settings">
+  return <><div className="settings-overlay" role="dialog" aria-modal="true" aria-label="Settings">
     <div className="settings-panel">
       <header><div><h1>Settings</h1><p>User settings · stored locally</p></div><button onClick={onClose} title="Close settings"><X /></button></header>
       <div className="settings-content">
@@ -266,8 +306,11 @@ export function SettingsPanel({
               {autocompleteProvider !== 'ollama' && cloudModelErrors[autocompleteProvider] && <p className="provider-error" role="alert">{cloudModelErrors[autocompleteProvider]}</p>}
             </div>
           </section>
-          <section id="work-mode"><h2>Work Mode</h2><p>Work Mode has its own persistent conversations and shares OmniCode’s secure AI provider and model infrastructure. The selected Work model is changed from the Work conversation header.</p>
-            <div className="work-settings-summary"><Shield /><span><strong>Tool permissions stay in the main process</strong><small>AI-generated tool requests are schema-validated and checked before a connector can run. Write and high-impact actions require confirmation.</small></span></div>
+          <section id="work-mode"><h2>Work Mode</h2><p>Choose how OmniCode handles actions proposed by any Work model. This app-level setting is stored privately on this Mac and applies independently from Code Mode permissions.</p>
+            <div className="work-settings-summary"><Shield /><span><strong>Tool permissions stay in the main process</strong><small>Cloud and local models use the same schema validation and backend permission policy. Instructions inside connected content cannot change it.</small></span></div>
+            <h3 className="work-permission-heading">How should OmniCode approve Work actions?</h3>
+            <div className="work-permission-options">{WORK_APPROVAL_MODES.map((mode) => <button type="button" disabled={permissionBusy} className={workPermissions.globalMode === mode ? 'active' : ''} key={mode} onClick={() => void setGlobalWorkPermission(mode)}><Shield /><span><strong>{WORK_APPROVAL_MODE_COPY[mode].label}</strong><small>{WORK_APPROVAL_MODE_COPY[mode].description}</small></span>{workPermissions.globalMode === mode && <CheckCircle2 />}</button>)}</div>
+            <p className="work-permission-boundary"><strong>Always protected:</strong> critical actions, financial transactions, account-security changes, and irreversible destructive actions still need direct approval—even with Full access.</p>
           </section>
           <section id="connected-apps"><h2>Work Mode · Connected Apps</h2><p>Only real registered connectors appear here. A connector is shown as connected only after its own connection verification succeeds.</p>
             {googleAccount && <div className={`settings-google-account state-${googleAccount.state}`}><span>{googleAccount.state === 'connected' ? <Shield /> : <Plug />}</span><span><strong>Google account</strong><small>{googleAccount.message}</small></span></div>}
@@ -283,6 +326,7 @@ export function SettingsPanel({
                   <ul>{connector.capabilities.map((capability) => <li key={capability}>{capability}</li>)}</ul>
                   {!!connector.requestedScopes.length && <details className="settings-connector-permissions"><summary>Permissions requested</summary><ul>{connector.requestedScopes.map((scope) => <li key={scope}>{connectorScopeLabel(scope)}</li>)}</ul></details>}
                   {(connector.id === 'gmail' || connector.id === 'google-drive') && <small className="settings-connector-note">Google revocation disconnects both Gmail and Drive from OmniCode.</small>}
+                  <label className="settings-connector-approval"><strong>Action approval</strong><select disabled={permissionBusy} value={workPermissions.connectorOverrides[connector.id] ?? ''} onChange={(event) => void setConnectorWorkPermission(connector.id, event.target.value ? event.target.value as WorkApprovalMode : null)}><option value="">Use global · {WORK_APPROVAL_MODE_COPY[workPermissions.globalMode].shortLabel}</option>{WORK_APPROVAL_MODES.map((mode) => <option value={mode} key={mode}>{WORK_APPROVAL_MODE_COPY[mode].label}</option>)}</select><small>{workPermissions.connectorOverrides[connector.id] ? `Overrides the global setting for ${connector.name}.` : 'Follows the global Work Mode setting.'}</small></label>
                   <div className="settings-connector-actions">
                     {(connector.id === 'gmail' || connector.id === 'google-drive') && connected && <button type="button" onClick={() => void window.omnicode.app.openExternal('https://myaccount.google.com/connections').catch((cause) => setConnectorError(cause instanceof Error ? cause.message : String(cause)))}><ExternalLink />Manage permissions</button>}
                     <button type="button" disabled={busy} className={connected ? 'disconnect' : 'primary-button'} onClick={() => void toggleConnector(connector)}>{busy ? <LoaderCircle className="spin" /> : connected ? <Unplug /> : <Plug />}{busy ? 'Working…' : connected ? 'Disconnect' : reconnect ? 'Reconnect' : 'Connect'}</button>
@@ -316,5 +360,8 @@ export function SettingsPanel({
         </main>
       </div>
     </div>
-  </div>
+  </div>{fullAccessTarget && <FullAccessWarning busy={permissionBusy} onCancel={() => setFullAccessTarget(null)} onEnable={() => {
+    if (fullAccessTarget.scope === 'connector' && fullAccessTarget.connectorId) void setConnectorWorkPermission(fullAccessTarget.connectorId, 'full', true)
+    else void setGlobalWorkPermission('full', true)
+  }} />}</>
 }

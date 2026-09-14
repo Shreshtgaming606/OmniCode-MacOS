@@ -275,66 +275,68 @@ export class GoogleDriveConnector implements ConnectorAdapter {
   registerTools(registry: ToolRegistry): void {
     const requiredScopes = [...GOOGLE_DRIVE_SCOPES]
     const base = { connectorId: 'google-drive', modes: ['work'] as const, requiredScopes }
+    const readSafety = { category: 'read' as const, risk: 'low' as const, reversible: true, externalSideEffect: false }
+    const routineWrite = { category: 'write' as const, risk: 'low' as const, reversible: true, externalSideEffect: true }
     const maximum = { type: 'integer' as const, minimum: 1, maximum: 50 }
     const fileId = { type: 'string' as const, minLength: 1, maxLength: 256 }
     registry.register({
-      ...base, id: 'drive.search', name: 'Search Google Drive', description: 'Search non-trashed Drive files by text.', action: 'read', confirmation: 'never',
+      ...base, ...readSafety, id: 'drive.search', name: 'Search Google Drive', description: 'Search non-trashed Drive files by text.', action: 'read', confirmation: 'never',
       inputSchema: { type: 'object', properties: { query: { type: 'string', minLength: 1, maxLength: 1_000 }, maximum }, required: ['query', 'maximum'], additionalProperties: false }
     }, async (input, context) => this.search(String(input.query), Number(input.maximum), context.signal))
     registry.register({
-      ...base, id: 'drive.recent', name: 'List recent Drive files', description: 'List recently modified non-trashed Drive files.', action: 'read', confirmation: 'never',
+      ...base, ...readSafety, id: 'drive.recent', name: 'List recent Drive files', description: 'List recently modified non-trashed Drive files.', action: 'read', confirmation: 'never',
       inputSchema: { type: 'object', properties: { maximum }, required: ['maximum'], additionalProperties: false }
     }, async (input, context) => this.listRecent(Number(input.maximum), context.signal))
     registry.register({
-      ...base, id: 'drive.folder', name: 'List Drive folder', description: 'List the children of a Drive folder.', action: 'read', confirmation: 'never',
+      ...base, ...readSafety, id: 'drive.folder', name: 'List Drive folder', description: 'List the children of a Drive folder.', action: 'read', confirmation: 'never',
       inputSchema: { type: 'object', properties: { folderId: fileId, maximum }, required: ['folderId', 'maximum'], additionalProperties: false }
     }, async (input, context) => this.listFolder(String(input.folderId), Number(input.maximum), context.signal))
     registry.register({
-      ...base, id: 'drive.metadata', name: 'Read Drive metadata', description: 'Read bounded metadata for one Drive item.', action: 'read', confirmation: 'never',
+      ...base, ...readSafety, id: 'drive.metadata', name: 'Read Drive metadata', description: 'Read bounded metadata for one Drive item.', action: 'read', confirmation: 'never',
       inputSchema: { type: 'object', properties: { fileId }, required: ['fileId'], additionalProperties: false }
     }, async (input, context) => this.metadata(String(input.fileId), context.signal))
     registry.register({
-      ...base, id: 'drive.read', name: 'Read Drive text file', description: 'Read bounded text or export a Google Doc, Sheet, or Slides file to text.', action: 'read', confirmation: 'never',
+      ...base, ...readSafety, id: 'drive.read', name: 'Read Drive text file', description: 'Read bounded text or export a Google Doc, Sheet, or Slides file to text.', action: 'read', confirmation: 'never',
       inputSchema: { type: 'object', properties: { fileId }, required: ['fileId'], additionalProperties: false }
     }, async (input, context) => this.readText(String(input.fileId), context.signal))
     registry.register({
-      ...base, id: 'drive.download', name: 'Prepare Drive file', description: 'Download a Drive file into an opaque, short-lived app-private transfer for another connected app. File bytes and local paths are never sent to the AI.', action: 'read', confirmation: 'never', timeoutMs: 120_000,
+      ...base, ...readSafety, id: 'drive.download', name: 'Prepare Drive file', description: 'Download a Drive file into an opaque, short-lived app-private transfer for another connected app. File bytes and local paths are never sent to the AI.', action: 'read', confirmation: 'never', timeoutMs: 120_000,
       inputSchema: { type: 'object', properties: { fileId }, required: ['fileId'], additionalProperties: false }
     }, async (input, context) => this.download(String(input.fileId), context.signal))
     registry.register({
-      ...base, id: 'drive.save-local', name: 'Save Drive file to Mac', description: 'Download a Drive file and ask the user to choose its local destination in the native macOS save dialog.', action: 'write', confirmation: 'always', timeoutMs: 120_000,
+      ...base, ...routineWrite, risk: 'medium', id: 'drive.save-local', name: 'Save Drive file to Mac', description: 'Download a Drive file and ask the user to choose its local destination in the native macOS save dialog.', action: 'write', confirmation: 'always', timeoutMs: 120_000,
       inputSchema: { type: 'object', properties: { fileId }, required: ['fileId'], additionalProperties: false }
     }, async (input, context) => this.saveLocal(String(input.fileId), context.signal))
     registry.register({
-      ...base, id: 'drive.create-folder', name: 'Create Drive folder', description: 'Create a folder in Google Drive.', action: 'write', confirmation: 'policy',
+      ...base, ...routineWrite, id: 'drive.create-folder', name: 'Create Drive folder', description: 'Create a folder in Google Drive.', action: 'write', confirmation: 'policy',
       inputSchema: { type: 'object', properties: { name: { type: 'string', minLength: 1, maxLength: 1_000 }, parentId: fileId }, required: ['name'], additionalProperties: false }
     }, async (input, context) => this.createFolder(String(input.name), input.parentId === undefined ? undefined : String(input.parentId), context.signal))
     registry.register({
-      ...base, id: 'drive.upload-text', name: 'Upload text to Drive', description: 'Create a bounded text file in Google Drive.', action: 'write', confirmation: 'policy',
+      ...base, category: 'sensitive-data', risk: 'medium', reversible: true, externalSideEffect: true, id: 'drive.upload-text', name: 'Upload text to Drive', description: 'Create a bounded text file in Google Drive.', action: 'write', confirmation: 'policy',
       inputSchema: { type: 'object', properties: { name: { type: 'string', minLength: 1, maxLength: 1_000 }, mimeType: { type: 'string', minLength: 1, maxLength: 300 }, content: { type: 'string', maxLength: MAX_FILE_TEXT_BYTES }, parentId: fileId }, required: ['name', 'mimeType', 'content'], additionalProperties: false }
     }, async (input, context) => this.upload(input, context.signal))
     registry.register({
-      ...base, id: 'drive.upload-transfer', name: 'Upload transferred file to Drive', description: 'Upload an opaque file transfer prepared by Gmail or Drive. The AI never receives the file bytes or a local path.', action: 'write', confirmation: 'policy', timeoutMs: 120_000,
+      ...base, ...routineWrite, id: 'drive.upload-transfer', name: 'Upload transferred file to Drive', description: 'Upload an opaque file transfer prepared by Gmail or Drive. The AI never receives the file bytes or a local path.', action: 'write', confirmation: 'policy', timeoutMs: 120_000,
       inputSchema: { type: 'object', properties: { transferId: { type: 'string', minLength: 36, maxLength: 36 }, parentId: fileId, name: { type: 'string', minLength: 1, maxLength: 1_000 } }, required: ['transferId'], additionalProperties: false }
     }, async (input, context) => this.uploadTransfer(String(input.transferId), input.parentId === undefined ? undefined : String(input.parentId), input.name === undefined ? undefined : String(input.name), context.signal))
     registry.register({
-      ...base, id: 'drive.rename', name: 'Rename Drive item', description: 'Rename a Drive file or folder.', action: 'write', confirmation: 'policy',
+      ...base, ...routineWrite, id: 'drive.rename', name: 'Rename Drive item', description: 'Rename a Drive file or folder.', action: 'write', confirmation: 'policy',
       inputSchema: { type: 'object', properties: { fileId, name: { type: 'string', minLength: 1, maxLength: 1_000 } }, required: ['fileId', 'name'], additionalProperties: false }
     }, async (input, context) => this.rename(String(input.fileId), String(input.name), context.signal))
     registry.register({
-      ...base, id: 'drive.move', name: 'Move Drive item', description: 'Move a Drive file or folder to another folder.', action: 'write', confirmation: 'always',
+      ...base, ...routineWrite, id: 'drive.move', name: 'Move Drive item', description: 'Move a Drive file or folder to another folder.', action: 'write', confirmation: 'policy',
       inputSchema: { type: 'object', properties: { fileId, destinationFolderId: fileId }, required: ['fileId', 'destinationFolderId'], additionalProperties: false }
     }, async (input, context) => this.move(String(input.fileId), String(input.destinationFolderId), context.signal))
     registry.register({
-      ...base, id: 'drive.copy', name: 'Copy Drive file', description: 'Copy a Drive file, optionally with a new name.', action: 'write', confirmation: 'policy',
+      ...base, ...routineWrite, id: 'drive.copy', name: 'Copy Drive file', description: 'Copy a Drive file, optionally with a new name.', action: 'write', confirmation: 'policy',
       inputSchema: { type: 'object', properties: { fileId, name: { type: 'string', minLength: 1, maxLength: 1_000 } }, required: ['fileId'], additionalProperties: false }
     }, async (input, context) => this.copy(String(input.fileId), input.name === undefined ? undefined : String(input.name), context.signal))
     registry.register({
-      ...base, id: 'drive.trash', name: 'Move Drive item to trash', description: 'Move a Drive file or folder to trash.', action: 'destructive', confirmation: 'always',
+      ...base, category: 'destructive', risk: 'high', reversible: true, externalSideEffect: true, id: 'drive.trash', name: 'Move Drive item to trash', description: 'Move a Drive file or folder to trash.', action: 'destructive', confirmation: 'policy',
       inputSchema: { type: 'object', properties: { fileId }, required: ['fileId'], additionalProperties: false }
     }, async (input, context) => this.trash(String(input.fileId), context.signal))
     registry.register({
-      ...base, id: 'drive.restore', name: 'Restore Drive item', description: 'Restore a trashed Drive file or folder.', action: 'write', confirmation: 'always',
+      ...base, ...routineWrite, id: 'drive.restore', name: 'Restore Drive item', description: 'Restore a trashed Drive file or folder.', action: 'write', confirmation: 'policy',
       inputSchema: { type: 'object', properties: { fileId }, required: ['fileId'], additionalProperties: false }
     }, async (input, context) => this.restore(String(input.fileId), context.signal))
   }

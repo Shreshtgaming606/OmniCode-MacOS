@@ -2,6 +2,8 @@ import { useMemo } from 'react'
 import {
   Bot,
   CheckCircle2,
+  Check,
+  ChevronDown,
   CircleAlert,
   Cloud,
   Copy,
@@ -9,6 +11,7 @@ import {
   FileText,
   FolderClosed,
   Globe2,
+  History,
   LoaderCircle,
   MessageSquareText,
   Mail,
@@ -23,6 +26,7 @@ import {
   Search,
   Send,
   Settings,
+  Shield,
   Sparkles,
   Square,
   Trash2,
@@ -31,6 +35,7 @@ import {
 } from 'lucide-react'
 
 import type { AIProviderId } from '../../../../shared/contracts'
+import type { WorkApprovalMode } from '../../../../shared/tool-contracts'
 import type { AIModelDescriptor } from '../../../../shared/model-contracts'
 import { assessModelForUseCase } from '../../../../shared/model-contracts'
 import type {
@@ -41,6 +46,7 @@ import type {
   WorkToolPreview
 } from '../../../../shared/work-contracts'
 import { MarkdownMessage } from '../MarkdownMessage'
+import { WORK_APPROVAL_MODES, WORK_APPROVAL_MODE_COPY } from '../../lib/work-approval-mode'
 import './WorkModeShell.css'
 
 export type WorkConnectedAppState =
@@ -76,6 +82,7 @@ export interface WorkModeShellProps {
   modelsStale?: boolean
   modelError?: string
   error?: string
+  approvalMode: WorkApprovalMode
   onSearchChange(value: string): void
   onComposerChange(value: string): void
   onCreateConversation(): void
@@ -97,6 +104,8 @@ export interface WorkModeShellProps {
   onOpenSettings(): void
   onOpenConnectedApps(): void
   onOpenConnectedApp(id: string): void
+  onApprovalModeChange(mode: WorkApprovalMode): void
+  onOpenActivity(): void
   onLinkError(message: string): void
 }
 
@@ -308,6 +317,7 @@ export function WorkModeShell({
   modelsStale = false,
   modelError,
   error,
+  approvalMode,
   onSearchChange,
   onComposerChange,
   onCreateConversation,
@@ -329,6 +339,8 @@ export function WorkModeShell({
   onOpenSettings,
   onOpenConnectedApps,
   onOpenConnectedApp,
+  onApprovalModeChange,
+  onOpenActivity,
   onLinkError
 }: WorkModeShellProps) {
   const pinned = useMemo(() => conversations.filter((conversation) => conversation.pinned), [conversations])
@@ -382,13 +394,20 @@ export function WorkModeShell({
           </button>})
           : <button type="button" className="work-app-empty" onClick={onOpenConnectedApps}>No apps configured</button>}
       </section>
-      <button type="button" className="work-settings-link" onClick={onOpenSettings}><Settings />Settings</button>
+      <div className="work-sidebar-footer"><button type="button" className="work-settings-link" onClick={onOpenActivity}><History />Activity</button><button type="button" className="work-settings-link" onClick={onOpenSettings}><Settings />Settings</button></div>
     </aside>
 
     <main className="work-chat-main">
       <header className="work-chat-header">
         <div className="work-chat-heading"><strong>{currentConversation?.title ?? 'New conversation'}</strong><small>{currentConversation ? 'Work Mode conversation' : 'Ask anything or start with a suggestion'}</small></div>
         <div className="work-model-controls">
+          <details className={`work-approval-selector mode-${approvalMode}`}>
+            <summary aria-label={`Work action approvals: ${WORK_APPROVAL_MODE_COPY[approvalMode].label}`}><Shield /><span><small>Approval</small><strong>{WORK_APPROVAL_MODE_COPY[approvalMode].shortLabel}</strong></span><ChevronDown /></summary>
+            <div>{WORK_APPROVAL_MODES.map((mode) => <button type="button" className={mode === approvalMode ? 'active' : ''} key={mode} onClick={(event) => {
+              onApprovalModeChange(mode)
+              event.currentTarget.closest('details')?.removeAttribute('open')
+            }}><span><strong>{WORK_APPROVAL_MODE_COPY[mode].label}</strong><small>{WORK_APPROVAL_MODE_COPY[mode].description}</small></span>{mode === approvalMode && <Check />}</button>)}</div>
+          </details>
           <label><span>Provider</span><select aria-label="Work AI provider" value={selectedProvider} onChange={(event) => onProviderChange(event.target.value as AIProviderId)}>{PROVIDERS.map((provider) => <option value={provider} key={provider}>{PROVIDER_NAMES[provider]}</option>)}</select></label>
           <label><span>Model</span><select aria-label="Work AI model" value={selectedModelId} disabled={modelsLoading || !models.length} onChange={(event) => onModelChange(event.target.value)}>
             {!models.length && <option value="">No available models</option>}

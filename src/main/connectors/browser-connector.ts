@@ -267,9 +267,10 @@ export class BrowserConnector implements ConnectorAdapter {
   }
 
   registerTools(registry: ToolRegistry): void {
+    const readSafety = { category: 'read' as const, risk: 'low' as const, reversible: true, externalSideEffect: false }
     registry.register({
       id: 'browser.open', name: 'Open web page', description: 'Open and read a secure public page in the managed browser.',
-      connectorId: 'browser', modes: ['work'], action: 'read', confirmation: 'never', requiredScopes: [],
+      connectorId: 'browser', modes: ['work'], action: 'read', ...readSafety, confirmation: 'never', requiredScopes: [],
       inputSchema: { type: 'object', properties: { url: { type: 'string', format: 'https-url', maxLength: 2_048 } }, required: ['url'], additionalProperties: false },
       resultSchema: { type: 'object', properties: { title: { type: 'string', maxLength: 1_000 }, url: { type: 'string', format: 'https-url', maxLength: 2_048 }, text: { type: 'string', maxLength: MAX_PAGE_TEXT } }, required: ['title', 'url', 'text'], additionalProperties: false }
     }, async (input) => {
@@ -278,7 +279,7 @@ export class BrowserConnector implements ConnectorAdapter {
     })
     registry.register({
       id: 'browser.read', name: 'Read visible page', description: 'Read the title, URL, and visible text from the managed browser.',
-      connectorId: 'browser', modes: ['work'], action: 'read', confirmation: 'never', requiredScopes: [],
+      connectorId: 'browser', modes: ['work'], action: 'read', ...readSafety, confirmation: 'never', requiredScopes: [],
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       resultSchema: { type: 'object', properties: { title: { type: 'string', maxLength: 1_000 }, url: { type: 'string', format: 'https-url', maxLength: 2_048 }, text: { type: 'string', maxLength: MAX_PAGE_TEXT } }, required: ['title', 'url', 'text'], additionalProperties: false }
     }, async () => {
@@ -287,7 +288,7 @@ export class BrowserConnector implements ConnectorAdapter {
     })
     registry.register({
       id: 'browser.find', name: 'Find text on page', description: 'Find visible lines containing text on the current managed page.',
-      connectorId: 'browser', modes: ['work'], action: 'read', confirmation: 'never', requiredScopes: [],
+      connectorId: 'browser', modes: ['work'], action: 'read', ...readSafety, confirmation: 'never', requiredScopes: [],
       inputSchema: { type: 'object', properties: { query: { type: 'string', minLength: 1, maxLength: 500 } }, required: ['query'], additionalProperties: false },
       resultSchema: { type: 'object', properties: { count: { type: 'integer', minimum: 0 }, excerpts: { type: 'array', items: { type: 'string', maxLength: 1_000 }, maxItems: MAX_FIND_RESULTS } }, required: ['count', 'excerpts'], additionalProperties: false }
     }, async (input) => this.findText(String(input.query)))

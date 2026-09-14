@@ -50,3 +50,72 @@
   .work-app-card { grid-template-columns: 34px minmax(0, 1fr); }
   .work-app-card-actions { grid-column: 2; justify-content: flex-end; }
 }
+
+.work-safety-backdrop { position: fixed; inset: 0; z-index: 2200; padding: 32px; display: grid; place-items: center; background: color-mix(in srgb, #05070c 68%, transparent); backdrop-filter: blur(10px); animation: omni-enter var(--motion-base) var(--ease-standard); }
+.work-full-access-warning, .work-approval-card, .work-activity-dialog { width: min(560px, 100%); overflow: hidden; border: 1px solid var(--border-strong); border-radius: var(--radius-xl); color: var(--text); background: color-mix(in srgb, var(--bg-raised) 96%, transparent); box-shadow: 0 26px 90px rgba(0, 0, 0, .42); animation: omni-pop var(--motion-slow) var(--ease-emphasized); }
+.work-full-access-warning { padding: 25px; text-align: center; }
+.work-warning-icon { width: 50px; height: 50px; margin: 0 auto 14px; display: grid; place-items: center; border-radius: 15px; color: var(--warning); background: color-mix(in srgb, var(--warning) 14%, var(--bg-raised)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warning) 28%, transparent); }
+.work-warning-icon svg { width: 24px; height: 24px; }
+.work-full-access-warning h2 { margin: 0 0 8px; font-size: 20px; letter-spacing: -.02em; }
+.work-full-access-warning > p { margin: 0 auto 15px; max-width: 470px; color: var(--text-secondary); line-height: 1.55; }
+.work-full-access-warning > div { padding: 12px; display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 9px; border: 1px solid color-mix(in srgb, var(--success) 30%, var(--border)); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--success) 7%, var(--bg-panel)); text-align: left; }
+.work-full-access-warning > div > svg { width: 19px; color: var(--success); }
+.work-full-access-warning > div span { display: grid; gap: 3px; }
+.work-full-access-warning > div small { color: var(--text-secondary); line-height: 1.45; }
+.work-full-access-warning .work-warning-note { margin: 13px 0 0; color: var(--text-muted); font-size: var(--font-xs); }
+.work-full-access-warning > footer, .work-approval-card > footer { margin-top: 20px; display: flex; justify-content: flex-end; gap: 8px; }
+.work-full-access-warning button, .work-approval-card > footer button { min-height: 34px; padding: 0 13px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--border); border-radius: var(--radius-md); }
+.work-full-access-warning button:hover:not(:disabled), .work-approval-card > footer button:first-child:hover:not(:disabled) { background: var(--bg-hover); }
+.work-full-access-warning .danger-primary { border-color: transparent; color: white; background: var(--danger); }
+.work-full-access-warning .danger-primary:hover:not(:disabled) { filter: brightness(1.08); }
+
+.work-approval-card { padding: 21px; }
+.work-approval-card > header { display: grid; grid-template-columns: 42px minmax(0, 1fr); align-items: center; gap: 11px; }
+.work-approval-icon { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 12px; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--bg-panel)); }
+.work-approval-card.risk-high .work-approval-icon, .work-approval-card.risk-critical .work-approval-icon { color: var(--warning); background: color-mix(in srgb, var(--warning) 13%, var(--bg-panel)); }
+.work-approval-icon svg { width: 20px; height: 20px; }
+.work-approval-card > header > span:last-child { min-width: 0; display: grid; gap: 3px; }
+.work-approval-card > header small { color: var(--text-muted); font-size: var(--font-xs); font-weight: var(--weight-semibold); text-transform: capitalize; }
+.work-approval-card h2 { margin: 0; font-size: 18px; letter-spacing: -.018em; }
+.work-approval-summary { margin: 15px 0 11px; color: var(--text-secondary); line-height: 1.5; }
+.work-approval-details { max-height: min(320px, 42vh); margin: 0; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-input); }
+.work-approval-details > div { padding: 9px 11px; display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 9px; }
+.work-approval-details > div + div { border-top: 1px solid var(--border); }
+.work-approval-details dt { color: var(--text-muted); font-size: var(--font-xs); font-weight: var(--weight-semibold); }
+.work-approval-details dd { min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--text); line-height: 1.45; user-select: text; }
+.work-approval-details .multiline { display: block; }
+.work-approval-details .multiline dt { margin-bottom: 7px; }
+.work-approval-details .multiline dd { max-height: 180px; padding: 9px; overflow: auto; border-radius: var(--radius-sm); background: var(--bg-panel); white-space: pre-wrap; }
+.work-approval-reason { margin-top: 11px; padding: 9px 10px; display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 7px; border-radius: var(--radius-md); color: var(--text-secondary); background: var(--bg-panel); }
+.work-approval-reason > svg { width: 15px; color: var(--accent); }
+.work-approval-reason span { display: grid; gap: 2px; }
+.work-approval-reason small { color: var(--text-muted); line-height: 1.4; }
+.work-approval-card > footer button svg { width: 14px; height: 14px; }
+
+.work-activity-dialog { width: min(720px, 100%); height: min(680px, calc(100vh - 64px)); display: flex; flex-direction: column; }
+.work-activity-dialog > header { min-height: 65px; padding: 12px 14px 12px 18px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); }
+.work-activity-dialog > header > span { display: flex; align-items: center; gap: 10px; }
+.work-activity-dialog > header > span > svg { width: 21px; color: var(--accent); }
+.work-activity-dialog > header span span { display: grid; gap: 2px; }
+.work-activity-dialog h2 { margin: 0; font-size: 17px; }
+.work-activity-dialog header small { color: var(--text-muted); }
+.work-activity-dialog > header button { width: 29px; height: 29px; display: grid; place-items: center; border-radius: var(--radius-sm); color: var(--text-muted); }
+.work-activity-dialog > header button:hover { color: var(--text); background: var(--bg-hover); }
+.work-activity-list { min-height: 0; flex: 1; padding: 12px 15px; overflow: auto; }
+.work-activity-list > article { padding: 11px; display: grid; grid-template-columns: 25px minmax(0, 1fr); gap: 9px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-editor); }
+.work-activity-list > article + article { margin-top: 7px; }
+.work-activity-list > article > span { width: 25px; height: 25px; display: grid; place-items: center; border-radius: 8px; color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.work-activity-list > article.result-succeeded > span { color: var(--success); background: color-mix(in srgb, var(--success) 10%, transparent); }
+.work-activity-list > article > span svg { width: 14px; }
+.work-activity-list article > div > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.work-activity-list article time { color: var(--text-muted); font-size: var(--font-xs); }
+.work-activity-list article p { margin: 4px 0 7px; color: var(--text-secondary); line-height: 1.4; }
+.work-activity-list article footer { display: flex; flex-wrap: wrap; gap: 4px; }
+.work-activity-list article footer small { padding: 2px 6px; border: 1px solid var(--border); border-radius: var(--radius-pill); color: var(--text-muted); background: var(--bg-panel); font-size: 9px; text-transform: capitalize; }
+.work-activity-empty { height: 100%; min-height: 220px; display: grid; place-items: center; align-content: center; gap: 8px; color: var(--text-muted); text-align: center; }
+.work-activity-empty svg { width: 25px; }
+.work-activity-empty p { margin: 0; color: var(--text-secondary); }
+.work-activity-dialog > footer { min-height: 49px; padding: 8px 15px; display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--border); color: var(--text-muted); font-size: var(--font-xs); }
+.work-activity-dialog > footer button { min-height: 30px; padding: 0 9px; display: flex; align-items: center; gap: 5px; border-radius: var(--radius-sm); color: var(--danger); }
+.work-activity-dialog > footer button:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 9%, transparent); }
+.work-activity-dialog > footer button svg { width: 13px; }

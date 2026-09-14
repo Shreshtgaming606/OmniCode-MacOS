@@ -747,3 +747,31 @@ lost. Secrets, tokens, and authorization headers must never be included here.
   metadata only to the trusted main bundle, the OAuth manager supplies it to
   exchange/refresh requests, renderer/source/leak audits pass, and a subsequent
   real packaged authorization plus restart completed successfully.
+
+## OMI-045 — Work actions used a static, over-prompting permission policy — Resolved
+
+- Severity: High for safety and usability
+- Reproduction: Ask Work Mode to complete a multi-step Gmail/Drive task or
+  inspect the prior `PermissionManager` and connector settings.
+- Expected: Users can choose a safe global/per-app approval mode; routine actions
+  do not produce unnecessary prompts; consequential actions and hard boundaries
+  are enforced in the backend for both cloud and local models.
+- Actual: The prior policy used connector access level plus coarse read/write/
+  destructive/sensitive classes. It had no global mode, per-connector override,
+  risk/reversibility metadata, Full warning, durable safe activity, or in-Work
+  approval surface; normal writes could repeatedly prompt and the UI could not
+  explain the evaluated policy.
+- Suspected cause: The original permission layer was a secure minimum for the
+  first connector implementation, not the complete user-configurable approval
+  model required by Work Mode.
+- Relevant files: `src/main/services/permission-manager.ts`,
+  `src/main/services/work-permission-settings-manager.ts`,
+  `src/main/services/work-action-history-manager.ts`, `src/main/index.ts`,
+  `src/shared/tool-contracts.ts`, `src/renderer/src/components/work/`,
+  `src/renderer/src/components/SettingsPanel.tsx`.
+- Current status: ✅ Resolved — Ask, Approve for me, and acknowledged Full modes
+  now run through one main-process gate with per-connector overrides, fixed tool
+  metadata, dynamic critical escalation, non-bypassable hard boundaries,
+  cancellation-safe polished approval cards/native fallback, and bounded private
+  activity. The 419-test suite passes; packaged verification proved a safe
+  automatic Gmail read and exact cancelled Gmail-send flow with no network write.

@@ -40,6 +40,18 @@ export type ToolValueSchema =
 export type ToolActionClass = 'read' | 'write' | 'destructive' | 'sensitive'
 export type ToolConfirmationPolicy = 'never' | 'policy' | 'always'
 export type ConnectorAccessLevel = 'read-only' | 'ask-before-changes' | 'trusted'
+export type WorkApprovalMode = 'ask' | 'auto' | 'full'
+export type ToolActionCategory =
+  | 'read'
+  | 'write'
+  | 'communication'
+  | 'destructive'
+  | 'external-submission'
+  | 'system'
+  | 'financial'
+  | 'account-security'
+  | 'sensitive-data'
+export type ToolRiskLevel = 'low' | 'medium' | 'high' | 'critical'
 
 export interface ToolDescriptor {
   id: string
@@ -48,6 +60,10 @@ export interface ToolDescriptor {
   connectorId: string
   modes: readonly AppMode[]
   action: ToolActionClass
+  category: ToolActionCategory
+  risk: ToolRiskLevel
+  reversible: boolean
+  externalSideEffect: boolean
   confirmation: ToolConfirmationPolicy
   requiredScopes: readonly string[]
   inputSchema: Extract<ToolValueSchema, { type: 'object' }>
@@ -67,8 +83,20 @@ export interface ToolConfirmationRequest {
   toolName: string
   connectorId: string
   action: ToolActionClass
+  category: ToolActionCategory
+  risk: ToolRiskLevel
+  approvalMode: WorkApprovalMode
   summary: string
+  reason: string
   input: Record<string, JsonValue>
+}
+
+export interface ToolAuthorizationDecision {
+  approvalMode: WorkApprovalMode
+  risk: ToolRiskLevel
+  requiredApproval: boolean
+  userApproved: boolean
+  reason: string
 }
 
 export interface ToolExecutionResult {
@@ -76,6 +104,53 @@ export interface ToolExecutionResult {
   startedAt: string
   completedAt: string
   result: JsonValue
+  authorization: ToolAuthorizationDecision
+}
+
+export interface WorkPermissionSettings {
+  version: 1
+  globalMode: WorkApprovalMode
+  connectorOverrides: Record<string, WorkApprovalMode>
+  fullAccessWarningAcknowledged: boolean
+}
+
+export interface WorkApprovalDetail {
+  label: string
+  value: string
+  multiline?: boolean
+}
+
+export interface WorkApprovalRequest {
+  id: string
+  toolId: string
+  toolName: string
+  connectorId: string
+  connectorName: string
+  category: ToolActionCategory
+  risk: ToolRiskLevel
+  approvalMode: WorkApprovalMode
+  title: string
+  summary: string
+  reason: string
+  details: WorkApprovalDetail[]
+}
+
+export type WorkActionHistoryResult = 'succeeded' | 'failed' | 'cancelled' | 'blocked'
+
+export interface WorkActionHistoryEntry {
+  id: string
+  timestamp: number
+  completedAt: number
+  toolId: string
+  toolName: string
+  connectorId: string
+  connectorName: string
+  category: ToolActionCategory
+  risk: ToolRiskLevel
+  approvalMode: WorkApprovalMode
+  approval: 'automatic' | 'user-approved' | 'user-cancelled' | 'blocked'
+  result: WorkActionHistoryResult
+  summary: string
 }
 
 export type ConnectorConnectionState =

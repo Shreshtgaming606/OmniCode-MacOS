@@ -65,7 +65,7 @@ describe('BrowserConnector security boundary', () => {
     connector.registerTools(registry)
     expect(registry.list('work').map((tool) => tool.id)).toEqual(['browser.open', 'browser.read', 'browser.find'])
     expect(registry.list('code')).toEqual([])
-    const authorization = { accessLevel: 'read-only' as const, confirm: vi.fn(async () => false) }
+    const authorization = { accessLevel: 'read-only' as const, approvalMode: 'ask' as const, confirm: vi.fn(async () => false) }
     const result = await registry.execute({ toolId: 'browser.find', mode: 'work', input: { query: 'Needle' } }, authorization)
     expect(result.result).toEqual({ count: 1, excerpts: ['Needle in a real page snapshot.'] })
     expect(authorization.confirm).not.toHaveBeenCalled()

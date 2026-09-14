@@ -107,6 +107,9 @@
 .work-settings-link { min-height: 36px; padding: 0 13px; display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--border); color: var(--text-secondary); text-align: left; }
 .work-settings-link:hover { color: var(--text); background: var(--bg-hover); }
 .work-settings-link svg { width: 15px; }
+.work-sidebar-footer { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--border); }
+.work-sidebar-footer .work-settings-link { justify-content: center; border-top: 0; padding: 0 8px; }
+.work-sidebar-footer .work-settings-link + .work-settings-link { border-left: 1px solid var(--border); }
 
 .work-chat-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-editor); }
 .work-chat-header { min-height: 62px; padding: 7px var(--space-4) 7px var(--space-5); display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--bg-editor) 94%, transparent); }
@@ -114,6 +117,23 @@
 .work-chat-heading strong { overflow: hidden; font-size: var(--font-md); font-weight: var(--weight-semibold); text-overflow: ellipsis; white-space: nowrap; }
 .work-chat-heading small { color: var(--text-muted); font-size: var(--font-xs); }
 .work-model-controls { min-width: 0; display: flex; align-items: end; gap: 6px; }
+.work-approval-selector { position: relative; align-self: end; }
+.work-approval-selector > summary { min-width: 126px; height: 31px; padding: 0 7px; display: grid; grid-template-columns: 16px minmax(0, 1fr) 13px; align-items: center; gap: 6px; border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border)); border-radius: var(--radius-sm); color: var(--text-secondary); background: color-mix(in srgb, var(--accent) 6%, var(--bg-input)); cursor: default; list-style: none; }
+.work-approval-selector > summary::-webkit-details-marker { display: none; }
+.work-approval-selector > summary > svg:first-child { width: 14px; color: var(--accent); }
+.work-approval-selector > summary > svg:last-child { width: 12px; color: var(--text-muted); transition: transform var(--motion-fast) var(--ease-standard); }
+.work-approval-selector[open] > summary > svg:last-child { transform: rotate(180deg); }
+.work-approval-selector > summary span { min-width: 0; display: grid; line-height: 1.05; }
+.work-approval-selector > summary small { color: var(--text-muted); font-size: 8px; font-weight: var(--weight-semibold); }
+.work-approval-selector > summary strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.work-approval-selector > div { position: absolute; z-index: 80; top: 37px; right: 0; width: 310px; padding: 5px; display: grid; gap: 3px; border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--bg-raised); box-shadow: var(--shadow-lg); animation: omni-pop var(--motion-base) var(--ease-emphasized); }
+.work-approval-selector > div button { min-height: 52px; padding: 7px 9px; display: grid; grid-template-columns: minmax(0, 1fr) 18px; align-items: center; gap: 7px; border-radius: var(--radius-md); text-align: left; }
+.work-approval-selector > div button:hover, .work-approval-selector > div button.active { background: var(--bg-hover); }
+.work-approval-selector > div button.active { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 32%, transparent); }
+.work-approval-selector > div button span { display: grid; gap: 3px; }
+.work-approval-selector > div button strong { font-size: var(--font-xs); }
+.work-approval-selector > div button small { color: var(--text-muted); font-size: 9px; line-height: 1.35; }
+.work-approval-selector > div button > svg { width: 14px; color: var(--accent); }
 .work-model-controls label { min-width: 0; display: grid; gap: 2px; color: var(--text-muted); font-size: var(--font-xs); font-weight: var(--weight-semibold); letter-spacing: .02em; }
 .work-model-controls select { width: 132px; height: 31px; padding: 0 24px 0 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font-size: var(--font-xs); text-transform: none; }
 .work-model-controls label:nth-child(2) select { width: 190px; }

@@ -3,6 +3,45 @@
 This log records repairs and audit milestones made during the no-new-features
 stabilization phase.
 
+## OmniCode 0.4.0 Work action approvals — 2026-09-13
+
+- Evolved the existing main-process `PermissionManager` into a complete Work
+  action policy with **Ask for approval**, **Approve for me**, and **Full access**
+  modes. Missing, corrupt, and migrated settings fail closed to Ask.
+- Added global and per-connector permission controls to Work Mode and Settings,
+  including a dedicated first-use Full Access warning. The backend refuses an
+  unacknowledged Full Access change rather than trusting the renderer alone.
+- Added explicit application-owned category, risk, reversibility, and external-
+  side-effect metadata to all Browser, Gmail, and Drive tools. The backend
+  dynamically escalates bulk and credential-bearing inputs to critical risk.
+- Kept critical, financial, account-security, irreversible destructive, and
+  explicitly always-confirm actions behind direct approval in every mode.
+  Connector scopes, read-only access, schema checks, and network boundaries
+  remain independently enforced.
+- Added a polished, sender-bound Work approval card with bounded exact action
+  details, safe-focus Cancel, Approve once, abort/navigation cleanup, a five-
+  minute timeout, and a native macOS fallback when the renderer is unavailable
+  or already displaying another approval.
+- Added private, atomic main-process permission and action-history stores. The
+  bounded local activity log records only redacted operation metadata and never
+  tool inputs, recipients, content, model output, credentials, or tokens.
+- Applied the same Tool Registry and Permission Manager path to OpenAI,
+  Anthropic, Gemini, and compatible Ollama tool turns. Prompt-injection strings
+  from messages, Drive files, webpages, and model output cannot lower policy.
+- Verified a packaged Intel build against the connected Google test account:
+  a harmless Gmail labels read ran automatically, an exact Gmail-send approval
+  rendered, Cancel prevented the network write, Activity recorded the cancelled
+  action, original permission settings were restored, and no renderer error was
+  captured.
+- Expanded the automated regression suite to 419 passing tests with one
+  intentionally skipped native Keychain test and no failures. TypeScript and
+  production compilation pass. Fresh 0.4.0 x64/arm64 DMGs and ZIPs pass archive,
+  image, version, executable/native-module architecture, original-icon, and
+  SHA-256 verification; the x64 package passed final runtime smokes.
+- Documented the complete security model, mode behavior, connector policy,
+  storage/privacy boundary, and test evidence in
+  `OMNICODE_WORK_ACTION_APPROVALS.md`.
+
 ## OmniCode 0.3.1 Google OAuth publisher integration — 2026-09-13
 
 - Added a strict build-time loader for a publisher-owned Google Desktop OAuth

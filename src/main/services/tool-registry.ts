@@ -83,6 +83,11 @@ function validateDescriptor(descriptor: ToolDescriptor): ToolDescriptor {
   if (!descriptor.name.trim() || !descriptor.description.trim()) throw new Error('Tool name and description are required.')
   if (!descriptor.modes.length || descriptor.modes.some((mode) => mode !== 'code' && mode !== 'work')) throw new Error('Tool modes are invalid.')
   if (!['read', 'write', 'destructive', 'sensitive'].includes(descriptor.action)) throw new Error('Tool action classification is invalid.')
+  if (!['read', 'write', 'communication', 'destructive', 'external-submission', 'system', 'financial', 'account-security', 'sensitive-data'].includes(descriptor.category)) {
+    throw new Error('Tool action category is invalid.')
+  }
+  if (!['low', 'medium', 'high', 'critical'].includes(descriptor.risk)) throw new Error('Tool risk classification is invalid.')
+  if (typeof descriptor.reversible !== 'boolean' || typeof descriptor.externalSideEffect !== 'boolean') throw new Error('Tool side-effect metadata is invalid.')
   if (!['never', 'policy', 'always'].includes(descriptor.confirmation)) throw new Error('Tool confirmation policy is invalid.')
   if (descriptor.timeoutMs !== undefined && (!Number.isInteger(descriptor.timeoutMs) || descriptor.timeoutMs < 100 || descriptor.timeoutMs > MAX_TIMEOUT_MS)) {
     throw new Error('Tool timeout must be between 100 and 120000 milliseconds.')
@@ -131,7 +136,10 @@ export class ToolRegistry {
     if (inputBytes > MAX_INPUT_BYTES) throw new Error('The tool input exceeds the 64 KB limit.')
     const normalized = validateSchema(registered.descriptor.inputSchema, request.input, 'input')
     assertRecord(normalized, 'input')
-    await this.permissions.authorize(registered.descriptor, normalized as Record<string, JsonValue>, authorization)
+    const authorizationDecision = await this.permissions.authorize(registered.descriptor, normalized as Record<string, JsonValue>, {
+      ...authorization,
+      signal: options.signal ?? authorization.signal
+    })
 
     const controller = new AbortController()
     const abortFromCaller = (): void => controller.abort(options.signal?.reason ?? new DOMException('Tool execution cancelled.', 'AbortError'))
@@ -160,7 +168,7 @@ export class ToolRegistry {
       if (Buffer.byteLength(serializedResult, 'utf8') > (registered.descriptor.maxResultBytes ?? DEFAULT_RESULT_BYTES)) {
         throw new Error('The tool result exceeds its allowed size.')
       }
-      return { toolId: request.toolId, startedAt, completedAt: new Date().toISOString(), result: checked }
+      return { toolId: request.toolId, startedAt, completedAt: new Date().toISOString(), result: checked, authorization: authorizationDecision }
     } finally {
       clearTimeout(timeout)
       options.signal?.removeEventListener('abort', abortFromCaller)

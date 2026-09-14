@@ -19,6 +19,10 @@ const tool: ToolDescriptor = {
   connectorId: 'browser',
   modes: ['work'],
   action: 'read',
+  category: 'read',
+  risk: 'low',
+  reversible: true,
+  externalSideEffect: false,
   confirmation: 'never',
   requiredScopes: [],
   inputSchema: {

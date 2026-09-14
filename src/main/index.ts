@@ -1,6 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, Notification, session, shell } from 'electron'
 import path from 'node:path'
 import { promises as fs } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { installApplicationMenu } from './menu'
 import { FileSystemManager, isPathInside } from './services/filesystem-manager'
 import { TerminalManager } from './services/terminal-manager'
@@ -31,7 +32,16 @@ import type { WorkAgentChatRequest, WorkAgentStreamEvent } from '../shared/work-
 import { modelCanUseWorkTools, WorkAgentManager } from './services/work-agent-manager'
 import { WorkAttachmentManager } from './services/work-attachment-manager'
 import { WorkTransferStore } from './services/work-transfer-store'
+import { WorkPermissionSettingsManager } from './services/work-permission-settings-manager'
+import { WorkActionHistoryManager } from './services/work-action-history-manager'
 import type { GitCloneProgress } from '../shared/contracts'
+import type {
+  ToolAuthorizationDecision,
+  WorkActionHistoryEntry,
+  WorkApprovalDetail,
+  WorkApprovalMode,
+  WorkApprovalRequest
+} from '../shared/tool-contracts'
 
 let mainWindow: BrowserWindow | null = null
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
@@ -60,6 +70,8 @@ const diagnostics = new DiagnosticLogger(path.join(app.getPath('userData'), 'log
 const workConversations = new WorkConversationManager(path.join(app.getPath('userData'), 'work-conversations.json'))
 const workAttachments = new WorkAttachmentManager(path.join(app.getPath('userData'), 'work-attachments'))
 const workTransfers = new WorkTransferStore(path.join(app.getPath('userData'), 'work-transfers'))
+const workPermissionSettings = new WorkPermissionSettingsManager(path.join(app.getPath('userData'), 'work-action-settings.json'))
+const workActionHistory = new WorkActionHistoryManager(path.join(app.getPath('userData'), 'work-action-history.json'))
 const cloudModelCatalog = new ModelCatalogManager({
   getCredential: async (provider) => {
     try {
@@ -90,6 +102,14 @@ const googleDriveConnector = new GoogleDriveConnector(googleOAuth, fetch, workTr
 const workAgent = new WorkAgentManager(ai)
 const activeWorkAgentRequests = new Map<string, { controller: AbortController; senderId: number }>()
 const activeGitCloneRequests = new Map<string, { controller: AbortController; senderId: number }>()
+const workApprovalReadySenders = new Set<number>()
+const pendingWorkApprovals = new Map<string, {
+  senderId: number
+  resolve: (approved: boolean) => void
+  timeout: NodeJS.Timeout
+  signal?: AbortSignal
+  abort?: () => void
+}>()
 const WORK_REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/u
 workConnectors.register(browserConnector)
 workConnectors.register(gmailConnector)
@@ -190,45 +210,155 @@ async function attachWorkContext(request: WorkAgentChatRequest): Promise<WorkAge
   return { ...request, messages }
 }
 
-async function confirmWorkTool(
-  event: Electron.IpcMainInvokeEvent,
-  request: ToolConfirmationRequest
-): Promise<boolean> {
+function approvalTitle(request: ToolConfirmationRequest): string {
+  if (request.toolId === 'gmail.send') return 'Send this email?'
+  if (request.toolId === 'gmail.reply') return 'Send this reply?'
+  if (request.toolId === 'gmail.draft') return 'Create this draft?'
+  if (request.toolId === 'drive.trash') return 'Move this Drive item to trash?'
+  return `Allow ${request.toolName}?`
+}
+
+function displayText(value: unknown, maximum = 4_000): string {
+  return String(value ?? '').replace(/\0/gu, '').slice(0, maximum)
+}
+
+async function workApprovalDetails(request: ToolConfirmationRequest): Promise<WorkApprovalDetail[]> {
+  const details: WorkApprovalDetail[] = []
+  const input = request.input
+  const append = (label: string, value: unknown, multiline = false, maximum?: number): void => {
+    const text = Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string').join(', ') : displayText(value, maximum)
+    if (text) details.push({ label, value: text, ...(multiline ? { multiline: true } : {}) })
+  }
+  if (request.connectorId === 'gmail') {
+    append('To', input.to)
+    append('Cc', input.cc)
+    append('Subject', input.subject, false, 998)
+    append('Message', input.body, true, 131_072)
+    if (typeof input.unread === 'boolean') append('New state', input.unread ? 'Unread' : 'Read')
+    append('Labels to add', input.addLabelIds)
+    append('Labels to remove', input.removeLabelIds)
+    if (Array.isArray(input.transferIds)) {
+      const attachments = await Promise.all(input.transferIds
+        .filter((value): value is string => typeof value === 'string')
+        .map(async (id) => {
+          try {
+            const transfer = await workTransfers.get(id)
+            return `${transfer.record.filename} (${transfer.record.sizeBytes.toLocaleString()} bytes)`
+          } catch {
+            return 'Unavailable attachment'
+          }
+        }))
+      append('Attachments', attachments)
+    }
+  } else if (request.connectorId === 'google-drive') {
+    append('Name', input.name, false, 1_000)
+    append('Type', input.mimeType, false, 300)
+    append('Content preview', input.content, true)
+    if (request.toolId === 'drive.trash') append('Recovery', 'The item can normally be restored from Google Drive trash.')
+    if (typeof input.fileId === 'string' || typeof input.folderId === 'string') append('Selected item', 'The Drive item selected by the task')
+    if (typeof input.parentId === 'string' || typeof input.destinationFolderId === 'string') append('Destination', 'The Drive folder selected by the task')
+    if (typeof input.transferId === 'string') {
+      try {
+        const transfer = await workTransfers.get(input.transferId)
+        append('Transferred file', `${transfer.record.filename} (${transfer.record.sizeBytes.toLocaleString()} bytes)`)
+      } catch {
+        append('Transferred file', 'Unavailable attachment')
+      }
+    }
+  } else {
+    const safeLabels: Record<string, string> = { url: 'Website', query: 'Search', name: 'Name', subject: 'Subject', body: 'Content' }
+    for (const [key, label] of Object.entries(safeLabels)) {
+      if (key in input) append(label, input[key], key === 'body')
+    }
+  }
+  return details.slice(0, 12)
+}
+
+async function createWorkApprovalRequest(request: ToolConfirmationRequest): Promise<WorkApprovalRequest> {
+  const connector = (await workConnectors.list()).find((candidate) => candidate.id === request.connectorId)
+  return {
+    id: randomUUID(),
+    toolId: request.toolId,
+    toolName: request.toolName,
+    connectorId: request.connectorId,
+    connectorName: connector?.name ?? request.connectorId,
+    category: request.category,
+    risk: request.risk,
+    approvalMode: request.approvalMode,
+    title: approvalTitle(request),
+    summary: request.summary,
+    reason: request.reason,
+    details: await workApprovalDetails(request)
+  }
+}
+
+function settleWorkApproval(id: string, approved: boolean, senderId?: number): boolean {
+  const pending = pendingWorkApprovals.get(id)
+  if (!pending || (senderId !== undefined && pending.senderId !== senderId)) return false
+  pendingWorkApprovals.delete(id)
+  clearTimeout(pending.timeout)
+  if (pending.signal && pending.abort) pending.signal.removeEventListener('abort', pending.abort)
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.id === pending.senderId) {
+    mainWindow.webContents.send('work:approval-settled', id)
+  }
+  pending.resolve(approved === true)
+  return true
+}
+
+function cancelWorkApprovals(senderId?: number): void {
+  for (const [id, pending] of pendingWorkApprovals) {
+    if (senderId !== undefined && pending.senderId !== senderId) continue
+    settleWorkApproval(id, false, pending.senderId)
+  }
+  if (senderId === undefined) workApprovalReadySenders.clear()
+  else workApprovalReadySenders.delete(senderId)
+}
+
+async function nativeWorkConfirmation(event: Electron.IpcMainInvokeEvent, request: WorkApprovalRequest): Promise<boolean> {
   const isEmailSend = request.toolId === 'gmail.send' || request.toolId === 'gmail.reply'
-  const emailRecipients = isEmailSend && Array.isArray(request.input.to)
-    ? request.input.to.filter((value): value is string => typeof value === 'string').join(', ')
-    : ''
-  const emailCc = isEmailSend && Array.isArray(request.input.cc)
-    ? request.input.cc.filter((value): value is string => typeof value === 'string').join(', ')
-    : ''
-  const emailSubject = isEmailSend && typeof request.input.subject === 'string' ? request.input.subject : ''
-  const emailBody = isEmailSend && typeof request.input.body === 'string' ? request.input.body : ''
-  const emailAttachments = isEmailSend && Array.isArray(request.input.transferIds)
-    ? (await Promise.all(request.input.transferIds.filter((value): value is string => typeof value === 'string').map(async (id) => {
-        try {
-          const transfer = await workTransfers.get(id)
-          return `${transfer.record.filename} (${transfer.record.sizeBytes.toLocaleString()} bytes)`
-        } catch {
-          return 'Unavailable attachment'
-        }
-      }))).join('\n')
-    : ''
+  const detailText = request.details.map((detail) => `${detail.label}: ${detail.value}`).join('\n')
   const options: Electron.MessageBoxOptions = {
-    type: request.action === 'destructive' ? 'warning' : 'question',
-    buttons: [isEmailSend ? 'Send Email' : 'Allow Once', 'Cancel'],
+    type: request.category === 'destructive' || request.risk === 'critical' ? 'warning' : 'question',
+    buttons: [isEmailSend ? 'Send Email' : 'Approve Once', 'Cancel'],
     defaultId: 1,
     cancelId: 1,
     noLink: true,
-    message: isEmailSend ? 'Review and send this email?' : `Allow ${request.toolName}?`,
-    detail: isEmailSend
-      ? `To: ${emailRecipients}\n${emailCc ? `Cc: ${emailCc}\n` : ''}Subject: ${emailSubject}\n${emailAttachments ? `Attachments:\n${emailAttachments}\n` : ''}\nExact message body:\n${emailBody}\n\nNothing is sent unless you choose Send Email.`
-      : `${request.summary}\n\nOmniCode will run this fixed, validated action once. Secret values are never shown in this confirmation.`
+    message: request.title,
+    detail: `${request.summary}\n\n${detailText ? `${detailText}\n\n` : ''}${request.reason}\n\nNothing happens unless you approve this exact action.`
   }
   const owner = BrowserWindow.fromWebContents(event.sender)
-  const response = owner
-    ? await dialog.showMessageBox(owner, options)
-    : await dialog.showMessageBox(options)
+  const response = owner ? await dialog.showMessageBox(owner, options) : await dialog.showMessageBox(options)
   return response.response === 0
+}
+
+async function confirmWorkTool(
+  event: Electron.IpcMainInvokeEvent,
+  request: ToolConfirmationRequest,
+  signal?: AbortSignal
+): Promise<boolean> {
+  const approval = await createWorkApprovalRequest(request)
+  const rendererAlreadyHasApproval = [...pendingWorkApprovals.values()].some(
+    (pending) => pending.senderId === event.sender.id
+  )
+  if (!workApprovalReadySenders.has(event.sender.id) || event.sender.isDestroyed() || rendererAlreadyHasApproval) {
+    return nativeWorkConfirmation(event, approval)
+  }
+  return new Promise<boolean>((resolve) => {
+    const timeout = setTimeout(() => settleWorkApproval(approval.id, false, event.sender.id), 5 * 60_000)
+    const abort = (): void => { settleWorkApproval(approval.id, false, event.sender.id) }
+    pendingWorkApprovals.set(approval.id, { senderId: event.sender.id, resolve, timeout, signal, abort })
+    signal?.addEventListener('abort', abort, { once: true })
+    event.sender.send('work:approval-request', approval)
+  })
+}
+
+async function recordWorkAction(entry: Omit<WorkActionHistoryEntry, 'id'>, sender: Electron.WebContents): Promise<void> {
+  try {
+    const stored = await workActionHistory.add(entry)
+    if (!sender.isDestroyed()) sender.send('work:activity-changed', stored)
+  } catch (error) {
+    await diagnostics.failure('work:activity:add', error).catch(() => undefined)
+  }
 }
 
 async function executeWorkTool(
@@ -241,15 +371,58 @@ async function executeWorkTool(
   if (!tool) throw new Error('The requested Work tool is not registered.')
   const connector = (await workConnectors.list()).find((candidate) => candidate.id === tool.connectorId)
   if (!connector) throw new Error('The tool connector is not registered.')
-  if (connector.status.state !== 'connected') throw new Error(`Connect ${connector.name} before using ${tool.name}.`)
-  const grantedScopes = new Set(connector.status.grantedScopes)
-  if (tool.requiredScopes.some((scope) => !grantedScopes.has(scope))) {
-    throw new Error(`${connector.name} has not granted every permission required by ${tool.name}.`)
+  const permissionSettings = await workPermissionSettings.get()
+  const approvalMode = workPermissionSettings.effectiveMode(permissionSettings, connector.id)
+  const timestamp = Date.now()
+  let decision: ToolAuthorizationDecision | undefined
+  try {
+    if (connector.status.state !== 'connected') throw new Error(`Connect ${connector.name} before using ${tool.name}.`)
+    const grantedScopes = new Set(connector.status.grantedScopes)
+    if (tool.requiredScopes.some((scope) => !grantedScopes.has(scope))) {
+      throw new Error(`${connector.name} has not granted every permission required by ${tool.name}.`)
+    }
+    const result = await workTools.execute(request, {
+      accessLevel: connector.accessLevel,
+      approvalMode,
+      confirm: (confirmation, confirmationSignal) => confirmWorkTool(event, confirmation, confirmationSignal),
+      signal,
+      onDecision: (value) => { decision = value }
+    }, { signal })
+    await recordWorkAction({
+      timestamp,
+      completedAt: Date.now(),
+      toolId: tool.id,
+      toolName: tool.name,
+      connectorId: connector.id,
+      connectorName: connector.name,
+      category: tool.category,
+      risk: result.authorization.risk,
+      approvalMode,
+      approval: result.authorization.requiredApproval ? 'user-approved' : 'automatic',
+      result: 'succeeded',
+      summary: `${tool.name} completed successfully.`
+    }, event.sender)
+    return result
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    const cancelled = signal?.aborted === true || /cancelled|canceled/iu.test(message)
+    const blocked = !cancelled && (!decision || /blocked|read only|connect .* before|has not granted/iu.test(message))
+    await recordWorkAction({
+      timestamp,
+      completedAt: Date.now(),
+      toolId: tool.id,
+      toolName: tool.name,
+      connectorId: connector.id,
+      connectorName: connector.name,
+      category: tool.category,
+      risk: decision?.risk ?? tool.risk,
+      approvalMode,
+      approval: cancelled && decision?.requiredApproval ? 'user-cancelled' : blocked ? 'blocked' : decision?.requiredApproval ? 'user-approved' : 'automatic',
+      result: cancelled ? 'cancelled' : blocked ? 'blocked' : 'failed',
+      summary: `${tool.name} ${cancelled ? 'was cancelled before completion' : blocked ? 'was blocked by its safety or connection boundary' : 'failed'}.`
+    }, event.sender)
+    throw error
   }
-  return workTools.execute(request, {
-    accessLevel: connector.accessLevel,
-    confirm: (confirmation) => confirmWorkTool(event, confirmation)
-  }, { signal })
 }
 
 function isGoogleConnector(id: string): boolean {
@@ -333,7 +506,10 @@ function createWindow(): void {
   })
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   mainWindow.webContents.on('did-start-navigation', (_event, url, _isInPlace, isMainFrame) => {
-    if (isMainFrame && isTrustedRendererUrl(url)) rendererReady = false
+    if (isMainFrame && isTrustedRendererUrl(url)) {
+      rendererReady = false
+      cancelWorkApprovals(mainWindow?.webContents.id)
+    }
   })
   mainWindow.webContents.on('will-navigate', (event, url) => {
     if (!isTrustedRendererUrl(url)) event.preventDefault()
@@ -367,6 +543,7 @@ function createWindow(): void {
   mainWindow.on('closed', () => {
     cancelWorkAgentRequests()
     cancelGitCloneRequests()
+    cancelWorkApprovals()
     terminals.shutdown()
     if (!quitRequested) {
       void server.stop()
@@ -695,6 +872,39 @@ function registerIpc(): void {
   handle('work:connectors:list', (_event, refresh?: boolean) => workConnectors.list(refresh === true))
   handle('work:connectors:connect', (_event, id: string) => connectWorkConnector(id))
   handle('work:connectors:disconnect', (_event, id: string) => disconnectWorkConnector(id))
+  handle('work:permissions:get', () => workPermissionSettings.get())
+  handle('work:permissions:set-global', async (event, mode: WorkApprovalMode, acknowledgeFullAccess?: boolean) => {
+    const updated = await workPermissionSettings.setGlobal(mode, acknowledgeFullAccess === true)
+    if (!event.sender.isDestroyed()) event.sender.send('work:permissions-changed', updated)
+    return updated
+  })
+  handle('work:permissions:set-connector', async (event, id: string, mode: WorkApprovalMode | null, acknowledgeFullAccess?: boolean) => {
+    if (!(await workConnectors.list()).some((connector) => connector.id === id)) throw new Error('The Work connector is not registered.')
+    const updated = await workPermissionSettings.setConnector(id, mode, acknowledgeFullAccess === true)
+    if (!event.sender.isDestroyed()) event.sender.send('work:permissions-changed', updated)
+    return updated
+  })
+  handle('work:activity:list', (_event, limit?: number) => workActionHistory.list(limit))
+  handle('work:activity:clear', async (event) => {
+    await workActionHistory.clear()
+    if (!event.sender.isDestroyed()) event.sender.send('work:activity-cleared')
+  })
+  handle('work:approvals:resolve', (event, id: string, approved: boolean) => {
+    if (typeof id !== 'string' || typeof approved !== 'boolean') throw new Error('The Work approval response is invalid.')
+    return settleWorkApproval(id, approved, event.sender.id)
+  })
+  ipcMain.on('work:approvals:ready', (event) => {
+    try {
+      assertTrustedSender(event)
+      workApprovalReadySenders.add(event.sender.id)
+    } catch { /* Ignore stale or untrusted renderer readiness signals. */ }
+  })
+  ipcMain.on('work:approvals:not-ready', (event) => {
+    try {
+      assertTrustedSender(event)
+      cancelWorkApprovals(event.sender.id)
+    } catch { /* Ignore stale or untrusted renderer readiness signals. */ }
+  })
   handle('work:attachments:select', async () => {
     const options: Electron.OpenDialogOptions = {
       title: 'Attach files to Work Mode',

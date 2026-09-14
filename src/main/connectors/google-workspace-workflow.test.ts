@@ -59,7 +59,7 @@ function driveFile(overrides: Record<string, unknown> = {}) {
 }
 
 describe('Google Workspace cross-connector workflows', () => {
-  it('chains Gmail search → attachment retrieval → confirmed Drive upload without exposing bytes to the model', async () => {
+  it('chains Gmail search → attachment retrieval → routine Drive upload without approval spam in Approve for me mode', async () => {
     const transfers = await transferStore()
     const attachmentBytes = Buffer.from('%PDF-teacher-data')
     let uploadedBody = Buffer.alloc(0)
@@ -100,13 +100,12 @@ describe('Google Workspace cross-connector workflows', () => {
     const response = await manager.chat({
       provider: 'google', model: 'gemini-test',
       messages: [{ role: 'user', content: 'Find the PDF my teacher emailed today and save it to Drive.' }]
-    }, tools, (request) => registry.execute(request, { accessLevel: 'ask-before-changes', confirm }))
+    }, tools, (request) => registry.execute(request, { accessLevel: 'ask-before-changes', approvalMode: 'auto', confirm }))
 
     expect(response).toMatchObject({ content: 'The attachment was uploaded to Google Drive.', toolCallCount: 3 })
     expect(response.toolActivities.map((activity) => activity.status)).toEqual(['succeeded', 'succeeded', 'succeeded'])
     expect(uploadedBody.includes(attachmentBytes)).toBe(true)
-    expect(confirm).toHaveBeenCalledOnce()
-    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ toolId: 'drive.upload-transfer' }))
+    expect(confirm).not.toHaveBeenCalled()
     const modelPayload = JSON.stringify(toolTurn.mock.calls)
     expect(modelPayload).not.toContain(attachmentBytes.toString('base64'))
     expect(modelPayload).not.toContain(attachmentBytes.toString())
@@ -154,14 +153,14 @@ describe('Google Workspace cross-connector workflows', () => {
     const response = await manager.chat({
       provider: 'google', model: 'gemini-test',
       messages: [{ role: 'user', content: 'Find my latest resume in Drive and attach it to a Gmail draft for Alex.' }]
-    }, registry.list('work'), (request) => registry.execute(request, { accessLevel: 'ask-before-changes', confirm }))
+    }, registry.list('work'), (request) => registry.execute(request, { accessLevel: 'ask-before-changes', approvalMode: 'ask', confirm }))
 
     expect(response).toMatchObject({ content: 'The Gmail draft is ready with your latest resume attached.', toolCallCount: 3 })
     expect(draftMime).toContain('To: alex@example.com')
     expect(draftMime).toContain("filename*=UTF-8''Latest%20resume.pdf")
     expect(draftMime).toContain(resumeBytes.toString('base64'))
     expect(confirm).toHaveBeenCalledOnce()
-    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ toolId: 'gmail.draft' }))
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ toolId: 'gmail.draft' }), undefined)
     expect(JSON.stringify(toolTurn.mock.calls)).not.toContain(resumeBytes.toString('base64'))
   })
 
@@ -190,7 +189,7 @@ describe('Google Workspace cross-connector workflows', () => {
     })
     const response = await new WorkAgentManager({ toolTurn } as unknown as AIManager).chat({
       provider: 'google', model: 'gemini-test', messages: [{ role: 'user', content: 'Summarize my unread email.' }]
-    }, registry.list('work', 'gmail'), (request) => registry.execute(request, { accessLevel: 'ask-before-changes', confirm: vi.fn() }))
+    }, registry.list('work', 'gmail'), (request) => registry.execute(request, { accessLevel: 'ask-before-changes', approvalMode: 'ask', confirm: vi.fn() }))
 
     expect(response).toMatchObject({ content: expect.stringContaining('Friday at 2 PM'), toolCallCount: 2 })
   })
@@ -216,7 +215,7 @@ describe('Google Workspace cross-connector workflows', () => {
     })
     const response = await new WorkAgentManager({ toolTurn } as unknown as AIManager).chat({
       provider: 'google', model: 'gemini-test', messages: [{ role: 'user', content: 'Find my resume and tell me what to improve.' }]
-    }, registry.list('work', 'google-drive'), (request) => registry.execute(request, { accessLevel: 'ask-before-changes', confirm: vi.fn() }))
+    }, registry.list('work', 'google-drive'), (request) => registry.execute(request, { accessLevel: 'ask-before-changes', approvalMode: 'ask', confirm: vi.fn() }))
 
     expect(response).toMatchObject({ content: expect.stringContaining('measurable outcomes'), toolCallCount: 2 })
   })
