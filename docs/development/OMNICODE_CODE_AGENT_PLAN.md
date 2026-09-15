@@ -104,3 +104,57 @@ untrusted data and are wrapped as tool results, never system instructions.
   action through the existing diff/undo system.
 - Unsupported macOS computer-control operations will be reported as blocked with
   the exact permission/implementation requirement rather than faked.
+
+## Reasoning Summary and dynamic plan addition — 2026-09-14
+
+Verified baseline: Code Agent 0.5.0 persists trusted operational events and
+Standard/Glasses visibility, but it has no first-class plan state. The final
+provider answer is visible, while task interpretation, current/next step,
+user-facing decision summaries, and plan changes are not structured or
+persisted. Pause/resume/stop exist; Modify Plan and Skip Step do not.
+
+Implementation order:
+
+1. Add bounded provider-neutral plan contracts to each Code Agent task. Persist
+   sanitized task understanding, reasoning summary, steps, current/next step,
+   progress, decisions, and change reasons in the existing private activity
+   store with backwards-compatible migration.
+2. Register one Code-only `agent.update-plan` Tool Registry descriptor. The
+   model will use this application-owned schema for user-facing plan summaries;
+   it provides no system authority and never bypasses Permission Manager.
+3. Extend the shared provider loop with a bounded user-intervention queue. A
+   plan edit or skipped step pauses at the atomic-action boundary, safely marks
+   already-proposed calls as skipped when necessary, and returns the user's
+   revised course to the model before more work.
+4. Add main/preload APIs for Modify Plan and Skip Step, retaining sender/task
+   ownership and existing pause/resume/stop behavior.
+5. Add a compact plan/status panel shared by Standard and Glasses, expanded
+   planning detail in Glasses, inline plan modification, progress, decisions,
+   change reasons, and a final evidence summary derived from real activity.
+6. Add unit/integration coverage for initial and changed plans, step progress,
+   user intervention, skipped calls, persistence, redaction, Standard/Glasses,
+   failed/final reports, approval independence, and provider-neutral schemas;
+   then rerun production and packaged verification.
+
+Safety boundary: “Reasoning Summary” is a deliberately short model-authored
+explanation requested through a fixed schema. Raw provider reasoning tokens,
+hidden chain-of-thought, system/developer prompts, and unbounded free-form traces
+are neither requested nor stored.
+
+Implementation result — 2026-09-15:
+
+- Steps 1–6 are complete in OmniCode 0.5.1.
+- The full regression suite passes: 459 tests passed, one native Keychain test
+  is intentionally excluded from the ordinary suite, and zero tests failed.
+- TypeScript and production bundling pass. Intel and Apple Silicon DMG/ZIP
+  artifacts embed 0.5.1, contain matching Electron/native PTY architectures,
+  preserve the original icon, and pass archive/disk-image/checksum validation.
+- A packaged Intel five-turn controlled local-provider audit clicked Skip Step
+  and Modify Plan, paused/resumed, proved the stale proposal did not execute,
+  rendered changed/progress plan state and a real runtime-detection action,
+  showed 9 Glasses versus 7 Standard events, reached 2/2 progress, displayed the
+  complete final report, had no horizontal overflow, and logged zero renderer
+  errors.
+- Remaining release blocks are unchanged external requirements: Apple signing/
+  notarization, matching Apple Silicon execution hardware, and the separately
+  documented service/account gates. They do not block this planning layer.

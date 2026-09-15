@@ -127,6 +127,27 @@ describe('WorkAgentManager', () => {
     expect(response.toolActivities[0]).not.toHaveProperty('result')
   })
 
+  it('skips already-proposed actions when the user changes the course at an action boundary', async () => {
+    const toolTurn = vi.fn()
+      .mockResolvedValueOnce({ content: '', calls: [{ callId: 'stale-call', name: 'tool_0_browser_read', toolId: 'browser.read', input: {} }] })
+      .mockResolvedValueOnce({ content: 'I revised the plan without running the stale action.', calls: [] })
+    const execute = vi.fn()
+    let interventionChecks = 0
+
+    const response = await new WorkAgentManager({ toolTurn } as unknown as AIManager).chat({
+      provider: 'google', model: 'gemini-test', messages: [{ role: 'user', content: 'Inspect the page.' }]
+    }, [browserTool], execute, {
+      takeIntervention: () => ++interventionChecks === 2 ? 'The user changed the course: do not read the page.' : undefined
+    })
+
+    expect(execute).not.toHaveBeenCalled()
+    expect(response.content).toContain('revised the plan')
+    expect(response.toolCallCount).toBe(1)
+    const secondTurnMessages = toolTurn.mock.calls[1]?.[0].messages
+    expect(secondTurnMessages.at(-2)?.content).toContain('Skipped before execution')
+    expect(secondTurnMessages.at(-1)?.content).toContain('do not read the page')
+  })
+
   it('projects Gmail results into bounded display cards without persisting internal IDs or raw bodies', async () => {
     const toolTurn = vi.fn()
       .mockResolvedValueOnce({ content: '', calls: [{ callId: 'call-1', name: 'tool_0_gmail_search', toolId: 'gmail.search', input: { query: 'launch', maximum: 10 } }] })

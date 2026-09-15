@@ -108,14 +108,34 @@ Approval and visibility are independent:
 - **Full Access** allows ordinary registered tools but cannot bypass
   always-confirm, critical, financial, account-security, irreversible
   destructive, credential, system-root, or command-policy boundaries.
-- **Standard** shows concise waiting, failure, and result activity.
-- **Glasses** shows the complete bounded operational timeline.
+- **Standard** shows the shared plan, reasoning summary, progress, decisions,
+  tests/builds, waiting/failure states, and final report without every low-level
+  action.
+- **Glasses** shows the same planning layer plus the complete bounded
+  operational timeline, commands, results, paths, and action reasons.
 - **Automatic**, **When needed**, and **Never** control whether browser or app
   actions foreground their surface. Nonvisual tools never steal focus.
 
 ## Glasses timeline and task control
 
-Each task emits bounded events for task, file, terminal, Git, browser,
+Each task owns a bounded provider-neutral plan containing task understanding,
+concise user-facing Reasoning Summary, assumptions, ordered steps, completed
+count, current/next step, optional decision, and explained change reason. The
+application registers `agent.update-plan` as metadata-only: it has no external
+effect or execution authority. OpenAI, Anthropic, Gemini, and tool-capable
+Ollama models use the same schema rather than provider-private reasoning APIs.
+Raw chain-of-thought, private reasoning tokens, and system prompts are never
+requested or stored.
+
+Modify Plan and Skip Step create bounded task-owned user interventions and
+request a pause at the next atomic-action boundary. If a provider already
+proposed a batch, remaining calls are recorded back to the model as skipped and
+are not executed. After Resume, the revised user course is inserted before the
+next provider turn. The Agent must update its visible plan before another new
+action. These controls do not alter Ask/Auto/Full policy; each subsequent action
+still passes through Tool Registry and Permission Manager independently.
+
+Each task emits bounded events for task, plan, decision, file, terminal, Git, browser,
 application, server, build, test, diagnostic, approval, failure, and result
 states. Commands, paths, URLs, output, proposal IDs, status, and short summaries
 are visible where relevant. Outputs can be expanded/copied and diff proposals
@@ -146,6 +166,14 @@ ownership/input/interrupt/secret prompts, command policy, Code Browser URL and
 localhost boundaries, web search, app allowlisting/focus/permission panes,
 timeline filtering, persistence, corruption recovery, bounds, redaction,
 cancellation, and untrusted-content instructions.
+
+The 0.5.1 packaged Intel audit used a loopback-only controlled
+Ollama-compatible service to complete five provider turns while exercising Skip
+Step, Modify Plan, safe pause/resume, stale-call cancellation, changed/progress
+plans, a real runtime detection action, Standard/Glasses filtering, the final
+evidence report, and layout/error checks. The UI reached 2/2 complete with zero
+renderer errors and no horizontal overflow. Automated regression is 459 passed,
+one native Keychain test intentionally skipped, and zero failed.
 
 A packaged Gemini run completed a real Code Agent task against a disposable
 workspace: the model inspected a real file, created exact requested bytes

@@ -1,9 +1,34 @@
 # OmniCode Known Issues
 
-Last updated: 2026-09-14
+Last updated: 2026-09-15
 
 Resolved issues remain in this file with a resolution so audit history is not
 lost. Secrets, tokens, and authorization headers must never be included here.
+
+## OMI-048 — Code Agent lacked a structured visible course of action — Resolved
+
+- Severity: Medium for transparency and intervention safety
+- Reproduction: Run a multi-step Code Agent task in OmniCode 0.5.0.
+- Expected: Standard and Glasses show a concise plan, reasoning summary,
+  current/next step, decisions, changes, and evidence-based final report; the
+  user can modify or skip the course without bypassing approval.
+- Actual: Operational tool events were real and visible, but there was no
+  first-class persisted plan state, Modify Plan, Skip Step, or structured final
+  evidence report.
+- Suspected cause: The initial Code Agent milestone prioritized real tool
+  execution and safe observability before adding provider-neutral planning
+  metadata.
+- Relevant files: `src/shared/code-agent-contracts.ts`,
+  `src/main/services/code-agent-manager.ts`,
+  `src/main/services/work-agent-manager.ts`,
+  `src/main/services/code-agent-activity-manager.ts`,
+  `src/renderer/src/components/AgentMode.tsx`.
+- Current status: ✅ Resolved — 0.5.1 adds a bounded application-owned plan
+  schema, decisions and action reasons, persistent redacted state, Standard and
+  Glasses presentation, Modify Plan, Skip Step, safe action-boundary pause and
+  stale-call cancellation, plus a final report derived from actual activity.
+  A controlled packaged five-turn local-model audit passed with zero renderer
+  errors; Permission Manager remains the sole action authority.
 
 ## OMI-001 — Provider status did not verify connectivity — Resolved
 

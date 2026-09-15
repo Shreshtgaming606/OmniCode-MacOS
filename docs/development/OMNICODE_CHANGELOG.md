@@ -3,6 +3,48 @@
 This log records repairs and audit milestones made during the no-new-features
 stabilization phase.
 
+## OmniCode 0.5.1 Agent plan and reasoning summary — 2026-09-15
+
+- Added a bounded, provider-neutral `agent.update-plan` tool for Code Agent task
+  understanding, concise Reasoning Summary, assumptions, ordered steps,
+  progress, current/next step, decisions, and explained plan changes. The
+  schema explicitly excludes provider-private reasoning and system prompts.
+- Added a compact Agent Plan surface shared by Standard and Glasses modes with
+  progress, expandable details, step state, decisions, assumptions, and a clear
+  privacy label. Standard retains consequential plan/test/build/result events;
+  Glasses additionally retains every meaningful observable tool action.
+- Added Modify Plan and Skip Step controls. User interventions pause at a safe
+  action boundary, are delivered to the model before further work, and cause
+  already-proposed stale calls to be returned as skipped rather than executed.
+- Kept plan metadata outside execution authority: every actual action still
+  uses the existing Tool Registry and Permission Manager. Approval and
+  visibility remain independent, and task/sender ownership is enforced by the
+  main process.
+- Added Action / Reason / Result pairing to Glasses events. Explicit terminal
+  rationales are preserved; other actions receive a bounded reason tied to the
+  visible current plan step.
+- Added a final task report derived from persisted evidence: What I did, What
+  changed, Tests performed, Results, Problems encountered, Plan changes, and
+  Remaining issues. Missing evidence is labeled as unrecorded rather than
+  implied to have passed.
+- Expanded persistent task validation/redaction for plan fields and added
+  backwards compatibility for 0.5.0 tasks without plan state.
+- Added regression coverage for initial/changed/progress plans, decisions,
+  assumptions, persistence, redaction, Standard/Glasses filtering, final
+  reports, Modify Plan, Skip Step, stale-call cancellation, pause/resume, and
+  provider-neutral execution. The full suite passes with 459 tests and one
+  intentionally skipped native Keychain test.
+- A packaged Intel audit used a loopback-only controlled Ollama-compatible
+  service to exercise five real provider turns, both intervention controls,
+  safe pause/resume, dynamic plan revisions, a real runtime-detection action,
+  final reporting, Standard/Glasses differences, layout bounds, and renderer
+  logging. The stale proposal did not execute; zero renderer errors occurred.
+- Built fresh 0.5.1 Intel and Apple Silicon DMG/ZIP artifacts. Both architectures
+  contain matching Electron/native PTY slices, embed 0.5.1, preserve the
+  original icon, and pass ZIP/DMG/checksum verification. The Intel package ran
+  the live audit; Apple Silicon launch and Apple signing/notarization remain
+  external requirements.
+
 ## OmniCode 0.5.0 Code Agent and Glasses Mode — 2026-09-14
 
 - Replaced Code Mode's renderer-only, one-response planning flow with a real

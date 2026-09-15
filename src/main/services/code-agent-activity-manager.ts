@@ -5,6 +5,7 @@ import path from 'node:path'
 import type {
   CodeAgentEvent,
   CodeAgentFocusBehavior,
+  CodeAgentPlan,
   CodeAgentTask,
   CodeAgentTaskStatus,
   CodeAgentTaskSummary,
@@ -24,11 +25,14 @@ const PROVIDERS = new Set<AIProviderId>(['ollama', 'openai', 'anthropic', 'googl
 const VISIBILITIES = new Set<CodeAgentVisibility>(['standard', 'glasses'])
 const FOCUS_BEHAVIORS = new Set<CodeAgentFocusBehavior>(['automatic', 'when-needed', 'never'])
 const TASK_STATUSES = new Set<CodeAgentTaskStatus>(['running', 'pausing', 'paused', 'completed', 'failed', 'stopped'])
-const EVENT_KINDS = new Set(['task', 'terminal', 'file', 'git', 'browser', 'application', 'server', 'build', 'test', 'diagnostic', 'approval', 'result'])
+const EVENT_KINDS = new Set(['task', 'plan', 'decision', 'terminal', 'file', 'git', 'browser', 'application', 'server', 'build', 'test', 'diagnostic', 'approval', 'result'])
 const EVENT_STATUSES = new Set(['running', 'waiting', 'succeeded', 'failed', 'cancelled', 'info'])
 const CATEGORIES = new Set(['read', 'write', 'communication', 'destructive', 'external-submission', 'system', 'financial', 'account-security', 'sensitive-data'])
 const RISKS = new Set(['low', 'medium', 'high', 'critical'])
 const APPROVAL_MODES = new Set(['ask', 'auto', 'full'])
+const PLAN_UPDATE_TYPES = new Set(['initial', 'progress', 'changed'])
+const PLAN_STEP_STATUSES = new Set(['pending', 'active', 'completed', 'skipped'])
+const PLAN_UPDATED_BY = new Set(['system', 'agent', 'user'])
 
 function defaults(): CodeAgentStore {
   return { version: 1, preferences: { visibility: 'standard', focusBehavior: 'automatic' }, tasks: [] }
@@ -46,6 +50,52 @@ export function redactCodeAgentText(value: unknown, maximum = CODE_AGENT_LIMITS.
     .replace(/([?&](?:key|api_key|access_token|refresh_token|token|client_secret)=)[^&#\s]+/giu, '$1••••')
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, ' ')
     .slice(0, maximum)
+}
+
+function safePlan(value: CodeAgentPlan): CodeAgentPlan {
+  if (!value || typeof value !== 'object' || !Number.isSafeInteger(value.revision) || value.revision < 0 ||
+    !PLAN_UPDATE_TYPES.has(value.updateType) || !PLAN_UPDATED_BY.has(value.updatedBy) ||
+    !Number.isFinite(value.updatedAt) || value.updatedAt < 0 || !Array.isArray(value.steps) ||
+    value.steps.length < 1 || value.steps.length > CODE_AGENT_LIMITS.planSteps ||
+    !Number.isSafeInteger(value.completedSteps) || value.completedSteps < 0 || value.completedSteps > value.steps.length ||
+    typeof value.taskUnderstanding !== 'string' || !value.taskUnderstanding.trim() ||
+    typeof value.reasoningSummary !== 'string' || !value.reasoningSummary.trim() ||
+    typeof value.currentStep !== 'string' || !value.currentStep.trim() ||
+    typeof value.nextStep !== 'string' || !value.nextStep.trim() ||
+    (value.updateType === 'changed' && (typeof value.changeReason !== 'string' || !value.changeReason.trim())) ||
+    (value.assumptions !== undefined && (!Array.isArray(value.assumptions) || value.assumptions.some((item) => typeof item !== 'string')))) {
+    throw new Error('Code Agent plan is invalid.')
+  }
+  const steps = value.steps.map((step) => {
+    if (!step || typeof step.id !== 'string' || !step.id || typeof step.title !== 'string' || !PLAN_STEP_STATUSES.has(step.status)) {
+      throw new Error('Code Agent plan step is invalid.')
+    }
+    const id = safeText(step.id, 128)
+    const title = safeText(step.title, CODE_AGENT_LIMITS.planStepCharacters)
+    if (!id || !title) throw new Error('Code Agent plan step is invalid.')
+    return {
+      id,
+      title,
+      status: step.status
+    }
+  })
+  return {
+    revision: value.revision,
+    updateType: value.updateType,
+    taskUnderstanding: safeText(value.taskUnderstanding, CODE_AGENT_LIMITS.planUnderstandingCharacters),
+    reasoningSummary: safeText(value.reasoningSummary, CODE_AGENT_LIMITS.reasoningSummaryCharacters),
+    steps,
+    completedSteps: value.completedSteps,
+    currentStep: safeText(value.currentStep, CODE_AGENT_LIMITS.planStepCharacters),
+    nextStep: safeText(value.nextStep, CODE_AGENT_LIMITS.planStepCharacters),
+    ...(value.decision ? { decision: safeText(value.decision, CODE_AGENT_LIMITS.planDecisionCharacters) } : {}),
+    ...(Array.isArray(value.assumptions) && value.assumptions.length ? {
+      assumptions: value.assumptions.slice(0, CODE_AGENT_LIMITS.planAssumptions).map((item) => safeText(item, CODE_AGENT_LIMITS.planDecisionCharacters)).filter(Boolean)
+    } : {}),
+    ...(value.changeReason ? { changeReason: safeText(value.changeReason, CODE_AGENT_LIMITS.planDecisionCharacters) } : {}),
+    updatedBy: value.updatedBy,
+    updatedAt: value.updatedAt
+  }
 }
 
 function safeEvent(value: CodeAgentEvent, taskId: string): CodeAgentEvent {
@@ -74,7 +124,8 @@ function safeEvent(value: CodeAgentEvent, taskId: string): CodeAgentEvent {
     ...(value.output ? { output: redactCodeAgentText(value.output) } : {}),
     ...(value.relativePath ? { relativePath: safeText(value.relativePath, 1_024) } : {}),
     ...(value.url ? { url: safeText(value.url, 2_048) } : {}),
-    ...(value.proposalId ? { proposalId: safeText(value.proposalId, 128) } : {})
+    ...(value.proposalId ? { proposalId: safeText(value.proposalId, 128) } : {}),
+    ...(value.reason ? { reason: safeText(value.reason, CODE_AGENT_LIMITS.planDecisionCharacters) } : {})
   }
 }
 
@@ -106,6 +157,7 @@ function safeTask(value: CodeAgentTask): CodeAgentTask {
     actionCount: events.length,
     ...(value.resultSummary ? { resultSummary: safeText(value.resultSummary, CODE_AGENT_LIMITS.resultCharacters) } : {}),
     ...(value.error ? { error: safeText(value.error, 2_000) } : {}),
+    ...(value.plan ? { plan: safePlan(value.plan) } : {}),
     events
   }
 }
@@ -132,12 +184,13 @@ export class CodeAgentActivityManager {
 
   constructor(private readonly storePath: string) {}
 
-  async create(input: { title: string; provider: AIProviderId; model: string; approvalMode: CodeAgentTask['approvalMode']; visibility: CodeAgentVisibility; focusBehavior: CodeAgentFocusBehavior }): Promise<CodeAgentTask> {
+  async create(input: { title: string; provider: AIProviderId; model: string; approvalMode: CodeAgentTask['approvalMode']; visibility: CodeAgentVisibility; focusBehavior: CodeAgentFocusBehavior; plan?: CodeAgentPlan }): Promise<CodeAgentTask> {
     const now = Date.now()
     const created = safeTask({
       id: randomUUID(), title: input.title, provider: input.provider, model: input.model, approvalMode: input.approvalMode,
       visibility: input.visibility, focusBehavior: input.focusBehavior,
-      status: 'running', createdAt: now, updatedAt: now, actionCount: 0, events: []
+      status: 'running', createdAt: now, updatedAt: now, actionCount: 0,
+      ...(input.plan ? { plan: input.plan } : {}), events: []
     })
     await this.#mutate((store) => { store.tasks = [created, ...store.tasks].slice(0, CODE_AGENT_LIMITS.tasks) })
     return structuredClone(created)
@@ -161,6 +214,17 @@ export class CodeAgentActivityManager {
       const task = store.tasks.find((candidate) => candidate.id === id)
       if (!task) throw new Error('That Code Agent task was not found.')
       result = safeTask({ ...task, ...changes, updatedAt: Date.now() })
+      store.tasks[store.tasks.indexOf(task)] = result
+    })
+    return structuredClone(result as CodeAgentTask)
+  }
+
+  async updatePlan(id: string, plan: CodeAgentPlan): Promise<CodeAgentTask> {
+    let result: CodeAgentTask | undefined
+    await this.#mutate((store) => {
+      const task = store.tasks.find((candidate) => candidate.id === id)
+      if (!task) throw new Error('That Code Agent task was not found.')
+      result = safeTask({ ...task, plan: safePlan(plan), updatedAt: Date.now() })
       store.tasks[store.tasks.indexOf(task)] = result
     })
     return structuredClone(result as CodeAgentTask)

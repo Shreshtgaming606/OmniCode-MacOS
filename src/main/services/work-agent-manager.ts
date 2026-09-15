@@ -38,6 +38,7 @@ export interface WorkAgentRunOptions {
   maxSteps?: number
   maxToolCalls?: number
   beforeAction?(): Promise<void>
+  takeIntervention?(): string | undefined
   onToolActivity?(activity: WorkToolActivity): void
 }
 
@@ -64,6 +65,15 @@ export function modelCanUseWorkTools(
 
 function assertNotAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw signal.reason ?? new DOMException('Generation cancelled.', 'AbortError')
+}
+
+function takeIntervention(options: WorkAgentRunOptions): string | undefined {
+  const value = options.takeIntervention?.()
+  if (value === undefined) return undefined
+  if (typeof value !== 'string' || !value.trim() || value.length > 8_000 || value.includes('\0')) {
+    throw new Error('The Code Agent intervention is invalid.')
+  }
+  return value.trim()
 }
 
 function validateRequest(request: WorkAgentChatRequest): void {
@@ -279,6 +289,8 @@ export class WorkAgentManager {
       assertNotAborted(options.signal)
       await options.beforeAction?.()
       assertNotAborted(options.signal)
+      const beforeTurnIntervention = takeIntervention(options)
+      if (beforeTurnIntervention) messages.push({ role: 'user', content: beforeTurnIntervention })
       const turn = await this.ai.toolTurn({
         provider: request.provider,
         model: request.model.trim(),
@@ -301,10 +313,24 @@ export class WorkAgentManager {
       }
 
       messages.push({ role: 'assistant-tool', content: turn.content, calls: turn.calls })
-      for (const call of turn.calls) {
+      for (let callIndex = 0; callIndex < turn.calls.length; callIndex++) {
+        const call = turn.calls[callIndex]
         assertNotAborted(options.signal)
         await options.beforeAction?.()
         assertNotAborted(options.signal)
+        const intervention = takeIntervention(options)
+        if (intervention) {
+          for (const skipped of turn.calls.slice(callIndex)) {
+            seenCallIds.add(skipped.callId)
+            callCount++
+            messages.push({
+              role: 'tool', callId: skipped.callId, name: skipped.name,
+              content: JSON.stringify({ ok: false, error: 'Skipped before execution because the user changed the course of action.' })
+            })
+          }
+          messages.push({ role: 'user', content: intervention })
+          break
+        }
         seenCallIds.add(call.callId)
         callCount++
         const descriptor = call.toolId ? descriptors.get(call.toolId) : undefined

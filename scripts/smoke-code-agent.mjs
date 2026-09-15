@@ -97,10 +97,12 @@ try {
       controls: [...document.querySelectorAll('.agent-control-grid select')].map((item) => item.value),
       history: Boolean(document.querySelector('.agent-history')),
       timeline: document.querySelectorAll('.agent-event').length,
-      result: document.querySelector('.agent-final-result')?.textContent || ''
+      result: document.querySelector('.agent-final-report')?.textContent || '',
+      plan: document.querySelector('.agent-plan-panel')?.textContent || '',
+      decisionEvents: [...document.querySelectorAll('.agent-event')].filter((item) => /decision/i.test(item.textContent || '')).length
     }
   `)
-  if (surface.controls.length !== 3 || !surface.history || surface.timeline < 2 || !surface.result) throw new Error(`Glasses Mode surface is incomplete: ${JSON.stringify(surface)}`)
+  if (surface.controls.length !== 3 || !surface.history || surface.timeline < 3 || !surface.result || !/current|next|reasoning summary/i.test(surface.plan)) throw new Error(`Glasses Mode surface is incomplete: ${JSON.stringify(surface)}`)
   await evaluate(`await window.omnicode.diff.undo(${JSON.stringify(proposal)}); await window.omnicode.agent.clearHistory(); return true`)
   await waitFor(() => fs.access(marker).then(() => false).catch(() => true), 'live marker undo', 10_000)
   const errors = runtimeErrors.filter((message) => !/ResizeObserver loop|Failed to load resource.*(?:403|404)/iu.test(message))

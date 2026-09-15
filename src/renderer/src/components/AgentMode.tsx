@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   Activity,
+  ArrowRight,
   Bot,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Circle,
   CircleStop,
   Clipboard,
   Eye,
@@ -11,14 +16,16 @@ import {
   ListChecks,
   LoaderCircle,
   Pause,
+  PenLine,
   Play,
   ShieldCheck,
+  SkipForward,
   TerminalSquare,
   Trash2
 } from 'lucide-react'
 
 import type { AIProviderId, DiffProposalChangeInput } from '../../../shared/contracts'
-import type { CodeAgentEvent, CodeAgentFocusBehavior, CodeAgentTask, CodeAgentTaskSummary, CodeAgentVisibility } from '../../../shared/code-agent-contracts'
+import type { CodeAgentEvent, CodeAgentFocusBehavior, CodeAgentPlan, CodeAgentTask, CodeAgentTaskSummary, CodeAgentVisibility } from '../../../shared/code-agent-contracts'
 import type { WorkApprovalMode } from '../../../shared/tool-contracts'
 
 interface AgentCommand {
@@ -103,7 +110,39 @@ export function parseAgentPlan(value: string): AgentPlan {
 export function visibleAgentEvents(events: CodeAgentEvent[], visibility: CodeAgentVisibility): CodeAgentEvent[] {
   return visibility === 'glasses'
     ? events
-    : events.filter((event) => event.kind === 'result' || event.status === 'failed' || event.status === 'waiting').slice(-8)
+    : events.filter((event) => ['plan', 'decision', 'result', 'test', 'build'].includes(event.kind) || event.status === 'failed' || event.status === 'waiting').slice(-12)
+}
+
+export interface AgentFinalReport {
+  whatIDid: string
+  changes: string[]
+  tests: string[]
+  results: string[]
+  problems: string[]
+  planChanges: string[]
+  remaining: string[]
+}
+
+function unique(values: string[]): string[] {
+  return [...new Set(values.filter(Boolean))]
+}
+
+export function buildAgentFinalReport(task: CodeAgentTask): AgentFinalReport {
+  const terminalChecks = /(?:^|\s)(?:npm|pnpm|yarn|bun|cargo|go|swift|xcodebuild)?\s*(?:test|build|check|lint|typecheck)|pytest|vitest|jest|cargo\s+(?:test|check|build)/iu
+  const changes = task.events.filter((event) => event.status === 'succeeded' && (
+    event.toolId?.startsWith('files.write') || event.toolId?.startsWith('files.delete') || Boolean(event.proposalId)
+  )).map((event) => event.relativePath ? `${event.title}: ${event.relativePath}` : event.summary)
+  const tests = task.events.filter((event) => ['test', 'build'].includes(event.kind) || Boolean(event.command && terminalChecks.test(event.command)))
+    .map((event) => event.command ? `$ ${event.command}` : event.title)
+  const results = task.events.filter((event) => ['test', 'build', 'result'].includes(event.kind) && ['succeeded', 'failed', 'cancelled'].includes(event.status))
+    .map((event) => `${event.status === 'succeeded' ? 'Passed' : event.status === 'failed' ? 'Failed' : 'Cancelled'}: ${event.summary}`)
+  const problems = task.events.filter((event) => event.status === 'failed').map((event) => event.summary)
+  const planChanges = task.events.filter((event) => event.kind === 'plan' && /updated|change|skipped/iu.test(event.title)).map((event) => `${event.title}: ${event.summary}`)
+  return {
+    whatIDid: task.resultSummary ?? task.error ?? (task.status === 'stopped' ? 'The task was stopped by the user.' : 'The task ended without a summary.'),
+    changes: unique(changes), tests: unique(tests), results: unique(results), problems: unique(problems), planChanges: unique(planChanges),
+    remaining: task.error ? [task.error] : task.status === 'stopped' ? ['The stopped task may have unfinished work.'] : ['None reported by the Agent.']
+  }
 }
 
 export function AgentMode({
@@ -123,6 +162,9 @@ export function AgentMode({
   const [approvalMode, setApprovalMode] = useState<WorkApprovalMode>(permission === 'agent' ? 'full' : permission === 'workspace' ? 'auto' : 'ask')
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState('')
+  const [planExpanded, setPlanExpanded] = useState(false)
+  const [editingPlan, setEditingPlan] = useState(false)
+  const [planInstruction, setPlanInstruction] = useState('')
 
   useEffect(() => {
     let active = true
@@ -156,10 +198,38 @@ export function AgentMode({
     setError('')
   }, [provider, model])
 
+  useEffect(() => {
+    if (visibility === 'glasses') setPlanExpanded(true)
+  }, [visibility])
+
   const active = Boolean(currentTask && ['running', 'pausing', 'paused'].includes(currentTask.status))
   const events = currentTask?.events ?? []
   const latest = events.at(-1)
   const visibleEvents = useMemo(() => visibleAgentEvents(events, visibility), [events, visibility])
+
+  const changePlan = async (): Promise<void> => {
+    if (!currentTask || !planInstruction.trim()) return
+    setError('')
+    try {
+      setCurrentTask(await window.omnicode.agent.modifyPlan(currentTask.id, planInstruction.trim()))
+      setPlanInstruction('')
+      setEditingPlan(false)
+      setPlanExpanded(true)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
+
+  const skipStep = async (): Promise<void> => {
+    if (!currentTask) return
+    setError('')
+    try {
+      setCurrentTask(await window.omnicode.agent.skipStep(currentTask.id))
+      setPlanExpanded(true)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
 
   const run = async (): Promise<void> => {
     if (!workspacePath || !taskInput.trim() || !model.trim() || active || starting) return
@@ -202,10 +272,19 @@ export function AgentMode({
         {active && <div className="agent-task-controls">
           {currentTask.status === 'paused' ? <button onClick={() => void window.omnicode.agent.resume(currentTask.id).then(setCurrentTask).catch((cause) => setError(String(cause)))}><Play />Resume</button> : <button onClick={() => void window.omnicode.agent.pause(currentTask.id).then(setCurrentTask).catch((cause) => setError(String(cause)))} disabled={currentTask.status === 'pausing'}><Pause />Pause</button>}
           {currentTask.status === 'running' && <button title="Pause the agent so you can use its visible browser or application, then choose Resume to return control." onClick={() => void window.omnicode.agent.pause(currentTask.id).then(setCurrentTask).catch((cause) => setError(String(cause)))}><TerminalSquare />Take over</button>}
+          <button onClick={() => { setEditingPlan((value) => !value); setPlanExpanded(true) }}><PenLine />Modify Plan</button>
+          <button onClick={() => void skipStep()}><SkipForward />Skip Step</button>
           <button className="danger" onClick={() => void window.omnicode.agent.stop(currentTask.id).then(setCurrentTask).catch((cause) => setError(String(cause)))}><CircleStop />Stop</button>
         </div>}
+        {editingPlan && active && <div className="agent-plan-editor">
+          <label htmlFor="agent-plan-instruction">Change the course of action</label>
+          <textarea id="agent-plan-instruction" rows={3} maxLength={2_000} value={planInstruction} onChange={(event) => setPlanInstruction(event.target.value)} placeholder="For example: Do not install dependencies. Use the existing implementation." />
+          <small>The Agent pauses at the next safe action boundary. Resume it after submitting this change.</small>
+          <div><button onClick={() => { setEditingPlan(false); setPlanInstruction('') }}>Cancel</button><button className="primary" disabled={!planInstruction.trim()} onClick={() => void changePlan()}>Update Plan</button></div>
+        </div>}
+        {currentTask.plan && <AgentPlanPanel plan={currentTask.plan} expanded={planExpanded} onToggle={() => setPlanExpanded((value) => !value)} />}
         {latest && <p className="agent-now"><Activity />{latest.title}: {latest.summary}</p>}
-        {currentTask.resultSummary && <div className="agent-final-result"><strong>Result</strong><p>{currentTask.resultSummary}</p></div>}
+        {['completed', 'failed', 'stopped'].includes(currentTask.status) && <AgentFinalReportView report={buildAgentFinalReport(currentTask)} status={currentTask.status} />}
         {currentTask.error && <div className="inline-error"><strong>Task failed</strong><p>{currentTask.error}</p></div>}
         <div className="agent-timeline">
           {visibleEvents.map((event) => <AgentTimelineEvent key={event.id} event={event} onReviewProposal={onReviewProposal} glasses={visibility === 'glasses'} />)}
@@ -228,10 +307,52 @@ function AgentTimelineEvent({ event, glasses, onReviewProposal }: { event: CodeA
     <p>{event.summary}</p>
     {(glasses || expanded) && <div className="agent-event-detail">
       {event.command && <code>$ {event.command}</code>}
+      {event.reason && <small><strong>Reason:</strong> {event.reason}</small>}
       {event.relativePath && <small>Path: {event.relativePath}</small>}
       {event.url && <small>URL: {event.url}</small>}
       {event.output && <pre>{event.output}</pre>}
       <div>{event.proposalId && <button onClick={() => onReviewProposal(event.proposalId!)}><FileDiff />Review diff</button>}{event.output && <button onClick={() => void window.omnicode.app.copyText(event.output!)}><Clipboard />Copy output</button>}</div>
     </div>}
   </article>
+}
+
+function AgentPlanPanel({ plan, expanded, onToggle }: { plan: CodeAgentPlan; expanded: boolean; onToggle(): void }) {
+  const completed = plan.steps.filter((step) => step.status === 'completed').length
+  const percent = plan.steps.length ? Math.round((completed / plan.steps.length) * 100) : 0
+  return <section className="agent-plan-panel">
+    <button className="agent-plan-heading" onClick={onToggle} aria-expanded={expanded}>
+      <span>{expanded ? <ChevronDown /> : <ChevronRight />}<strong>Agent Plan</strong><em>Revision {plan.revision + 1}</em></span>
+      <small>{completed} / {plan.steps.length} complete</small>
+    </button>
+    <div className="agent-plan-progress" role="progressbar" aria-label="Agent plan progress" aria-valuemin={0} aria-valuemax={plan.steps.length} aria-valuenow={completed}><i style={{ width: `${percent}%` }} /></div>
+    <div className="agent-plan-status">
+      <span><Activity /><small>Current</small><strong>{plan.currentStep}</strong></span>
+      <span><ArrowRight /><small>Next</small><strong>{plan.nextStep}</strong></span>
+    </div>
+    {expanded && <div className="agent-plan-detail">
+      <div><small>Task</small><p>{plan.taskUnderstanding}</p></div>
+      <div><small>Reasoning Summary</small><p>{plan.reasoningSummary}</p></div>
+      {plan.decision && <div><small>Decision</small><p>{plan.decision}</p></div>}
+      {plan.changeReason && <div className="changed"><small>Plan Updated</small><p>{plan.changeReason}</p></div>}
+      {plan.assumptions?.length ? <div><small>Assumptions</small><ul>{plan.assumptions.map((assumption) => <li key={assumption}>{assumption}</li>)}</ul></div> : null}
+      <ol>{plan.steps.map((step) => <li key={step.id} className={step.status}>{step.status === 'completed' ? <CheckCircle2 /> : step.status === 'active' ? <Activity /> : step.status === 'skipped' ? <SkipForward /> : <Circle />}<span>{step.title}</span><em>{step.status}</em></li>)}</ol>
+      <p className="agent-reasoning-note">Reasoning Summary is a concise, user-facing explanation. Provider-private reasoning is never shown here.</p>
+    </div>}
+  </section>
+}
+
+function AgentFinalReportView({ report, status }: { report: AgentFinalReport; status: CodeAgentTask['status'] }) {
+  const sections: Array<[string, string[], string]> = [
+    ['What changed', report.changes, 'No file changes were recorded.'],
+    ['Tests performed', report.tests, 'No tests were recorded.'],
+    ['Results', report.results, 'No separate verification results were recorded.'],
+    ['Problems encountered', report.problems, 'No problems were recorded.'],
+    ['Plan changes', report.planChanges, 'No course changes were recorded.'],
+    ['Remaining issues', report.remaining, 'None reported by the Agent.']
+  ]
+  return <section className={`agent-final-report ${status}`}>
+    <header><CheckCircle2 /><span><strong>{status === 'completed' ? 'Completed' : status === 'failed' ? 'Task failed' : 'Task stopped'}</strong><small>Final task report</small></span></header>
+    <div><small>What I did</small><p>{report.whatIDid}</p></div>
+    {sections.map(([label, items, empty]) => <div key={label}><small>{label}</small>{items.length ? <ul>{items.map((item) => <li key={item}>{item}</li>)}</ul> : <p>{empty}</p>}</div>)}
+  </section>
 }

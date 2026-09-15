@@ -7,6 +7,8 @@ export type CodeAgentTaskStatus = 'running' | 'pausing' | 'paused' | 'completed'
 export type CodeAgentEventStatus = 'running' | 'waiting' | 'succeeded' | 'failed' | 'cancelled' | 'info'
 export type CodeAgentEventKind =
   | 'task'
+  | 'plan'
+  | 'decision'
   | 'terminal'
   | 'file'
   | 'git'
@@ -18,6 +20,35 @@ export type CodeAgentEventKind =
   | 'diagnostic'
   | 'approval'
   | 'result'
+
+export type CodeAgentPlanStepStatus = 'pending' | 'active' | 'completed' | 'skipped'
+export type CodeAgentPlanUpdateType = 'initial' | 'progress' | 'changed'
+
+export interface CodeAgentPlanStep {
+  id: string
+  title: string
+  status: CodeAgentPlanStepStatus
+}
+
+/**
+ * A bounded, model-authored user-facing summary. This is deliberately not raw
+ * provider reasoning or chain-of-thought.
+ */
+export interface CodeAgentPlan {
+  revision: number
+  updateType: CodeAgentPlanUpdateType
+  taskUnderstanding: string
+  reasoningSummary: string
+  steps: CodeAgentPlanStep[]
+  completedSteps: number
+  currentStep: string
+  nextStep: string
+  decision?: string
+  assumptions?: string[]
+  changeReason?: string
+  updatedBy: 'system' | 'agent' | 'user'
+  updatedAt: number
+}
 
 export interface CodeAgentStartRequest {
   provider: AIProviderId
@@ -47,6 +78,7 @@ export interface CodeAgentEvent {
   relativePath?: string
   url?: string
   proposalId?: string
+  reason?: string
 }
 
 export interface CodeAgentTaskSummary {
@@ -64,6 +96,7 @@ export interface CodeAgentTaskSummary {
   actionCount: number
   resultSummary?: string
   error?: string
+  plan?: CodeAgentPlan
 }
 
 export interface CodeAgentTask extends CodeAgentTaskSummary {
@@ -87,5 +120,12 @@ export const CODE_AGENT_LIMITS = {
   titleCharacters: 160,
   eventSummaryCharacters: 2_000,
   eventOutputCharacters: 32 * 1024,
-  resultCharacters: 8 * 1024
+  resultCharacters: 8 * 1024,
+  planUnderstandingCharacters: 1_000,
+  reasoningSummaryCharacters: 2_000,
+  planSteps: 20,
+  planStepCharacters: 300,
+  planDecisionCharacters: 1_000,
+  planAssumptions: 10,
+  planInterventionCharacters: 2_000
 } as const

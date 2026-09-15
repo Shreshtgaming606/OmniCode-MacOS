@@ -1121,6 +1121,8 @@ function registerIpc(): void {
   handle('agent:start', (event, request) => codeAgent.start(event.sender.id, request))
   handle('agent:pause', (event, taskId: string) => codeAgent.pause(event.sender.id, taskId))
   handle('agent:resume', (event, taskId: string) => codeAgent.resume(event.sender.id, taskId))
+  handle('agent:modify-plan', (event, taskId: string, instruction: string) => codeAgent.modifyPlan(event.sender.id, taskId, instruction))
+  handle('agent:skip-step', (event, taskId: string) => codeAgent.skipStep(event.sender.id, taskId))
   handle('agent:stop', (event, taskId: string) => codeAgent.stop(event.sender.id, taskId))
   handle('agent:get', (_event, taskId: string) => codeAgent.get(taskId))
   handle('agent:list', () => codeAgent.list())

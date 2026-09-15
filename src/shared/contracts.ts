@@ -584,6 +584,8 @@ export interface OmniCodeAPI {
     start(request: CodeAgentStartRequest): Promise<CodeAgentTask>
     pause(taskId: string): Promise<CodeAgentTask>
     resume(taskId: string): Promise<CodeAgentTask>
+    modifyPlan(taskId: string, instruction: string): Promise<CodeAgentTask>
+    skipStep(taskId: string): Promise<CodeAgentTask>
     stop(taskId: string): Promise<CodeAgentTask>
     get(taskId: string): Promise<CodeAgentTask>
     list(): Promise<CodeAgentTaskSummary[]>

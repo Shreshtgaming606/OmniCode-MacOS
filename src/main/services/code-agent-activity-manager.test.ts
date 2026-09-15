@@ -29,6 +29,31 @@ describe('CodeAgentActivityManager', () => {
     expect((await fs.stat(file)).mode & 0o777).toBe(0o600)
   })
 
+  it('persists validated, redacted plan revisions without requiring them in legacy tasks', async () => {
+    const { value, file } = await manager()
+    const task = await value.create({
+      title: 'Fix auth', provider: 'google', model: 'gemini-test', approvalMode: 'ask', visibility: 'standard', focusBehavior: 'automatic',
+      plan: {
+        revision: 0, updateType: 'initial', taskUnderstanding: 'Fix auth safely',
+        reasoningSummary: 'Inspect the shared validator before editing callers.',
+        steps: [{ id: 'inspect', title: 'Inspect auth', status: 'active' }, { id: 'test', title: 'Run tests', status: 'pending' }],
+        completedSteps: 0, currentStep: 'Inspect auth', nextStep: 'Run tests', updatedBy: 'agent', updatedAt: 10
+      }
+    })
+    await value.updatePlan(task.id, {
+      ...task.plan!, revision: 1, updateType: 'changed', completedSteps: 1,
+      steps: [{ ...task.plan!.steps[0], status: 'completed' }, { ...task.plan!.steps[1], status: 'active' }],
+      currentStep: 'Run tests', nextStep: 'Report results',
+      reasoningSummary: 'Authorization: Bearer plan-secret', changeReason: 'api_key=plan-secret', updatedAt: 20
+    })
+
+    const reopened = await new CodeAgentActivityManager(file).get(task.id)
+    expect(reopened.plan).toMatchObject({ revision: 1, completedSteps: 1, currentStep: 'Run tests' })
+    expect(JSON.stringify(reopened.plan)).not.toContain('plan-secret')
+    const legacy = await value.create({ title: 'Legacy', provider: 'ollama', model: 'local', approvalMode: 'ask', visibility: 'standard', focusBehavior: 'automatic' })
+    expect((await new CodeAgentActivityManager(file).get(legacy.id)).plan).toBeUndefined()
+  })
+
   it('redacts credentials from commands, output, summaries, and stored JSON', async () => {
     const { value, file } = await manager()
     const task = await value.create({ title: 'Do safe work', provider: 'openai', model: 'model', approvalMode: 'auto', visibility: 'standard', focusBehavior: 'never' })

@@ -66,7 +66,8 @@ try {
       preferences: [...document.querySelectorAll('.agent-control-grid select')].map((item) => item.value),
       status: document.querySelector('.agent-status')?.textContent?.trim() || '',
       timeline: document.querySelectorAll('.agent-event').length,
-      result: document.querySelector('.agent-final-result')?.textContent || '',
+      result: document.querySelector('.agent-final-report')?.textContent || '',
+      plan: document.querySelector('.agent-plan-panel')?.textContent || '',
       reviewDiff: [...document.querySelectorAll('.agent-event-detail button')].some((button) => /review diff/i.test(button.textContent || '')),
       hiddenReasoningClaim: /chain.of.thought|hidden reasoning/i.test(document.querySelector('.agent-live-task')?.textContent || '')
     }
