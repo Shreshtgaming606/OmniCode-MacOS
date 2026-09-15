@@ -1,32 +1,34 @@
 # OmniCode Release Readiness
 
-Last updated: 2026-09-13
+Last updated: 2026-09-14
 
 ## Overall Status
 
 **NOT READY for a signed public release.**
 
-OmniCode 0.4.0 is a verified unsigned release candidate for Intel macOS Sonoma.
+OmniCode 0.5.0 is a verified unsigned release candidate for Intel macOS Sonoma.
 The separate Work Mode, Code Mode regression surface, real terminal, filesystem,
 Git, local server, provider adapters, Google OAuth boundary, Gmail/Drive tools,
 opaque cross-service transfers, persisted connector result cards, and the new
-Work action approval system are covered without a tracked failing test. The
-0.4.0 Intel package passed the complete Work smoke and a live approval-policy
-audit against the connected Google test account; the earlier lifecycle soak
-remains valid for unchanged startup systems. Both Intel and Apple Silicon 0.4.0
+Work action approval system, real Code Agent tools, and Glasses Mode are covered
+without a tracked failing test. The 0.5.0 Intel package passed startup,
+workspace, real PTY, localhost/security, live Gemini Code Agent, persistent
+Glasses timeline, diff-action, and renderer-error audits; the 0.4.0 Work action
+audit and earlier lifecycle soak remain valid for unchanged systems. Both Intel
+and Apple Silicon 0.5.0
 distributions pass archive, disk-image, version, architecture, native-terminal,
 original-icon, and SHA-256 validation.
 
 Public release is still blocked by Apple signing/notarization, matching-hardware
 Apple Silicon execution, and external service/account gates. In particular, the
-current 0.4.0 internal-test installers contain the publisher's Testing Desktop
+current 0.5.0 internal-test installers contain the publisher's Testing Desktop
 OAuth metadata in the trusted main process. Real consent, shared Gmail/Drive
 identity, restart persistence, and minimal read-only API calls passed with an
 approved test account. This Testing client is not a substitute for Google's
 production verification and is not available to arbitrary public users. A
 Gemini API key cannot authorize Google Workspace.
 
-The matrix result is **172 of 192 tracked behaviors passing (89.6%)**. Fourteen
+The matrix result is **198 of 219 tracked behaviors passing (90.4%)**. Fifteen
 are externally blocked, three are accurately not implemented or claimed, and
 three are partially exercised. No blocked, partial, or absent capability is
 counted as passing.
@@ -35,17 +37,18 @@ counted as passing.
 
 | Result | Count | Meaning |
 | --- | ---: | --- |
-| Tests passed | 172 | Observed behavior met the stated expectation |
+| Tests passed | 198 | Observed behavior met the stated expectation |
 | Tests failed | 0 | No currently tracked test has a known failing result |
-| Tests blocked | 14 | External credential, service, hardware, runtime, repository, safe test data, or certificate required |
+| Tests blocked | 15 | External credential, service, hardware, runtime, repository, safe test data, native platform bridge, or certificate required |
 | Tests not run / not implemented | 3 | Code Chat streaming/stop, rich-document attachment extraction, and layout persistence are absent and not presented as complete |
 | Tests partially run | 3 | Gmail mutations, Drive mutations, and physical network disconnection were not performed; their safe/controlled paths are covered |
 
-Automated regression result: **419 passed, 1 intentionally skipped, 0 failed**
-across 52 test files. The skipped test is native Keychain integration inside the
+Automated regression result: **454 passed, 1 intentionally skipped, 0 failed**
+across 57 test files. The skipped test is native Keychain integration inside the
 ordinary suite; that behavior was run separately with disposable credentials and
 passed. TypeScript checking and x64/arm64 production builds also pass. A final
-credential scan covered 225 repository files and 66 user-profile files without
+credential scan covered 237 repository files, 31 isolated-profile files, three
+workspace files, renderer storage, and diagnostics without
 finding credential material outside Keychain or the trusted OAuth build boundary.
 
 ## Subsystems
@@ -66,7 +69,7 @@ finding credential material outside Keychain or the trusted OAuth build boundary
 | AI Chat | ✅ Ready for implemented behavior | Provider/model selection, messages, Markdown/code, context, clear, and honest errors passed; Code Chat does not claim Work Mode's streaming/Stop/history |
 | Work Mode | ✅ Core ready | Separate mounted surface, persistent conversations, grouped history/search/pin, streaming/Stop, Copy/Edit/Regenerate, text attachments, and packaged responsive smokes passed |
 | Workspace Indexer | ✅ Ready | Watcher freshness, ranking, ignores, binary/sensitive exclusions, and a responsive 1,203-file workload passed |
-| AI Agent | ✅ Ready for implemented proposal workflow | Multi-file planning, staged review, accept/undo, safe command suggestion, native approval, and PTY execution passed |
+| Code Agent / Glasses | ✅ Ready for implemented tool workflow | Shared provider-native tool loop; real workspace/diff, PTY/build/test, Git, server, runtime, Managed Code Browser, external-grant and app-launch tools; independent approval/visibility/focus; pause/resume/Take Over/stop; private redacted history. A packaged Gemini task completed a real inspect/write/read loop and its five-event Glasses timeline rendered with Review Diff and zero errors |
 | Work Agent / Tools | ✅ Ready for registered tools | Bounded provider-native tool loop, schemas, mode/risk enforcement, hard boundaries, cancellation, redaction, local-model gate, and prompt-injection resistance pass for OpenAI, Claude, Gemini, and compatible Ollama paths |
 | Work Action Approvals | ✅ Ready | Global Ask/Approve-for-me/Full modes, per-connector overrides, backend-only policy, dynamic critical escalation, first-use Full warning, exact action cards/native fallback, and private activity pass automated and packaged live tests |
 | Connected Apps | 🟡 Registered connectors operational | Managed Browser passed live; real shared Google consent, identity, restart persistence, Gmail/Drive reads, permission modes, and exact cancelled Gmail-send approval passed. Full live Google mutations/transfers still need disposable data and confirmation |
@@ -78,26 +81,26 @@ finding credential material outside Keychain or the trusted OAuth build boundary
 | Settings | ✅ Ready | User/workspace persistence, corrupt-input handling, `0600` storage, Work/Connected Apps actions, global/per-connector approval modes, Full warning, and model dropdowns passed |
 | Keychain | ✅ Ready | Save/read/restart/update/delete passed with disposable credentials; leak scans found no credential outside Keychain |
 | macOS Integration | 🟡 Partially ready | Menus, dialogs, shortcuts, Finder, window lifecycle, themes, and file associations passed; notifications/public trust require signing |
-| Production Build | 🟡 Unsigned release candidate | Four 0.4.0 artifacts pass DMG/ZIP integrity, version, icon, executable/native-module architecture and checksum validation; x64 passed final runtime tests, while arm64 launch plus Apple signing/notarization remain blocked |
+| Production Build | 🟡 Unsigned release candidate | Four 0.5.0 artifacts pass DMG/ZIP integrity, version, original icon, executable/native-module architecture and checksum validation; x64 passed final runtime and Code Agent tests, while arm64 launch plus Apple signing/notarization remain blocked |
 
 ## Release Artifacts
 
 | Target | Artifact | Size | SHA-256 |
 | --- | --- | ---: | --- |
-| Apple Silicon installer | `dist/OmniCode-0.4.0-arm64.dmg` | 143,523,456 bytes | `30b717e9024252e0967f1658c91e8b7267c25c301d64e4cd81aa3f7706d245a1` |
-| Apple Silicon archive | `dist/OmniCode-0.4.0-arm64.zip` | 141,532,723 bytes | `94a5dbef9ae2d864201a91bed037e40dd56e21d57b4a6b6fc5e6f1391c6c6524` |
-| Intel installer | `dist/OmniCode-0.4.0-x64.dmg` | 147,216,543 bytes | `5f4f9b3a0aa91e6c9022cc35cee433759809275a5c2c71655877274322633c2e` |
-| Intel archive | `dist/OmniCode-0.4.0-x64.zip` | 145,248,899 bytes | `774ed36cfa420b58dced4e8a9ffe008602ea99afea53c759c5cc1d102fe73f8e` |
+| Apple Silicon installer | `dist/OmniCode-0.5.0-arm64.dmg` | 143,545,242 bytes | `255b4834320393ca24b1801233b0a82b51469a4cb73c867b063c7198e972805f` |
+| Apple Silicon archive | `dist/OmniCode-0.5.0-arm64.zip` | 141,551,317 bytes | `d0e083574340cf36e2419d830dc8189954884ff2edebef4b589295ffe2307ff8` |
+| Intel installer | `dist/OmniCode-0.5.0-x64.dmg` | 147,221,423 bytes | `344d539fc7edbf6cf0cfb0d5113ea25639efe1c50dd3f55df61a6c13ba74504a` |
+| Intel archive | `dist/OmniCode-0.5.0-x64.zip` | 145,267,484 bytes | `6ee3a9d81da2648d1bd286093a6459239b7e0a33b666ed58884b67fac4893a6f` |
 
 Checksums are recorded in `dist/SHA256SUMS.txt` and the release-specific
-`dist/SHA256SUMS-0.4.0.txt`.
+`dist/SHA256SUMS-0.5.0.txt`.
 
 ## Remaining Problems
 
 1. **Apple signing/notarization:** a Developer ID Application certificate and
    notarization credentials are required. Gatekeeper trust and Notification
    Center delivery are not public-release-ready until this is completed.
-2. **Apple Silicon execution:** the 0.4.0 arm64 executable and active `node-pty`
+2. **Apple Silicon execution:** the 0.5.0 arm64 executable and packaged `node-pty`
    module are arm64 and its archives pass, but launch/smoke must run on a matching
    Apple Silicon Mac.
 3. **Google public-production approval and full live service workflows:** the
@@ -126,10 +129,15 @@ Checksums are recorded in `dist/SHA256SUMS.txt` and the release-specific
 11. **Code Chat streaming/persistence:** Work Mode implements and verifies these;
     the older Code Chat remains final-response-only and nonpersistent and does not
     claim otherwise.
+12. **Arbitrary external-app UI control:** allowlisted app launch and permission
+    state/reporting pass, but external-app observation/click/type requires a
+    separately audited native macOS Accessibility bridge. OmniCode blocks
+    unrestricted AppleScript and screen-capture substitutes and reports the
+    structured controller as not implemented.
 
 ## Conclusion
 
-OmniCode 0.4.0 is ready for controlled Intel macOS Sonoma testing as an unsigned
+OmniCode 0.5.0 is ready for controlled Intel macOS Sonoma testing as an unsigned
 release candidate, with statically verified Apple Silicon installers. It is not
 ready to be labeled a signed, notarized public macOS release until the external
 Apple, matching-hardware, Google-production-review, and configured-service gates

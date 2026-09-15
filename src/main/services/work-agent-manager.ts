@@ -9,6 +9,7 @@ import type {
   WorkToolPreview,
   WorkToolPreviewItem
 } from '../../shared/work-contracts'
+import type { AppMode } from '../../shared/work-contracts'
 import type { AIToolCall, AIToolConversationMessage } from './ai-tool-types'
 import { AIManager } from './ai-manager'
 
@@ -32,6 +33,12 @@ export type ExecuteWorkAgentTool = (request: ToolExecutionRequest) => Promise<To
 export interface WorkAgentRunOptions {
   signal?: AbortSignal
   onDelta?(delta: string): void
+  mode?: AppMode
+  systemPrompt?: string
+  maxSteps?: number
+  maxToolCalls?: number
+  beforeAction?(): Promise<void>
+  onToolActivity?(activity: WorkToolActivity): void
 }
 
 /**
@@ -238,6 +245,15 @@ export class WorkAgentManager {
   ): Promise<WorkAgentChatResponse> {
     validateRequest(request)
     assertNotAborted(options.signal)
+    const mode = options.mode ?? 'work'
+    const systemPrompt = options.systemPrompt ?? WORK_AGENT_SYSTEM
+    if (mode !== 'work' && mode !== 'code') throw new Error('Choose a supported tool-agent mode.')
+    if (!systemPrompt.trim() || systemPrompt.length > 32 * 1024 || systemPrompt.includes('\0')) throw new Error('The tool-agent instructions are invalid.')
+    const maxSteps = options.maxSteps ?? MAX_AGENT_STEPS
+    const maxToolCalls = options.maxToolCalls ?? MAX_TOOL_CALLS
+    if (!Number.isInteger(maxSteps) || maxSteps < 1 || maxSteps > 24 || !Number.isInteger(maxToolCalls) || maxToolCalls < 1 || maxToolCalls > 48) {
+      throw new Error('The tool-agent execution limits are invalid.')
+    }
     if (!tools.length) {
       const chatRequest = {
         provider: request.provider,
@@ -259,12 +275,14 @@ export class WorkAgentManager {
     let callCount = 0
     const seenCallIds = new Set<string>()
 
-    for (let step = 0; step < MAX_AGENT_STEPS; step++) {
+    for (let step = 0; step < maxSteps; step++) {
+      assertNotAborted(options.signal)
+      await options.beforeAction?.()
       assertNotAborted(options.signal)
       const turn = await this.ai.toolTurn({
         provider: request.provider,
         model: request.model.trim(),
-        system: WORK_AGENT_SYSTEM,
+        system: systemPrompt,
         messages,
         tools
       }, { signal: options.signal })
@@ -275,8 +293,8 @@ export class WorkAgentManager {
         return { content: turn.content, toolActivities: activities, toolCallCount: callCount }
       }
 
-      if (turn.calls.length > MAX_TOOL_CALLS - callCount) {
-        throw new Error('The Work agent exceeded the safe tool-call limit.')
+      if (turn.calls.length > maxToolCalls - callCount) {
+        throw new Error('The agent exceeded the safe tool-call limit.')
       }
       for (const call of turn.calls) {
         if (seenCallIds.has(call.callId)) throw new Error('The AI provider repeated a tool-call identifier; no repeated action was run.')
@@ -284,6 +302,8 @@ export class WorkAgentManager {
 
       messages.push({ role: 'assistant-tool', content: turn.content, calls: turn.calls })
       for (const call of turn.calls) {
+        assertNotAborted(options.signal)
+        await options.beforeAction?.()
         assertNotAborted(options.signal)
         seenCallIds.add(call.callId)
         callCount++
@@ -307,13 +327,15 @@ export class WorkAgentManager {
           summary: `${descriptor.name} started.`
         }
         activities.push(activity)
+        options.onToolActivity?.({ ...activity })
         try {
-          const result = await execute({ toolId: descriptor.id, mode: 'work', input: call.input })
+          const result = await execute({ toolId: descriptor.id, mode, input: call.input })
           assertNotAborted(options.signal)
           activity.status = 'succeeded'
           activity.completedAt = Date.now()
           activity.summary = `${descriptor.name} completed.`
           activity.preview = toolPreview(descriptor.id, call.input, result.result)
+          options.onToolActivity?.({ ...activity })
           messages.push({ role: 'tool', callId: call.callId, name: call.name, content: toolResultContent(result, descriptor.id) })
         } catch (error) {
           if (options.signal?.aborted) throw options.signal.reason ?? error
@@ -322,6 +344,7 @@ export class WorkAgentManager {
           activity.completedAt = Date.now()
           activity.summary = `${descriptor.name} failed: ${detail}`
           activity.errorCode = 'TOOL_EXECUTION_FAILED'
+          options.onToolActivity?.({ ...activity })
           messages.push({
             role: 'tool', callId: call.callId, name: call.name,
             content: JSON.stringify({ ok: false, error: detail })
@@ -329,6 +352,6 @@ export class WorkAgentManager {
         }
       }
     }
-    throw new Error('The Work agent reached its safe step limit before completing the request.')
+    throw new Error('The agent reached its safe step limit before completing the request.')
   }
 }

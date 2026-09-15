@@ -28,6 +28,14 @@ import type {
   WorkAttachment,
   WorkMessage
 } from './work-contracts'
+import type {
+  CodeAgentEvent,
+  CodeAgentFocusBehavior,
+  CodeAgentStartRequest,
+  CodeAgentTask,
+  CodeAgentTaskSummary,
+  CodeAgentVisibility
+} from './code-agent-contracts'
 
 export type ThemePreference = 'system' | 'dark' | 'light'
 
@@ -573,6 +581,17 @@ export interface OmniCodeAPI {
   }
   agent: {
     approveCommand(workspaceRoot: string, command: string, reason: string): Promise<boolean>
+    start(request: CodeAgentStartRequest): Promise<CodeAgentTask>
+    pause(taskId: string): Promise<CodeAgentTask>
+    resume(taskId: string): Promise<CodeAgentTask>
+    stop(taskId: string): Promise<CodeAgentTask>
+    get(taskId: string): Promise<CodeAgentTask>
+    list(): Promise<CodeAgentTaskSummary[]>
+    clearHistory(): Promise<void>
+    setPreferences(visibility: CodeAgentVisibility, focusBehavior: CodeAgentFocusBehavior): Promise<{ visibility: CodeAgentVisibility; focusBehavior: CodeAgentFocusBehavior }>
+    getPreferences(): Promise<{ visibility: CodeAgentVisibility; focusBehavior: CodeAgentFocusBehavior }>
+    onTaskChanged(callback: (task: CodeAgentTaskSummary) => void): () => void
+    onEvent(callback: (event: CodeAgentEvent) => void): () => void
   }
   settings: {
     read(root: string): Promise<WorkspaceSettings>

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseAgentPlan, relativeAgentPath } from './AgentMode'
+import type { CodeAgentEvent } from '../../../shared/code-agent-contracts'
+import { parseAgentPlan, relativeAgentPath, visibleAgentEvents } from './AgentMode'
 
 describe('Agent plan safety', () => {
   it('parses a fenced plan but keeps changes as review-only relative paths', () => {
@@ -42,5 +43,16 @@ describe('Agent plan safety', () => {
   it('rejects malformed or incomplete change records', () => {
     expect(() => parseAgentPlan('not JSON')).toThrow('valid agent plan')
     expect(() => parseAgentPlan('{"changes":[{"kind":"modify","path":"safe.txt"}]}')).toThrow('incomplete')
+  })
+
+  it('shows every observable action in Glasses Mode and only consequential updates in Standard Mode', () => {
+    const events = [
+      { id: '1', taskId: 'task', timestamp: 1, kind: 'file', status: 'succeeded', title: 'Read', summary: 'Read file.' },
+      { id: '2', taskId: 'task', timestamp: 2, kind: 'terminal', status: 'waiting', title: 'Run', summary: 'Approval required.' },
+      { id: '3', taskId: 'task', timestamp: 3, kind: 'test', status: 'failed', title: 'Test', summary: 'Failed.' },
+      { id: '4', taskId: 'task', timestamp: 4, kind: 'result', status: 'succeeded', title: 'Done', summary: 'Complete.' }
+    ] satisfies CodeAgentEvent[]
+    expect(visibleAgentEvents(events, 'glasses')).toEqual(events)
+    expect(visibleAgentEvents(events, 'standard').map((event) => event.id)).toEqual(['2', '3', '4'])
   })
 })

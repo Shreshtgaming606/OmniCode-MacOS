@@ -97,4 +97,40 @@ describe('ToolRegistry', () => {
     await expect(execution).rejects.toThrow('Generation cancelled')
     expect(executorSignal?.aborted).toBe(true)
   })
+
+  it('passes the backend authorization decision and execution identity to the executor', async () => {
+    const execute = vi.fn(async () => ({ title: 'Example' }))
+    const registry = new ToolRegistry()
+    registry.register(browserTool(), execute)
+    await registry.execute(
+      { toolId: 'browser.open', mode: 'work', input: { url: 'https://example.com/' } },
+      { accessLevel: 'read-only', approvalMode: 'ask', confirm: vi.fn() },
+      { executionId: 'task-17' }
+    )
+
+    expect(execute).toHaveBeenCalledWith(
+      { url: 'https://example.com/' },
+      expect.objectContaining({
+        mode: 'work',
+        executionId: 'task-17',
+        authorization: expect.objectContaining({ requiredApproval: false, approvalMode: 'ask' })
+      })
+    )
+  })
+
+  it('forwards bounded live progress only through the trusted executor context', async () => {
+    const progress = vi.fn()
+    const registry = new ToolRegistry()
+    registry.register(browserTool(), async (_input, context) => {
+      context.reportProgress?.({ status: 'running', output: 'verified output' })
+      return { title: 'Example' }
+    })
+    await registry.execute(
+      { toolId: 'browser.open', mode: 'work', input: { url: 'https://example.com/' } },
+      { accessLevel: 'read-only', approvalMode: 'ask', confirm: vi.fn() },
+      { executionId: 'task-progress', onProgress: progress }
+    )
+
+    expect(progress).toHaveBeenCalledExactlyOnceWith({ status: 'running', output: 'verified output' })
+  })
 })

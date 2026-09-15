@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { validateAgentCommand } from './agent-command-policy'
+import { validateAgentCommand, validateDependencyCommand } from './agent-command-policy'
 
 describe('validateAgentCommand', () => {
   it.each([
@@ -13,9 +13,28 @@ describe('validateAgentCommand', () => {
     'brew install example',
     'echo changed > /etc/hosts',
     'security find-generic-password -s com.omnicode.editor.ai',
-    'bash -lc "sudo whoami"'
+    'bash -lc "sudo whoami"',
+    'osascript -e "tell application Safari to quit"',
+    'printenv',
+    'node -e "require(\'https\').get(\'https://example.com\')"',
+    'python3 -c "print(1)"',
+    'curl https://example.com/private',
+    'gh auth token',
+    'echo "$GOOGLE_API_KEY"',
+    'cat ~/.ssh/id_ed25519',
+    'cat /private/etc/hosts',
+    'npm install react'
   ])('blocks a dangerous or privileged command: %s', (command) => {
     expect(() => validateAgentCommand(command, 'Agent suggestion')).toThrow('Command blocked')
+  })
+
+  it('routes only bounded project dependency commands through the dedicated policy', () => {
+    expect(validateDependencyCommand('npm install react@19', 'Install the declared UI dependency.')).toEqual({
+      command: 'npm install react@19', reason: 'Install the declared UI dependency.'
+    })
+    expect(validateDependencyCommand('pnpm install --frozen-lockfile', 'Restore lockfile dependencies.').command).toBe('pnpm install --frozen-lockfile')
+    expect(() => validateDependencyCommand('npm install x && curl example.com', 'Unsafe')).toThrow(/unsupported shell syntax/i)
+    expect(() => validateDependencyCommand('pip install keyring', 'System install')).toThrow(/allowlisted/i)
   })
 
   it.each([

@@ -1,16 +1,25 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
+  Activity,
   Bot,
-  CheckCircle2,
+  CircleStop,
+  Clipboard,
+  Eye,
   FileDiff,
+  Glasses,
+  History,
   ListChecks,
   LoaderCircle,
+  Pause,
   Play,
   ShieldCheck,
-  TerminalSquare
+  TerminalSquare,
+  Trash2
 } from 'lucide-react'
 
 import type { AIProviderId, DiffProposalChangeInput } from '../../../shared/contracts'
+import type { CodeAgentEvent, CodeAgentFocusBehavior, CodeAgentTask, CodeAgentTaskSummary, CodeAgentVisibility } from '../../../shared/code-agent-contracts'
+import type { WorkApprovalMode } from '../../../shared/tool-contracts'
 
 interface AgentCommand {
   command: string
@@ -91,123 +100,138 @@ export function parseAgentPlan(value: string): AgentPlan {
   }
 }
 
-function permissionName(permission: AgentModeProps['permission']): string {
-  if (permission === 'agent') return 'Agent Mode'
-  if (permission === 'workspace') return 'Workspace Access'
-  return 'Ask Every Time'
+export function visibleAgentEvents(events: CodeAgentEvent[], visibility: CodeAgentVisibility): CodeAgentEvent[] {
+  return visibility === 'glasses'
+    ? events
+    : events.filter((event) => event.kind === 'result' || event.status === 'failed' || event.status === 'waiting').slice(-8)
 }
 
 export function AgentMode({
   workspacePath,
   provider,
   model,
-  activeFile,
-  openFiles,
-  terminalOutput,
-  problems,
-  gitChanges,
   permission,
   resetToken,
   prepareWorkspace,
   onReviewProposal,
-  onRunCommand
 }: AgentModeProps) {
-  const [task, setTask] = useState('')
-  const [plan, setPlan] = useState<AgentPlan | null>(null)
-  const [proposalId, setProposalId] = useState<string | null>(null)
-  const [phase, setPhase] = useState<'idle' | 'saving' | 'planning' | 'staging'>('idle')
+  const [taskInput, setTaskInput] = useState('')
+  const [currentTask, setCurrentTask] = useState<CodeAgentTask | null>(null)
+  const [history, setHistory] = useState<CodeAgentTaskSummary[]>([])
+  const [visibility, setVisibility] = useState<CodeAgentVisibility>('standard')
+  const [focusBehavior, setFocusBehavior] = useState<CodeAgentFocusBehavior>('automatic')
+  const [approvalMode, setApprovalMode] = useState<WorkApprovalMode>(permission === 'agent' ? 'full' : permission === 'workspace' ? 'auto' : 'ask')
+  const [starting, setStarting] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
-    setTask('')
-    setPlan(null)
-    setProposalId(null)
-    setError('')
-    setPhase('idle')
+    let active = true
+    const refresh = async (): Promise<void> => {
+      try {
+        const [tasks, preferences] = await Promise.all([window.omnicode.agent.list(), window.omnicode.agent.getPreferences()])
+        if (!active) return
+        setHistory(tasks)
+        setVisibility(preferences.visibility)
+        setFocusBehavior(preferences.focusBehavior)
+        const selected = tasks.find((task) => ['running', 'pausing', 'paused'].includes(task.status)) ?? tasks[0]
+        if (selected) setCurrentTask(await window.omnicode.agent.get(selected.id))
+      } catch (cause) {
+        if (active) setError(cause instanceof Error ? cause.message : String(cause))
+      }
+    }
+    void refresh()
+    const removeTask = window.omnicode.agent.onTaskChanged((summary) => {
+      setHistory((items) => [summary, ...items.filter((item) => item.id !== summary.id)])
+      setCurrentTask((task) => task?.id === summary.id ? { ...task, ...summary } : task)
+    })
+    const removeEvent = window.omnicode.agent.onEvent((event) => {
+      setCurrentTask((task) => task?.id === event.taskId
+        ? { ...task, events: [...task.events.filter((item) => item.id !== event.id), event].sort((left, right) => left.timestamp - right.timestamp), actionCount: task.events.some((item) => item.id === event.id) ? task.actionCount : task.actionCount + 1 }
+        : task)
+    })
+    return () => { active = false; removeTask(); removeEvent() }
   }, [resetToken])
 
-  const run = async (): Promise<void> => {
-    if (!workspacePath || !task.trim() || !model.trim() || phase !== 'idle') return
+  useEffect(() => {
     setError('')
-    setPlan(null)
-    setProposalId(null)
-    const attachedPaths = [...new Set([...(activeFile ? [activeFile] : []), ...openFiles])].slice(0, 20)
+  }, [provider, model])
+
+  const active = Boolean(currentTask && ['running', 'pausing', 'paused'].includes(currentTask.status))
+  const events = currentTask?.events ?? []
+  const latest = events.at(-1)
+  const visibleEvents = useMemo(() => visibleAgentEvents(events, visibility), [events, visibility])
+
+  const run = async (): Promise<void> => {
+    if (!workspacePath || !taskInput.trim() || !model.trim() || active || starting) return
+    setError('')
     try {
-      if (provider !== 'ollama') {
-        const retrievedPaths = await window.omnicode.ai.contextPreview(workspacePath, task.trim())
-        const contextDetails = [
-          retrievedPaths.length ? `retrieved workspace files: ${retrievedPaths.join(', ')}` : 'retrieved workspace files: no indexed match',
-          attachedPaths.length ? `open/active files: ${attachedPaths.join(', ')}` : '',
-          terminalOutput ? `recent terminal output: ${Math.min(terminalOutput.length, 12_000).toLocaleString()} characters` : '',
-          problems ? `editor problems: ${Math.min(problems.length, 8_000).toLocaleString()} characters` : '',
-          gitChanges ? `Git changes: ${Math.min(gitChanges.length, 8_000).toLocaleString()} characters` : ''
-        ].filter(Boolean)
-        if (permission !== 'agent' && !window.confirm(
-          `Send this context to ${provider} for the Agent task?\n\n• ${contextDetails.join('\n• ')}\n\nNothing is written until you accept the proposed diff. Commands always require a separate click and confirmation.`
-        )) return
-      }
-      setPhase('saving')
+      if (provider !== 'ollama' && !window.confirm(`Run this Code Agent task with ${provider}?\n\nThe agent can inspect relevant workspace files and send the file contents it reads to the selected cloud provider. Changes and commands remain governed by ${approvalMode === 'ask' ? 'Ask' : approvalMode === 'auto' ? 'Approve for me' : 'Full Access'} mode.`)) return
+      setStarting(true)
       await prepareWorkspace()
-      setPhase('planning')
-      const diagnosticContext = [
-        terminalOutput ? `Recent terminal output:\n${terminalOutput.slice(-12_000)}` : '',
-        problems ? `Current editor problems:\n${problems.slice(0, 8_000)}` : '',
-        gitChanges ? `Current Git changes:\n${gitChanges.slice(0, 8_000)}` : ''
-      ].filter(Boolean).join('\n\n')
-      const response = await window.omnicode.ai.chat({
-        provider,
-        model,
-        workspacePath,
-        attachWorkspaceContext: true,
-        attachedPaths,
-        messages: [
-          {
-            role: 'system',
-            content: `You are OmniCode Agent, planning a safe change inside one open workspace. Return strict JSON only with this shape:\n{"summary":"short result","plan":["step"],"changes":[{"kind":"modify|create","path":"relative/path","content":"complete final file content"},{"kind":"delete","path":"relative/path"}],"commands":[{"command":"project command","reason":"why it is needed"}]}\nUse only relative workspace paths. Include complete final content for every created or modified file. Do not include unchanged files. Never propose sudo, destructive recursive deletion, system-setting changes, or access outside the workspace. Commands are suggestions only; do not claim to have run them. If context is insufficient, return no changes and explain the needed input in the plan.`
-          },
-          {
-            role: 'user',
-            content: `Task:\n${task.trim()}${diagnosticContext ? `\n\nRuntime context supplied by the user:\n${diagnosticContext}` : ''}`
-          }
-        ]
+      await window.omnicode.agent.setPreferences(visibility, focusBehavior)
+      const started = await window.omnicode.agent.start({
+        provider, model, workspaceRoot: workspacePath, task: taskInput.trim(), approvalMode, visibility, focusBehavior
       })
-      const nextPlan = parseAgentPlan(response.content)
-      setPlan(nextPlan)
-      if (nextPlan.changes.length) {
-        setPhase('staging')
-        const proposal = await window.omnicode.diff.propose({
-          workspaceRoot: workspacePath,
-          title: nextPlan.summary,
-          changes: nextPlan.changes
-        })
-        setProposalId(proposal.id)
-        onReviewProposal(proposal.id)
-      }
+      setCurrentTask(started)
+      setHistory((items) => [started, ...items.filter((item) => item.id !== started.id)])
+      setTaskInput('')
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
-      setPhase('idle')
+      setStarting(false)
     }
   }
 
-  const busy = phase !== 'idle'
   return <div className="agent-mode">
-    <div className="agent-permission"><ShieldCheck /><span><strong>{permissionName(permission)}</strong><small>All edits are staged in a review and commands require a separate click plus native confirmation.</small></span></div>
+    <div className="agent-control-grid">
+      <label><span><ShieldCheck />Approval</span><select value={approvalMode} disabled={active} onChange={(event) => setApprovalMode(event.target.value as WorkApprovalMode)}><option value="ask">Ask</option><option value="auto">Approve for me</option><option value="full">Full Access</option></select></label>
+      <label><span>{visibility === 'glasses' ? <Glasses /> : <Eye />}Visibility</span><select value={visibility} onChange={(event) => { const value = event.target.value as CodeAgentVisibility; setVisibility(value); void window.omnicode.agent.setPreferences(value, focusBehavior) }}><option value="standard">Standard</option><option value="glasses">Glasses</option></select></label>
+      <label><span><Activity />Focus</span><select value={focusBehavior} onChange={(event) => { const value = event.target.value as CodeAgentFocusBehavior; setFocusBehavior(value); void window.omnicode.agent.setPreferences(visibility, value) }}><option value="automatic">Automatic</option><option value="when-needed">When needed</option><option value="never">Never</option></select></label>
+    </div>
+    <div className="agent-permission"><ShieldCheck /><span><strong>{approvalMode === 'ask' ? 'Ask before every change' : approvalMode === 'auto' ? 'Routine reversible work can continue' : 'Full Access with hard safety boundaries'}</strong><small>Reads are bounded. File edits use OmniCode’s diff/undo engine. Critical, credential, destructive, and external actions cannot bypass native policy.</small></span></div>
     {!workspacePath ? <div className="agent-empty"><Bot /><strong>Open a workspace to use Agent Mode</strong><p>The agent is deliberately limited to the folder you choose.</p></div> : <>
       <div className="agent-task">
-        <label htmlFor="agent-task-input">Describe a workspace task</label>
-        <textarea id="agent-task-input" rows={5} value={task} disabled={busy} onChange={(event) => setTask(event.target.value)} placeholder="Add a login page using the existing design style…" />
-        <small>Unsaved editor files are saved first. {provider === 'ollama' ? 'Planning runs locally on this Mac.' : 'Relevant context is sent only after confirmation.'}</small>
-        <button className="agent-run" disabled={!task.trim() || !model.trim() || busy} onClick={() => void run()}>{busy ? <LoaderCircle className="spin" /> : <ListChecks />}{phase === 'saving' ? 'Saving files…' : phase === 'planning' ? 'Building plan…' : phase === 'staging' ? 'Preparing diff…' : 'Plan & Propose Changes'}</button>
+        <label htmlFor="agent-task-input">Describe an implementation task</label>
+        <textarea id="agent-task-input" rows={5} value={taskInput} disabled={active || starting} onChange={(event) => setTaskInput(event.target.value)} placeholder="Inspect the project, fix the failing tests, run them, and verify the result…" />
+        <small>Unsaved editor files are saved first. The agent must observe real tool results before claiming success.</small>
+        <button className="agent-run" disabled={!taskInput.trim() || !model.trim() || active || starting} onClick={() => void run()}>{starting ? <LoaderCircle className="spin" /> : <ListChecks />}{starting ? 'Starting task…' : active ? 'Task running' : 'Run Code Agent'}</button>
       </div>
-      {error && <div className="inline-error"><strong>Agent stopped safely</strong><p>{error}</p></div>}
-      {plan && <div className="agent-result">
-        <header><CheckCircle2 /><div><strong>{plan.summary}</strong><small>{plan.changes.length} proposed file change{plan.changes.length === 1 ? '' : 's'}</small></div></header>
-        {plan.plan.length > 0 && <ol>{plan.plan.map((step, index) => <li key={`${index}-${step}`}>{step}</li>)}</ol>}
-        {proposalId && <button className="agent-review" onClick={() => onReviewProposal(proposalId)}><FileDiff />Review Proposed Changes</button>}
-        {!plan.changes.length && <p className="agent-no-changes">No files were staged. Refine the task or provide the input listed above.</p>}
-        {plan.commands.length > 0 && <div className="agent-commands"><div><TerminalSquare /><strong>Suggested commands</strong></div>{plan.commands.map((item, index) => <article key={`${item.command}-${index}`}><code>{item.command}</code><small>{item.reason}</small><button onClick={() => onRunCommand(item.command, item.reason)}><Play />Review & Run</button></article>)}</div>}
-      </div>}
+      {error && <div className="inline-error"><strong>Code Agent error</strong><p>{error}</p></div>}
+      {currentTask && <section className={`agent-live-task visibility-${visibility}`}>
+        <header><span className={`agent-status ${currentTask.status}`}>{['running', 'pausing'].includes(currentTask.status) && <LoaderCircle className="spin" />}{currentTask.status === 'paused' && <Pause />}{currentTask.status}</span><strong>{currentTask.title}</strong></header>
+        {active && <div className="agent-task-controls">
+          {currentTask.status === 'paused' ? <button onClick={() => void window.omnicode.agent.resume(currentTask.id).then(setCurrentTask).catch((cause) => setError(String(cause)))}><Play />Resume</button> : <button onClick={() => void window.omnicode.agent.pause(currentTask.id).then(setCurrentTask).catch((cause) => setError(String(cause)))} disabled={currentTask.status === 'pausing'}><Pause />Pause</button>}
+          {currentTask.status === 'running' && <button title="Pause the agent so you can use its visible browser or application, then choose Resume to return control." onClick={() => void window.omnicode.agent.pause(currentTask.id).then(setCurrentTask).catch((cause) => setError(String(cause)))}><TerminalSquare />Take over</button>}
+          <button className="danger" onClick={() => void window.omnicode.agent.stop(currentTask.id).then(setCurrentTask).catch((cause) => setError(String(cause)))}><CircleStop />Stop</button>
+        </div>}
+        {latest && <p className="agent-now"><Activity />{latest.title}: {latest.summary}</p>}
+        {currentTask.resultSummary && <div className="agent-final-result"><strong>Result</strong><p>{currentTask.resultSummary}</p></div>}
+        {currentTask.error && <div className="inline-error"><strong>Task failed</strong><p>{currentTask.error}</p></div>}
+        <div className="agent-timeline">
+          {visibleEvents.map((event) => <AgentTimelineEvent key={event.id} event={event} onReviewProposal={onReviewProposal} glasses={visibility === 'glasses'} />)}
+          {!visibleEvents.length && <p className="agent-no-changes">Waiting for the first visible action…</p>}
+        </div>
+      </section>}
+      <section className="agent-history">
+        <header><span><History /><strong>Activity</strong></span>{history.length > 0 && <button title="Clear completed activity" onClick={() => void window.omnicode.agent.clearHistory().then(() => setHistory((items) => items.filter((item) => ['running', 'pausing', 'paused'].includes(item.status))))}><Trash2 /></button>}</header>
+        {history.slice(0, 12).map((item) => <button key={item.id} className={currentTask?.id === item.id ? 'active' : ''} onClick={() => void window.omnicode.agent.get(item.id).then(setCurrentTask).catch((cause) => setError(String(cause)))}><span><strong>{item.title}</strong><small>{new Date(item.updatedAt).toLocaleString()}</small></span><em>{item.status} · {item.actionCount}</em></button>)}
+        {!history.length && <p>No Code Agent tasks yet.</p>}
+      </section>
     </>}
   </div>
+}
+
+function AgentTimelineEvent({ event, glasses, onReviewProposal }: { event: CodeAgentEvent; glasses: boolean; onReviewProposal(proposalId: string): void }) {
+  const [expanded, setExpanded] = useState(event.status === 'failed' || event.status === 'waiting')
+  return <article className={`agent-event ${event.status}`}>
+    <button className="agent-event-summary" onClick={() => setExpanded((value) => !value)}><span><i /> <strong>{event.title}</strong></span><small>{new Date(event.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })} · {event.status}</small></button>
+    <p>{event.summary}</p>
+    {(glasses || expanded) && <div className="agent-event-detail">
+      {event.command && <code>$ {event.command}</code>}
+      {event.relativePath && <small>Path: {event.relativePath}</small>}
+      {event.url && <small>URL: {event.url}</small>}
+      {event.output && <pre>{event.output}</pre>}
+      <div>{event.proposalId && <button onClick={() => onReviewProposal(event.proposalId!)}><FileDiff />Review diff</button>}{event.output && <button onClick={() => void window.omnicode.app.copyText(event.output!)}><Clipboard />Copy output</button>}</div>
+    </div>}
+  </article>
 }

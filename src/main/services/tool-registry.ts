@@ -1,5 +1,6 @@
 import type {
   JsonValue,
+  ToolAuthorizationDecision,
   ToolDescriptor,
   ToolExecutionRequest,
   ToolExecutionResult,
@@ -17,6 +18,9 @@ const MAX_TIMEOUT_MS = 120_000
 export interface ToolExecutorContext {
   mode: ToolExecutionRequest['mode']
   signal: AbortSignal
+  authorization: ToolAuthorizationDecision
+  executionId?: string
+  reportProgress?(value: JsonValue): void
 }
 
 export type ToolExecutor = (
@@ -121,7 +125,7 @@ export class ToolRegistry {
   async execute(
     request: ToolExecutionRequest,
     authorization: ToolAuthorizationContext,
-    options: { signal?: AbortSignal } = {}
+    options: { signal?: AbortSignal; executionId?: string; onProgress?(value: JsonValue): void } = {}
   ): Promise<ToolExecutionResult> {
     const registered = this.#tools.get(request.toolId)
     if (!registered) throw new Error('The requested Work tool is not registered.')
@@ -153,7 +157,13 @@ export class ToolRegistry {
         ? Promise.reject(controller.signal.reason)
         : new Promise<never>((_resolve, reject) => controller.signal.addEventListener('abort', () => reject(controller.signal.reason), { once: true }))
       const result = await Promise.race([
-        registered.executor(normalized as Record<string, JsonValue>, { mode: request.mode, signal: controller.signal }),
+        registered.executor(normalized as Record<string, JsonValue>, {
+          mode: request.mode,
+          signal: controller.signal,
+          authorization: authorizationDecision,
+          executionId: options.executionId,
+          reportProgress: options.onProgress
+        }),
         aborted
       ])
       const checked = registered.descriptor.resultSchema

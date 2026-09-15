@@ -179,6 +179,20 @@ describe('Gemini cloud model discovery', () => {
     expect(isCompatibleGoogleTextModelId(model)).toBe(expected)
   })
 
+  it('orders current stable Gemini generations ahead of retired catalog entries', async () => {
+    const manager = configuredManager((async () => Response.json({
+      models: [
+        { name: 'models/gemini-2.5-flash', displayName: 'Gemini 2.5 Flash', supportedGenerationMethods: ['generateContent'] },
+        { name: 'models/gemini-3.6-flash', displayName: 'Gemini 3.6 Flash', supportedGenerationMethods: ['generateContent'] },
+        { name: 'models/gemini-flash-latest', displayName: 'Gemini Flash Latest', supportedGenerationMethods: ['generateContent'] }
+      ]
+    })) as typeof fetch)
+
+    expect((await manager.listModels('google', { forceRefresh: true })).models.map((model) => model.id)).toEqual([
+      'gemini-flash-latest', 'gemini-3.6-flash', 'gemini-2.5-flash'
+    ])
+  })
+
   it('paginates, keeps generateContent models, normalizes resource names, and deduplicates', async () => {
     const urls: string[] = []
     const manager = configuredManager((async (input, init) => {

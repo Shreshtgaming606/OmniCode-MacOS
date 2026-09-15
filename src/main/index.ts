@@ -34,6 +34,10 @@ import { WorkAttachmentManager } from './services/work-attachment-manager'
 import { WorkTransferStore } from './services/work-transfer-store'
 import { WorkPermissionSettingsManager } from './services/work-permission-settings-manager'
 import { WorkActionHistoryManager } from './services/work-action-history-manager'
+import { CodeAgentActivityManager } from './services/code-agent-activity-manager'
+import { CodeAgentToolService } from './services/code-agent-tool-service'
+import { CodeAgentManager } from './services/code-agent-manager'
+import { CodeApplicationManager } from './services/code-application-manager'
 import type { GitCloneProgress } from '../shared/contracts'
 import type {
   ToolAuthorizationDecision,
@@ -72,6 +76,7 @@ const workAttachments = new WorkAttachmentManager(path.join(app.getPath('userDat
 const workTransfers = new WorkTransferStore(path.join(app.getPath('userData'), 'work-transfers'))
 const workPermissionSettings = new WorkPermissionSettingsManager(path.join(app.getPath('userData'), 'work-action-settings.json'))
 const workActionHistory = new WorkActionHistoryManager(path.join(app.getPath('userData'), 'work-action-history.json'))
+const codeAgentActivity = new CodeAgentActivityManager(path.join(app.getPath('userData'), 'code-agent-activity.json'))
 const cloudModelCatalog = new ModelCatalogManager({
   getCredential: async (provider) => {
     try {
@@ -86,6 +91,12 @@ const cloudModelCatalog = new ModelCatalogManager({
 const workTools = new ToolRegistry()
 const workConnectors = new ConnectorManager()
 const browserConnector = new BrowserConnector()
+const codeAgentFocus = new Map<string, 'automatic' | 'when-needed' | 'never'>()
+const codeBrowserConnector = new BrowserConnector({
+  mode: 'code', allowLoopback: true, connectorId: 'code-browser',
+  shouldShow: (taskId) => !taskId || codeAgentFocus.get(taskId) !== 'never'
+})
+const codeApplications = new CodeApplicationManager()
 let googleOAuthConfig
 try {
   googleOAuthConfig = readGoogleOAuthConfig()
@@ -100,6 +111,53 @@ const googleOAuth = new GoogleOAuthManager(
 const gmailConnector = new GmailConnector(googleOAuth, fetch, workTransfers, saveWorkTransfer)
 const googleDriveConnector = new GoogleDriveConnector(googleOAuth, fetch, workTransfers, saveWorkTransfer)
 const workAgent = new WorkAgentManager(ai)
+const codeTools = new ToolRegistry()
+const codeToolService = new CodeAgentToolService({
+  fileSystem,
+  diffs,
+  terminals,
+  git,
+  server,
+  applications: codeApplications,
+  focusBehavior: (taskId) => codeAgentFocus.get(taskId) ?? 'automatic',
+  activateWorkspace: async (root) => {
+    const opened = fileSystem.setWorkspace(root)
+    await workspaceHistory.add(opened)
+    mainWindow?.webContents.send('app:command', 'open-path', { path: opened, kind: 'directory' })
+  },
+  selectExternalFolder: async () => {
+    const options: Electron.OpenDialogOptions = {
+      title: 'Choose one folder for this Code Agent task',
+      buttonLabel: 'Grant Folder',
+      properties: ['openDirectory', 'createDirectory']
+    }
+    const result = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options)
+    return result.canceled ? null : result.filePaths[0] ?? null
+  }
+})
+codeBrowserConnector.registerTools(codeTools)
+codeToolService.register(codeTools)
+const codeAgent = new CodeAgentManager({
+  activity: codeAgentActivity,
+  agent: workAgent,
+  tools: codeTools,
+  toolService: codeToolService,
+  currentWorkspace: () => fileSystem.getWorkspace(),
+  canUseTools: async (provider, model) => provider !== 'ollama' || modelCanUseWorkTools(provider, model, await ai.models()),
+  confirm: async (senderId, request, signal) => {
+    const sender = mainWindow?.webContents
+    if (!sender || sender.isDestroyed() || sender.id !== senderId) return false
+    return confirmToolForSender(sender, request, signal)
+  },
+  onTaskChanged: (senderId, task) => {
+    if (mainWindow?.webContents.id === senderId && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send('agent:task-changed', task)
+  },
+  onEvent: (senderId, event) => {
+    if (mainWindow?.webContents.id === senderId && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send('agent:event', event)
+  },
+  onTaskStarted: (taskId, focusBehavior) => { codeAgentFocus.set(taskId, focusBehavior) },
+  onTaskFinished: (taskId) => { codeAgentFocus.delete(taskId) }
+})
 const activeWorkAgentRequests = new Map<string, { controller: AbortController; senderId: number }>()
 const activeGitCloneRequests = new Map<string, { controller: AbortController; senderId: number }>()
 const workApprovalReadySenders = new Set<number>()
@@ -266,7 +324,11 @@ async function workApprovalDetails(request: ToolConfirmationRequest): Promise<Wo
       }
     }
   } else {
-    const safeLabels: Record<string, string> = { url: 'Website', query: 'Search', name: 'Name', subject: 'Subject', body: 'Content' }
+    const safeLabels: Record<string, string> = {
+      url: 'Website', query: 'Search', name: 'Name', subject: 'Subject', body: 'Content',
+      command: 'Command', reason: 'Purpose', path: 'Workspace path', application: 'Application',
+      script: 'Project script', port: 'Port', permission: 'Permission'
+    }
     for (const [key, label] of Object.entries(safeLabels)) {
       if (key in input) append(label, input[key], key === 'body')
     }
@@ -314,7 +376,7 @@ function cancelWorkApprovals(senderId?: number): void {
   else workApprovalReadySenders.delete(senderId)
 }
 
-async function nativeWorkConfirmation(event: Electron.IpcMainInvokeEvent, request: WorkApprovalRequest): Promise<boolean> {
+async function nativeWorkConfirmation(sender: Electron.WebContents, request: WorkApprovalRequest): Promise<boolean> {
   const isEmailSend = request.toolId === 'gmail.send' || request.toolId === 'gmail.reply'
   const detailText = request.details.map((detail) => `${detail.label}: ${detail.value}`).join('\n')
   const options: Electron.MessageBoxOptions = {
@@ -326,7 +388,7 @@ async function nativeWorkConfirmation(event: Electron.IpcMainInvokeEvent, reques
     message: request.title,
     detail: `${request.summary}\n\n${detailText ? `${detailText}\n\n` : ''}${request.reason}\n\nNothing happens unless you approve this exact action.`
   }
-  const owner = BrowserWindow.fromWebContents(event.sender)
+  const owner = BrowserWindow.fromWebContents(sender)
   const response = owner ? await dialog.showMessageBox(owner, options) : await dialog.showMessageBox(options)
   return response.response === 0
 }
@@ -336,19 +398,27 @@ async function confirmWorkTool(
   request: ToolConfirmationRequest,
   signal?: AbortSignal
 ): Promise<boolean> {
+  return confirmToolForSender(event.sender, request, signal)
+}
+
+async function confirmToolForSender(
+  sender: Electron.WebContents,
+  request: ToolConfirmationRequest,
+  signal?: AbortSignal
+): Promise<boolean> {
   const approval = await createWorkApprovalRequest(request)
   const rendererAlreadyHasApproval = [...pendingWorkApprovals.values()].some(
-    (pending) => pending.senderId === event.sender.id
+    (pending) => pending.senderId === sender.id
   )
-  if (!workApprovalReadySenders.has(event.sender.id) || event.sender.isDestroyed() || rendererAlreadyHasApproval) {
-    return nativeWorkConfirmation(event, approval)
+  if (!workApprovalReadySenders.has(sender.id) || sender.isDestroyed() || rendererAlreadyHasApproval) {
+    return nativeWorkConfirmation(sender, approval)
   }
   return new Promise<boolean>((resolve) => {
-    const timeout = setTimeout(() => settleWorkApproval(approval.id, false, event.sender.id), 5 * 60_000)
-    const abort = (): void => { settleWorkApproval(approval.id, false, event.sender.id) }
-    pendingWorkApprovals.set(approval.id, { senderId: event.sender.id, resolve, timeout, signal, abort })
+    const timeout = setTimeout(() => settleWorkApproval(approval.id, false, sender.id), 5 * 60_000)
+    const abort = (): void => { settleWorkApproval(approval.id, false, sender.id) }
+    pendingWorkApprovals.set(approval.id, { senderId: sender.id, resolve, timeout, signal, abort })
     signal?.addEventListener('abort', abort, { once: true })
-    event.sender.send('work:approval-request', approval)
+    sender.send('work:approval-request', approval)
   })
 }
 
@@ -504,6 +574,7 @@ function createWindow(): void {
       sandbox: true
     }
   })
+  const rendererId = mainWindow.webContents.id
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   mainWindow.webContents.on('did-start-navigation', (_event, url, _isInPlace, isMainFrame) => {
     if (isMainFrame && isTrustedRendererUrl(url)) {
@@ -541,6 +612,7 @@ function createWindow(): void {
   if (process.env.ELECTRON_RENDERER_URL) mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
   else mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
   mainWindow.on('closed', () => {
+    void codeAgent.stopSender(rendererId)
     cancelWorkAgentRequests()
     cancelGitCloneRequests()
     cancelWorkApprovals()
@@ -1046,6 +1118,15 @@ function registerIpc(): void {
       : await dialog.showMessageBox(options)
     return response.response === 0
   })
+  handle('agent:start', (event, request) => codeAgent.start(event.sender.id, request))
+  handle('agent:pause', (event, taskId: string) => codeAgent.pause(event.sender.id, taskId))
+  handle('agent:resume', (event, taskId: string) => codeAgent.resume(event.sender.id, taskId))
+  handle('agent:stop', (event, taskId: string) => codeAgent.stop(event.sender.id, taskId))
+  handle('agent:get', (_event, taskId: string) => codeAgent.get(taskId))
+  handle('agent:list', () => codeAgent.list())
+  handle('agent:clear-history', () => codeAgent.clearHistory())
+  handle('agent:get-preferences', () => codeAgentActivity.getPreferences())
+  handle('agent:set-preferences', (_event, visibility, focusBehavior) => codeAgentActivity.setPreferences(visibility, focusBehavior))
   handle('settings:read', (_event, root: string) => settings.read(assertCurrentWorkspace(root)))
   handle('settings:write', (_event, root: string, value) => settings.write(assertCurrentWorkspace(root), value))
 }
@@ -1091,6 +1172,7 @@ app.on('will-quit', (event) => {
     fileSystem.unwatch(),
     workTransfers.clear(),
     workConnectors.disconnect('browser'),
+    codeBrowserConnector.disconnect(),
     diagnostics.lifecycle('shutdown', 'OmniCode completed its shutdown sequence.')
   ]).finally(() => app.exit(0))
 })

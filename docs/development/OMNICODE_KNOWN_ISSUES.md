@@ -1,6 +1,6 @@
 # OmniCode Known Issues
 
-Last updated: 2026-09-13
+Last updated: 2026-09-14
 
 Resolved issues remain in this file with a resolution so audit history is not
 lost. Secrets, tokens, and authorization headers must never be included here.
@@ -775,3 +775,44 @@ lost. Secrets, tokens, and authorization headers must never be included here.
   cancellation-safe polished approval cards/native fallback, and bounded private
   activity. The 419-test suite passes; packaged verification proved a safe
   automatic Gmail read and exact cancelled Gmail-send flow with no network write.
+
+## OMI-046 — Retired Gemini fallback broke live Code Agent tasks — Resolved
+
+- Severity: High
+- Reproduction: Start a packaged Google Code Agent task when the selected model
+  is `gemini-2.5-flash` on an account where Google no longer offers that model to
+  new users.
+- Expected: OmniCode selects a currently available account-visible tool-capable
+  model, or surfaces the real provider error.
+- Actual: The first live Code Agent run reached Google and received a real 404
+  explaining that Gemini 2.5 Flash was no longer available to new users.
+- Suspected cause: Maintained fallback ordering favored an obsolete generation.
+- Relevant files: `src/main/services/model-catalog-manager.ts`,
+  `src/main/services/model-catalog-manager.test.ts`,
+  `scripts/smoke-code-agent.mjs`.
+- Current status: ✅ Resolved — Google fallback/discovery sorting now prefers
+  `latest` aliases and 3.6 before older stable generations. A subsequent
+  packaged task used an available current model and completed a real
+  inspect/write/read workflow. A later 429 quota response remained an honest
+  external account limit rather than being misreported as application success.
+
+## OMI-047 — Structured arbitrary macOS app control is unavailable
+
+- Severity: Medium; blocks only external-application interaction, not app launch
+- Reproduction: Ask Code Agent to observe an arbitrary external application and
+  click/type inside it after launch.
+- Expected: A permission-aware native ComputerTool observes and interacts with
+  only the approved application/session.
+- Actual: OmniCode can safely launch an allowlisted app or workspace document,
+  report Accessibility/Screen Recording state, and open the exact permission
+  pane, but reports structured computer control as `not-implemented`.
+- Suspected cause: Electron has no safe built-in macOS Accessibility controller;
+  a native AX bridge with explicit window/element scoping, capture lifecycle,
+  and independent security review is required.
+- Relevant files: `src/main/services/code-application-manager.ts`,
+  `src/main/services/code-agent-tool-service.ts`,
+  `src/main/services/agent-command-policy.ts`.
+- Current status: 🔵 Blocked / External Requirement — unrestricted AppleScript,
+  `osascript`, screen capture, and shell automation remain blocked. Implementing
+  a trustworthy native ComputerTool is a separate audited platform integration;
+  OmniCode does not present launch-only behavior as full UI control.

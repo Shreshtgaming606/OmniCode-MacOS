@@ -5,7 +5,8 @@ import {
   BrowserConnector,
   isPrivateNetworkAddress,
   type ManagedBrowserPage,
-  validateBrowserUrl
+  validateBrowserUrl,
+  validateCodeBrowserUrl
 } from './browser-connector'
 
 function fakePage(): ManagedBrowserPage {
@@ -30,6 +31,45 @@ describe('BrowserConnector security boundary', () => {
       expect(isPrivateNetworkAddress(address)).toBe(true)
     }
     expect(isPrivateNetworkAddress('93.184.216.34')).toBe(false)
+    expect(validateCodeBrowserUrl('http://localhost:4173/app').port).toBe('4173')
+    expect(() => validateCodeBrowserUrl('http://192.168.1.2/')).toThrow()
+  })
+
+  it('registers a separate Code Browser tool set and allows loopback without weakening Work Browser rules', async () => {
+    const page = fakePage()
+    ;(page.snapshot as ReturnType<typeof vi.fn>).mockResolvedValue({ title: 'Local app', url: 'http://localhost:4173/', text: 'Ready' })
+    const connector = new BrowserConnector({
+      mode: 'code', allowLoopback: true, createPage: async () => page,
+      resolveHost: async () => { throw new Error('Loopback must not use public DNS preflight.') }
+    })
+    const registry = new ToolRegistry()
+    connector.registerTools(registry)
+    expect(registry.list('code').map((tool) => tool.id)).toEqual([
+      'browser.open', 'browser.read', 'browser.find', 'browser.search', 'browser.reload', 'browser.console', 'browser.click', 'browser.type'
+    ])
+    await registry.execute(
+      { toolId: 'browser.open', mode: 'code', input: { url: 'http://localhost:4173/' } },
+      { accessLevel: 'read-only', approvalMode: 'ask', confirm: vi.fn() }
+    )
+    expect(page.loadURL).toHaveBeenCalledWith('http://localhost:4173/')
+    expect(() => validateBrowserUrl('http://localhost:4173/')).toThrow()
+  })
+
+  it('performs Code web search through a generated credential-free HTTPS URL', async () => {
+    const page = fakePage()
+    const connector = new BrowserConnector({
+      mode: 'code', allowLoopback: true, createPage: async () => page,
+      resolveHost: async () => ['142.250.191.132']
+    })
+    const registry = new ToolRegistry()
+    connector.registerTools(registry)
+    await registry.execute(
+      { toolId: 'browser.search', mode: 'code', input: { query: 'official TypeScript AbortController documentation' } },
+      { accessLevel: 'read-only', approvalMode: 'ask', confirm: vi.fn() },
+      { executionId: 'search-task' }
+    )
+    expect(page.loadURL).toHaveBeenCalledWith('https://www.google.com/search?q=official+TypeScript+AbortController+documentation')
+    expect(page.show).toHaveBeenCalledOnce()
   })
 
   it('does not claim connected before a real page exists and clears isolated state on disconnect', async () => {

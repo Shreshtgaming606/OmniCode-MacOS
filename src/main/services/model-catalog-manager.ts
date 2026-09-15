@@ -125,8 +125,8 @@ export const MAINTAINED_CLOUD_MODEL_FALLBACKS: Readonly<
     fallbackModel('anthropic', 'claude-haiku-4-5-20251001', 'Claude Haiku 4.5')
   ],
   google: [
-    fallbackModel('google', 'gemini-3.5-flash', 'Gemini 3.5 Flash'),
-    fallbackModel('google', 'gemini-3.5-flash-lite', 'Gemini 3.5 Flash-Lite')
+    fallbackModel('google', 'gemini-3.6-flash', 'Gemini 3.6 Flash'),
+    fallbackModel('google', 'gemini-3.6-flash-lite', 'Gemini 3.6 Flash-Lite')
   ]
 }
 
@@ -178,9 +178,20 @@ function dedupeAndSort(models: AIModelDescriptor[]): AIModelDescriptor[] {
     const key = `${model.provider}:${model.id.toLowerCase()}`
     if (!unique.has(key)) unique.set(key, model)
   }
-  return [...unique.values()].sort((left, right) =>
-    left.displayName.localeCompare(right.displayName) || left.id.localeCompare(right.id)
-  )
+  return [...unique.values()].sort((left, right) => {
+    if (left.provider === 'google' && right.provider === 'google') {
+      const score = (model: AIModelDescriptor): number => {
+        const normalized = model.id.toLowerCase()
+        if (normalized.includes('latest')) return 1_000_000
+        const version = normalized.match(/^gemini-(\d+)\.(\d+)/u)
+        const versionScore = version ? Number(version[1]) * 10_000 + Number(version[2]) * 100 : 0
+        return versionScore - (/(?:preview|experimental|exp)(?:-|$)/u.test(normalized) ? 10 : 0)
+      }
+      const difference = score(right) - score(left)
+      if (difference) return difference
+    }
+    return left.displayName.localeCompare(right.displayName) || left.id.localeCompare(right.id)
+  })
 }
 
 function fallbackModels(provider: CloudAIProviderId): AIModelDescriptor[] {

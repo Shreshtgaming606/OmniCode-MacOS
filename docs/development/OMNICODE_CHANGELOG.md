@@ -3,6 +3,61 @@
 This log records repairs and audit milestones made during the no-new-features
 stabilization phase.
 
+## OmniCode 0.5.0 Code Agent and Glasses Mode — 2026-09-14
+
+- Replaced Code Mode's renderer-only, one-response planning flow with a real
+  main-process Code Agent controller that reuses the existing provider-native
+  Work tool loop, Tool Registry, and Permission Manager.
+- Added registered Code tools for bounded workspace inspection, diff-backed
+  file changes, task-owned interactive PTYs, real build/test output and exit
+  status, structured Git operations, runtime detection, development servers,
+  a dedicated Code Browser, and allowlisted macOS application launch.
+- Added one-task external-folder grants through a native picker. The agent sees
+  only an opaque grant and folder label; traversal, symlink escape, private
+  configuration, credentials, protected system roots, binary context, and
+  cross-task reuse are rejected.
+- Added Code Browser public-web search, HTTPS documentation navigation,
+  localhost HTTP/HTTPS testing, visible-page reading/find, reload, console
+  errors, and bounded safe click/type. Work Browser's stricter public-HTTPS-only
+  boundary remains unchanged.
+- Added Standard and Glasses visibility independently from Ask, Approve for me,
+  and Full Access. Glasses shows observable actions, commands, bounded output,
+  diffs, pages, application launches, approvals, failures, retries, and final
+  results without exposing or claiming hidden chain-of-thought.
+- Added Automatic/When needed/Never focus control, live task state,
+  pause/resume, Take Over, stop, and bounded persistent Activity history. Stop
+  aborts future work and owned processes while preserving completed edits.
+- Added a private atomic Code activity store with redaction, corruption
+  recovery, and hard task/event/byte limits; raw prompts and workspace roots are
+  not persisted.
+- Hardened terminal policy against privilege escalation, Keychain/credential
+  discovery, secret environment expansion, arbitrary AppleScript, nested
+  evaluation shells, remote transfer tools, global installs, and destructive
+  system commands. Project dependency commands have a separate allowlist and
+  always require direct approval.
+- Added honest macOS Accessibility and Screen Recording status plus exact System
+  Settings links. Arbitrary app UI control remains explicitly unavailable until
+  a safe native ComputerTool exists; OmniCode does not use unrestricted shell
+  automation as a substitute.
+- Fixed Google Code Agent defaults after a real request proved Gemini 2.5 Flash
+  unavailable to new users. Discovery now prioritizes current `latest` and 3.6
+  models; actual provider errors and quota limits remain visible.
+- A packaged 0.5.0 Gemini task inspected a real file, made an exact diff-backed
+  write, read it back, completed, and rendered a five-event Glasses timeline
+  with its final result and Review Diff action. A subsequent provider call hit
+  the real five-request account quota and failed honestly. Automated
+  coverage is 454 passing tests plus one intentionally skipped native Keychain
+  test; TypeScript and production compilation pass.
+- Added `OMNICODE_CODE_AGENT_ARCHITECTURE.md` and the permanent phased baseline
+  plan documenting execution, visibility, permissions, security, and verified
+  limitations.
+- Built fresh x64 and arm64 DMG/ZIP artifacts. All four pass checksum and archive
+  verification; both apps embed version 0.5.0, preserve the original icon hash,
+  and contain matching executable/native-terminal architecture. The Intel
+  package passed startup/workspace, real PTY, localhost/security, Agent/Glasses,
+  and zero-renderer-error checks. Signing/notarization and arm64 execution remain
+  external requirements.
+
 ## OmniCode 0.4.0 Work action approvals — 2026-09-13
 
 - Evolved the existing main-process `PermissionManager` into a complete Work

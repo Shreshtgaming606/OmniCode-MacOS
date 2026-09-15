@@ -196,7 +196,18 @@ const api: OmniCodeAPI = {
     contextPreview: (root, query) => ipcRenderer.invoke('ai:context-preview', root, query)
   },
   agent: {
-    approveCommand: (workspaceRoot, command, reason) => ipcRenderer.invoke('agent:approve-command', workspaceRoot, command, reason)
+    approveCommand: (workspaceRoot, command, reason) => ipcRenderer.invoke('agent:approve-command', workspaceRoot, command, reason),
+    start: (request) => ipcRenderer.invoke('agent:start', request),
+    pause: (taskId) => ipcRenderer.invoke('agent:pause', taskId),
+    resume: (taskId) => ipcRenderer.invoke('agent:resume', taskId),
+    stop: (taskId) => ipcRenderer.invoke('agent:stop', taskId),
+    get: (taskId) => ipcRenderer.invoke('agent:get', taskId),
+    list: () => ipcRenderer.invoke('agent:list'),
+    clearHistory: () => ipcRenderer.invoke('agent:clear-history'),
+    setPreferences: (visibility, focusBehavior) => ipcRenderer.invoke('agent:set-preferences', visibility, focusBehavior),
+    getPreferences: () => ipcRenderer.invoke('agent:get-preferences'),
+    onTaskChanged: (callback) => subscribe('agent:task-changed', callback),
+    onEvent: (callback) => subscribe('agent:event', callback)
   },
   settings: {
     read: (root) => ipcRenderer.invoke('settings:read', root),
