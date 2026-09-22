@@ -3,6 +3,96 @@
 This log records repairs and audit milestones made during the no-new-features
 stabilization phase.
 
+## Omni text-first assistant foundation — 2026-09-21
+
+- Added Omni as the third persistent Code / Work / Omni mode, with validated
+  preferences and a purpose-built UI for provider/model selection, typed
+  requests, public plans, bounded Activity, results, task history, permissions,
+  Pause/Resume/Stop, Modify Plan, Skip Step, and execution/approval controls.
+- Added a main-process `OmniController` that reuses the provider-neutral Work
+  tool loop, serializes task start, owns AbortControllers and action generations,
+  rejects calls made stale by approval wait, pause, plan/step changes, mode
+  changes, or Stop, and stops every active task during application shutdown.
+- Locked the approval selector while an Omni task is active and display the
+  immutable approval policy captured on that task. Changing a future global
+  default can no longer create a misleading authority display for running work.
+- Added private atomic Omni settings and task stores with fail-closed defaults,
+  corruption recovery, Full Access acknowledgement, bounded retention, startup
+  recovery, user clearing that preserves active work, and redaction. Raw user
+  requests and generic raw tool results are not persisted.
+- Unified Code, Work, and Omni under one injected Permission Manager while
+  preserving source-scoped registry execution. Omni and connector approval
+  policy now compose to the stricter mode; connected-app schemas are exposed
+  only when the connector is connected and the required scopes exist.
+- Added a dedicated Omni Managed Browser with its own persistent session
+  partition and mode-aware focus behavior. Invisible mode does not show the
+  managed page or foreground allowlisted app launches, and no behavior is
+  misrepresented as native macOS cursor control.
+- Added a separate sandboxed overlay renderer/preload with exact window,
+  main-frame, local-URL, and channel allowlists. It can observe/start/control
+  Omni tasks but has no full `window.omnicode`, tool, credential, filesystem,
+  terminal, Git, browser, connector, or application API.
+- Added resident `⌘⇧Space` activation, an optional menu-bar item, and
+  packaged login/background startup that initializes Omni without a main window
+  or Dock icon. A native post-quit helper remains unimplemented.
+- Added real macOS TTS using fixed `/usr/bin/say` without a shell: installed
+  voice discovery, bounded/redacted stdin text, safe voice/rate validation,
+  embedded-command stripping, output bounds, cancellation, Stop, concurrency,
+  and disposal. Microphone/STT and local wake remain honestly unavailable.
+- Fixed task-start races, stale post-approval actions, raw tool-result history,
+  dead retention paths, stale restart state, disconnected connector exposure,
+  browser-session collisions, and Invisible-mode foreground focus.
+- Hardened every model-driven terminal command and terminal-input tool to
+  require non-bypassable direct approval even in Full Access. Agent PTYs now
+  skip login/rc files and inherit only an allowlisted toolchain/locale
+  environment with cloud credentials and authentication sockets stripped.
+- Added a structured native Cursor Mode foundation: strict shared contracts, a
+  fixed Swift CGEvent helper, task-owned sessions, helper/Accessibility
+  readiness, eight mode-gated `computer.*` tools, active-display and input
+  bounds, direct approval for click/type/key actions, secret-text refusal,
+  cancellation/timeout, pointer takeover pausing, and cleanup. Both x86_64 and
+  arm64 helper targets compile; live read-only native observation passed.
+- Separated public and localhost Managed Browser sessions, destroyed stale page
+  state on scope changes, bound loopback sessions to one exact origin, and
+  removed public DNS caching at the security decision boundary.
+- Added recursive bounded sanitization for all model-visible tool results,
+  including sensitive containers, authorization/cookie headers, credential URL
+  parameters, provider/service token forms, and private keys.
+- Prevented a provider's optimistic final text from marking an Omni task green
+  when the latest observed tool outcome is failed or cancelled.
+- Refreshed Omni cloud model selection to use authenticated provider catalogs
+  for OpenAI, Anthropic, and Gemini while retaining inspected local Ollama
+  models.
+- The current complete serial suite passes 66 files with 559 tests and one
+  intentionally skipped native-Keychain file/test. TypeScript, the 3,121-module
+  production build, x86_64 native helper, and x64 directory package pass. A built-app live smoke rendered Code/Work/Omni, verified the
+  restricted overlay boundary, reopened it with real `⌘⇧Space` while another
+  app was foreground, queried real TTS availability/voices, and confirmed a
+  missing model fails clearly without creating task history.
+- Extended the packaged smoke to reopen an explicitly authorized workspace
+  before filesystem access and to verify the packaged Omni helper, real
+  Accessibility readiness, TTS availability, accurate Cursor-option state,
+  native PTY, localhost secret boundaries, navigation blocking, and zero
+  renderer errors. This removed noisy false failures from the old fresh-profile
+  harness without weakening the workspace authorization boundary.
+- After approval-display, agent-terminal, model-result, browser-isolation, and
+  native-Cursor hardening, the complete serial suite and focused TypeScript
+  checking pass.
+
+## Omni Mode audited architecture baseline — 2026-09-15
+
+- Audited the complete third-mode specification against the current Electron,
+  Code Agent, Work connector, Tool Registry, Permission Manager, browser,
+  application-launch, lifecycle, IPC, and packaging implementations.
+- Added permanent Omni architecture, voice, Cursor Mode, background service,
+  and security documents that distinguish current 0.5.1 behavior from phased
+  targets and test gates.
+- Recorded the honest starting gaps: no global hotkey/overlay/helper, voice or
+  local wake detector, and no structured arbitrary macOS computer control.
+- Defined reuse of the existing provider/tool/permission stack without a second
+  AI implementation, plus fail-closed native, permission, privacy, signing,
+  and regression gates for implementation.
+
 ## OmniCode 0.5.1 Agent plan and reasoning summary — 2026-09-15
 
 - Added a bounded, provider-neutral `agent.update-plan` tool for Code Agent task

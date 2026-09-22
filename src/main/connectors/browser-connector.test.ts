@@ -55,6 +55,32 @@ describe('BrowserConnector security boundary', () => {
     expect(() => validateBrowserUrl('http://localhost:4173/')).toThrow()
   })
 
+  it('destroys and clears the public session before entering an exact localhost origin', async () => {
+    const publicPage = fakePage()
+    const localPage = fakePage()
+    ;(localPage.snapshot as ReturnType<typeof vi.fn>).mockResolvedValue({ title: 'Local app', url: 'http://localhost:4173/', text: 'Ready' })
+    const created: Array<{ scope?: string; origin?: string }> = []
+    const connector = new BrowserConnector({
+      mode: 'omni', allowLoopback: true,
+      createPage: async (scope, origin) => {
+        created.push({ scope, origin })
+        return scope === 'loopback' ? localPage : publicPage
+      },
+      resolveHost: async () => ['93.184.216.34']
+    })
+
+    await connector.open('https://example.com/', false)
+    await connector.open('http://localhost:4173/', false)
+
+    expect(created).toEqual([
+      { scope: 'public', origin: undefined },
+      { scope: 'loopback', origin: 'http://localhost:4173' }
+    ])
+    expect(publicPage.destroy).toHaveBeenCalledOnce()
+    expect(publicPage.clearStorage).toHaveBeenCalledOnce()
+    expect(localPage.loadURL).toHaveBeenCalledWith('http://localhost:4173/')
+  })
+
   it('performs Code web search through a generated credential-free HTTPS URL', async () => {
     const page = fakePage()
     const connector = new BrowserConnector({
@@ -70,6 +96,28 @@ describe('BrowserConnector security boundary', () => {
     )
     expect(page.loadURL).toHaveBeenCalledWith('https://www.google.com/search?q=official+TypeScript+AbortController+documentation')
     expect(page.show).toHaveBeenCalledOnce()
+  })
+
+  it('registers an isolated Omni browser catalog and honors Invisible Mode focus policy', async () => {
+    const page = fakePage()
+    const connector = new BrowserConnector({
+      mode: 'omni', allowLoopback: true, connectorId: 'omni-browser', createPage: async () => page,
+      shouldShow: () => false,
+      resolveHost: async () => ['93.184.216.34']
+    })
+    const registry = new ToolRegistry()
+    connector.registerTools(registry)
+    expect(registry.list('omni').map((tool) => tool.id)).toEqual([
+      'browser.open', 'browser.read', 'browser.find', 'browser.search', 'browser.reload', 'browser.console', 'browser.click', 'browser.type'
+    ])
+    expect(registry.list('code')).toEqual([])
+    await registry.execute(
+      { toolId: 'browser.open', mode: 'omni', input: { url: 'https://example.com/' } },
+      { accessLevel: 'trusted', approvalMode: 'ask', confirm: vi.fn() },
+      { executionId: 'omni-task' }
+    )
+    expect(page.loadURL).toHaveBeenCalledWith('https://example.com/')
+    expect(page.show).not.toHaveBeenCalled()
   })
 
   it('does not claim connected before a real page exists and clears isolated state on disconnect', async () => {

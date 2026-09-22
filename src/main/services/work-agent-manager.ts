@@ -12,11 +12,11 @@ import type {
 import type { AppMode } from '../../shared/work-contracts'
 import type { AIToolCall, AIToolConversationMessage } from './ai-tool-types'
 import { AIManager } from './ai-manager'
+import { serializeToolResultForModel } from './model-tool-result-sanitizer'
 
 const MAX_AGENT_STEPS = 8
 const MAX_TOOL_CALLS = 12
 const MAX_TOOL_INPUT_BYTES = 64 * 1024
-const MAX_TOOL_RESULT_FOR_MODEL = 256 * 1024
 const MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,254}$/u
 const PROVIDERS = new Set(['ollama', 'openai', 'anthropic', 'google'])
 
@@ -232,16 +232,7 @@ function validateTurnCalls(calls: AIToolCall[]): void {
 
 function toolResultContent(result: ToolExecutionResult, expectedToolId: string): string {
   if (!result || result.toolId !== expectedToolId) throw new Error('The connected app returned a result for the wrong tool.')
-  let serialized: string
-  try {
-    serialized = JSON.stringify({ ok: true, result: result.result })
-  } catch {
-    throw new Error('The connected-app result could not be serialized safely.')
-  }
-  if (Buffer.byteLength(serialized, 'utf8') > MAX_TOOL_RESULT_FOR_MODEL) {
-    throw new Error('The connected-app result is too large to return to the AI model.')
-  }
-  return serialized
+  return serializeToolResultForModel(result.result)
 }
 
 export class WorkAgentManager {
@@ -257,7 +248,7 @@ export class WorkAgentManager {
     assertNotAborted(options.signal)
     const mode = options.mode ?? 'work'
     const systemPrompt = options.systemPrompt ?? WORK_AGENT_SYSTEM
-    if (mode !== 'work' && mode !== 'code') throw new Error('Choose a supported tool-agent mode.')
+    if (mode !== 'work' && mode !== 'code' && mode !== 'omni') throw new Error('Choose a supported tool-agent mode.')
     if (!systemPrompt.trim() || systemPrompt.length > 32 * 1024 || systemPrompt.includes('\0')) throw new Error('The tool-agent instructions are invalid.')
     const maxSteps = options.maxSteps ?? MAX_AGENT_STEPS
     const maxToolCalls = options.maxToolCalls ?? MAX_TOOL_CALLS

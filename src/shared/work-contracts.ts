@@ -1,6 +1,6 @@
 import type { AIProviderId } from './contracts'
 
-export type AppMode = 'code' | 'work'
+export type AppMode = 'code' | 'work' | 'omni'
 
 export type WorkMessageRole = 'user' | 'assistant'
 export type WorkMessageStatus = 'pending' | 'streaming' | 'complete' | 'failed' | 'cancelled'

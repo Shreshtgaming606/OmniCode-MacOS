@@ -11,7 +11,6 @@ import type { AppMode } from '../../shared/work-contracts'
 const MAX_PAGE_TEXT = 128 * 1024
 const MAX_FIND_RESULTS = 100
 const DNS_GUARD_TIMEOUT_MS = 5_000
-const DNS_GUARD_CACHE_MS = 60_000
 const SNAPSHOT_SCRIPT = `(() => ({
   title: String(document.title || '').slice(0, 1000),
   url: String(location.href),
@@ -38,8 +37,10 @@ export interface ManagedBrowserPage {
   clearStorage(): Promise<void>
 }
 
+export type ManagedBrowserScope = 'public' | 'loopback'
+
 export interface BrowserConnectorOptions {
-  createPage?: () => Promise<ManagedBrowserPage>
+  createPage?: (scope?: ManagedBrowserScope, loopbackOrigin?: string) => Promise<ManagedBrowserPage>
   resolveHost?: (hostname: string) => Promise<string[]>
   mode?: AppMode
   allowLoopback?: boolean
@@ -147,7 +148,12 @@ function sanitizeSnapshot(value: unknown): BrowserPageSnapshot {
 class ElectronManagedBrowserPage implements ManagedBrowserPage {
   readonly #consoleErrors: string[] = []
 
-  constructor(private readonly window: BrowserWindow, private readonly isolatedSession: Session, private readonly allowLoopback: boolean) {
+  constructor(
+    private readonly window: BrowserWindow,
+    private readonly isolatedSession: Session,
+    private readonly scope: ManagedBrowserScope,
+    private readonly loopbackOrigin?: string
+  ) {
     window.webContents.on('console-message', (_event, level, message, line, sourceId) => {
       if (level < 2) return
       const clean = `${message} (${sourceId || 'page'}:${line})`.replace(/[\u0000-\u001f\u007f]/gu, ' ').slice(0, 2_000)
@@ -164,11 +170,13 @@ class ElectronManagedBrowserPage implements ManagedBrowserPage {
 
   async snapshot(): Promise<BrowserPageSnapshot> {
     const snapshot = await this.window.webContents.executeJavaScript(SNAPSHOT_SCRIPT, true)
-    if (!this.allowLoopback) return sanitizeSnapshot(snapshot)
+    if (this.scope === 'public') return sanitizeSnapshot(snapshot)
     if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) throw new Error('The managed browser returned an invalid page snapshot.')
     const value = snapshot as Partial<BrowserPageSnapshot>
     if (typeof value.title !== 'string' || typeof value.url !== 'string' || typeof value.text !== 'string') throw new Error('The managed browser returned an invalid page snapshot.')
-    return { title: value.title.slice(0, 1_000), url: validateCodeBrowserUrl(value.url).toString(), text: value.text.slice(0, MAX_PAGE_TEXT) }
+    const url = validateCodeBrowserUrl(value.url)
+    if (!this.loopbackOrigin || url.origin !== this.loopbackOrigin) throw new Error('The managed local browser left its approved localhost origin.')
+    return { title: value.title.slice(0, 1_000), url: url.toString(), text: value.text.slice(0, MAX_PAGE_TEXT) }
   }
 
   async findText(query: string): Promise<{ count: number; excerpts: string[] }> {
@@ -242,9 +250,9 @@ class ElectronManagedBrowserPage implements ManagedBrowserPage {
 function installSessionGuards(
   isolatedSession: Session,
   resolveHost: (hostname: string) => Promise<string[]>,
-  allowLoopback: boolean
+  scope: ManagedBrowserScope,
+  loopbackOrigin?: string
 ): void {
-  const publicHostCache = new Map<string, number>()
   isolatedSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
   isolatedSession.setPermissionCheckHandler(() => false)
   isolatedSession.on('will-download', (event) => event.preventDefault())
@@ -253,13 +261,17 @@ function installSessionGuards(
       try {
         const url = new URL(details.url)
         if (url.protocol === 'about:' && url.toString() === 'about:blank') return callback({ cancel: false })
-        validateManagedBrowserUrl(url.toString(), allowLoopback)
-        if (allowLoopback && loopbackHostname(url.hostname)) return callback({ cancel: false })
-        const cachedUntil = publicHostCache.get(url.hostname) ?? 0
-        if (cachedUntil <= Date.now()) {
-          await publicAddresses(url.hostname, resolveHost)
-          publicHostCache.set(url.hostname, Date.now() + DNS_GUARD_CACHE_MS)
+        const isLoopback = loopbackHostname(url.hostname)
+        if (isLoopback) {
+          validateManagedBrowserUrl(url.toString(), true)
+          if (scope !== 'loopback' || !loopbackOrigin || url.origin !== loopbackOrigin) throw new Error('Cross-scope localhost request blocked.')
+          return callback({ cancel: false })
         }
+        validateManagedBrowserUrl(url.toString(), false)
+        if (scope === 'loopback' && details.resourceType === 'mainFrame') throw new Error('Public navigation requires a fresh public browser session.')
+        // Resolve every public request. Avoid carrying a stale safety decision
+        // across DNS changes or into a different browser trust scope.
+        await publicAddresses(url.hostname, resolveHost)
         callback({ cancel: false })
       } catch {
         callback({ cancel: true })
@@ -268,16 +280,21 @@ function installSessionGuards(
   })
 }
 
-async function createElectronPage(resolveHost: (hostname: string) => Promise<string[]>, mode: AppMode, allowLoopback: boolean): Promise<ManagedBrowserPage> {
-  const isolatedSession = session.fromPartition(`persist:omnicode-${mode}-browser-v1`, { cache: true })
-  installSessionGuards(isolatedSession, resolveHost, allowLoopback)
+async function createElectronPage(
+  resolveHost: (hostname: string) => Promise<string[]>,
+  mode: AppMode,
+  scope: ManagedBrowserScope,
+  loopbackOrigin?: string
+): Promise<ManagedBrowserPage> {
+  const isolatedSession = session.fromPartition(`persist:omnicode-${mode}-browser-${scope}-v2`, { cache: true })
+  installSessionGuards(isolatedSession, resolveHost, scope, loopbackOrigin)
   const window = new BrowserWindow({
     width: 1120,
     height: 760,
     minWidth: 720,
     minHeight: 480,
     show: false,
-    title: `OmniCode ${mode === 'code' ? 'Code' : 'Work'} Browser`,
+    title: `OmniCode ${mode === 'code' ? 'Code' : mode === 'omni' ? 'Omni' : 'Work'} Browser`,
     webPreferences: {
       session: isolatedSession,
       sandbox: true,
@@ -288,41 +305,53 @@ async function createElectronPage(resolveHost: (hostname: string) => Promise<str
   })
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   window.webContents.on('will-navigate', (event, target) => {
-    try { validateManagedBrowserUrl(target, allowLoopback) } catch { event.preventDefault() }
+    try {
+      const url = validateManagedBrowserUrl(target, scope === 'loopback')
+      if (scope === 'loopback' && (!loopbackOrigin || url.origin !== loopbackOrigin)) event.preventDefault()
+    } catch { event.preventDefault() }
   })
   await window.loadURL('about:blank')
-  return new ElectronManagedBrowserPage(window, isolatedSession, allowLoopback)
+  return new ElectronManagedBrowserPage(window, isolatedSession, scope, loopbackOrigin)
 }
 
 export class BrowserConnector implements ConnectorAdapter {
   readonly descriptor: ConnectorAdapter['descriptor']
 
-  readonly #createPage: () => Promise<ManagedBrowserPage>
+  readonly #createPage: (scope: ManagedBrowserScope, loopbackOrigin?: string) => Promise<ManagedBrowserPage>
   readonly #resolveHost: (hostname: string) => Promise<string[]>
   readonly #mode: AppMode
   readonly #allowLoopback: boolean
   readonly #shouldShow: (executionId?: string) => boolean
   #page: ManagedBrowserPage | null = null
+  #pageScope: ManagedBrowserScope | null = null
+  #loopbackOrigin: string | null = null
 
   constructor(options: BrowserConnectorOptions = {}) {
     this.#mode = options.mode ?? 'work'
     this.#allowLoopback = options.allowLoopback ?? false
     this.#shouldShow = options.shouldShow ?? (() => true)
+    const agentBrowser = this.#mode === 'code' || this.#mode === 'omni'
     this.descriptor = {
-      id: options.connectorId ?? (this.#mode === 'code' ? 'code-browser' : 'browser'),
-      name: this.#mode === 'code' ? 'Code Browser' : 'Managed Browser',
-      description: `A dedicated, isolated browser session for approved ${this.#mode === 'code' ? 'Code' : 'Work'} tasks.`,
-      capabilities: this.#mode === 'code' ? ['Open documentation and localhost pages', 'Read visible page', 'Find text', 'Inspect console errors'] : ['Open secure pages', 'Read visible page', 'Find text'],
+      id: options.connectorId ?? (this.#mode === 'code' ? 'code-browser' : this.#mode === 'omni' ? 'omni-browser' : 'browser'),
+      name: this.#mode === 'code' ? 'Code Browser' : this.#mode === 'omni' ? 'Omni Browser' : 'Managed Browser',
+      description: `A dedicated, isolated browser session for approved ${this.#mode === 'code' ? 'Code' : this.#mode === 'omni' ? 'Omni' : 'Work'} tasks.`,
+      capabilities: agentBrowser ? ['Open documentation and localhost pages', 'Read visible page', 'Find text', 'Inspect console errors'] : ['Open secure pages', 'Read visible page', 'Find text'],
       requestedScopes: [],
       accessLevel: 'read-only' as const
     }
     this.#resolveHost = options.resolveHost ?? defaultResolveHost
-    this.#createPage = options.createPage ?? (() => createElectronPage(this.#resolveHost, this.#mode, this.#allowLoopback))
+    this.#createPage = options.createPage ?? ((scope, loopbackOrigin) => createElectronPage(this.#resolveHost, this.#mode, scope, loopbackOrigin))
   }
 
-  async connect(): Promise<void> {
-    if (this.#page && !this.#page.isDestroyed()) return
-    this.#page = await this.#createPage()
+  async connect(scope: ManagedBrowserScope = 'public', loopbackOrigin?: string): Promise<void> {
+    if (scope === 'loopback' && (!this.#allowLoopback || !loopbackOrigin)) throw new Error('The managed browser cannot create an unscoped localhost session.')
+    const reusable = this.#page && !this.#page.isDestroyed() && this.#pageScope === scope &&
+      (scope === 'public' || this.#loopbackOrigin === loopbackOrigin)
+    if (reusable) return
+    if (this.#page) await this.disconnect()
+    this.#page = await this.#createPage(scope, loopbackOrigin)
+    this.#pageScope = scope
+    this.#loopbackOrigin = scope === 'loopback' ? loopbackOrigin ?? null : null
   }
 
   async verify() {
@@ -339,15 +368,19 @@ export class BrowserConnector implements ConnectorAdapter {
   async disconnect(): Promise<void> {
     const page = this.#page
     this.#page = null
+    this.#pageScope = null
+    this.#loopbackOrigin = null
     if (!page) return
     page.destroy()
     await page.clearStorage()
   }
 
   async open(urlValue: string, show = true): Promise<BrowserPageSnapshot> {
-    const page = this.#requirePage()
     const url = validateManagedBrowserUrl(urlValue, this.#allowLoopback)
-    if (!(this.#allowLoopback && loopbackHostname(url.hostname))) await publicAddresses(url.hostname, this.#resolveHost)
+    const loopback = this.#allowLoopback && loopbackHostname(url.hostname)
+    if (!loopback) await publicAddresses(url.hostname, this.#resolveHost)
+    await this.connect(loopback ? 'loopback' : 'public', loopback ? url.origin : undefined)
+    const page = this.#requirePage()
     await page.loadURL(url.toString())
     if (show) page.show()
     return page.snapshot()
@@ -379,7 +412,6 @@ export class BrowserConnector implements ConnectorAdapter {
       inputSchema: { type: 'object', properties: { url: { type: 'string', maxLength: 2_048 } }, required: ['url'], additionalProperties: false },
       resultSchema: { type: 'object', properties: { title: { type: 'string', maxLength: 1_000 }, url: { type: 'string', maxLength: 2_048 }, text: { type: 'string', maxLength: MAX_PAGE_TEXT } }, required: ['title', 'url', 'text'], additionalProperties: false }
     }, async (input, context) => {
-      await this.connect()
       const snapshot = await this.open(String(input.url), this.#shouldShow(context.executionId))
       return { title: snapshot.title, url: snapshot.url, text: snapshot.text } satisfies Record<string, JsonValue>
     })
@@ -398,36 +430,35 @@ export class BrowserConnector implements ConnectorAdapter {
       inputSchema: { type: 'object', properties: { query: { type: 'string', minLength: 1, maxLength: 500 } }, required: ['query'], additionalProperties: false },
       resultSchema: { type: 'object', properties: { count: { type: 'integer', minimum: 0 }, excerpts: { type: 'array', items: { type: 'string', maxLength: 1_000 }, maxItems: MAX_FIND_RESULTS } }, required: ['count', 'excerpts'], additionalProperties: false }
     }, async (input) => this.findText(String(input.query)))
-    if (this.#mode === 'code') {
+    if (this.#mode === 'code' || this.#mode === 'omni') {
       registry.register({
         id: 'browser.search', name: 'Search the web', description: 'Search the public web for technical documentation in the managed Code Browser.',
-        connectorId: this.descriptor.id, modes: ['code'], action: 'read', ...readSafety, confirmation: 'never', requiredScopes: [],
+        connectorId: this.descriptor.id, modes: [this.#mode], action: 'read', ...readSafety, confirmation: 'never', requiredScopes: [],
         inputSchema: { type: 'object', properties: { query: { type: 'string', minLength: 1, maxLength: 500 } }, required: ['query'], additionalProperties: false },
         resultSchema: { type: 'object', properties: { title: { type: 'string', maxLength: 1_000 }, url: { type: 'string', maxLength: 2_048 }, text: { type: 'string', maxLength: MAX_PAGE_TEXT } }, required: ['title', 'url', 'text'], additionalProperties: false }
       }, async (input, context) => {
-        await this.connect()
         const snapshot = await this.searchWeb(String(input.query), this.#shouldShow(context.executionId))
         return { title: snapshot.title, url: snapshot.url, text: snapshot.text } satisfies Record<string, JsonValue>
       })
       registry.register({
         id: 'browser.reload', name: 'Reload page', description: 'Reload the current Code Browser page and return its visible contents.',
-        connectorId: this.descriptor.id, modes: ['code'], action: 'read', ...readSafety, confirmation: 'never', requiredScopes: [],
+        connectorId: this.descriptor.id, modes: [this.#mode], action: 'read', ...readSafety, confirmation: 'never', requiredScopes: [],
         inputSchema: { type: 'object', properties: {}, additionalProperties: false }, maxResultBytes: 256 * 1024
       }, async () => (await (this.#requirePage().reload?.() ?? Promise.reject(new Error('Browser reload is unavailable.')))) as unknown as JsonValue)
       registry.register({
         id: 'browser.console', name: 'Read browser errors', description: 'Read bounded error and warning messages from the Code Browser console.',
-        connectorId: this.descriptor.id, modes: ['code'], action: 'read', ...readSafety, confirmation: 'never', requiredScopes: [],
+        connectorId: this.descriptor.id, modes: [this.#mode], action: 'read', ...readSafety, confirmation: 'never', requiredScopes: [],
         inputSchema: { type: 'object', properties: {}, additionalProperties: false }, maxResultBytes: 64 * 1024
       }, async () => ({ errors: await (this.#requirePage().consoleErrors?.() ?? Promise.resolve([])) }))
       const interactionSafety = { category: 'external-submission' as const, risk: 'medium' as const, reversible: true, externalSideEffect: true }
       registry.register({
         id: 'browser.click', name: 'Click page control', description: 'Click one non-form, non-account, non-destructive page element by CSS selector.',
-        connectorId: this.descriptor.id, modes: ['code'], action: 'write', ...interactionSafety, confirmation: 'policy', requiredScopes: [],
+        connectorId: this.descriptor.id, modes: [this.#mode], action: 'write', ...interactionSafety, confirmation: 'policy', requiredScopes: [],
         inputSchema: { type: 'object', properties: { selector: { type: 'string', minLength: 1, maxLength: 500 } }, required: ['selector'], additionalProperties: false }
       }, async (input) => this.#requirePage().click?.(String(input.selector)) ?? Promise.reject(new Error('Browser clicking is unavailable.')))
       registry.register({
         id: 'browser.type', name: 'Type into page', description: 'Type non-secret text into one non-password field without submitting a form.',
-        connectorId: this.descriptor.id, modes: ['code'], action: 'write', ...interactionSafety, confirmation: 'policy', requiredScopes: [],
+        connectorId: this.descriptor.id, modes: [this.#mode], action: 'write', ...interactionSafety, confirmation: 'policy', requiredScopes: [],
         inputSchema: { type: 'object', properties: { selector: { type: 'string', minLength: 1, maxLength: 500 }, text: { type: 'string', maxLength: 8_000 } }, required: ['selector', 'text'], additionalProperties: false }
       }, async (input) => this.#requirePage().typeText?.(String(input.selector), String(input.text)) ?? Promise.reject(new Error('Browser typing is unavailable.')))
     }

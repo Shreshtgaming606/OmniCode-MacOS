@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import type { ToolConfirmationRequest, ToolDescriptor, WorkApprovalMode } from '../../shared/tool-contracts'
-import { PermissionManager } from './permission-manager'
+import { PermissionManager, stricterApprovalMode } from './permission-manager'
 
 function tool(overrides: Partial<ToolDescriptor> = {}): ToolDescriptor {
   return {
@@ -27,6 +27,13 @@ function context(mode: WorkApprovalMode, confirm: (request: ToolConfirmationRequ
 }
 
 describe('PermissionManager', () => {
+  it('composes nested policies without allowing either layer to relax the other', () => {
+    expect(stricterApprovalMode('ask', 'full')).toBe('ask')
+    expect(stricterApprovalMode('auto', 'full')).toBe('auto')
+    expect(stricterApprovalMode('full', 'ask')).toBe('ask')
+    expect(stricterApprovalMode('auto', 'ask')).toBe('ask')
+    expect(stricterApprovalMode('full', 'full')).toBe('full')
+  })
   it('keeps harmless read operations automatic in every mode', async () => {
     for (const mode of ['ask', 'auto', 'full'] as const) {
       const confirm = vi.fn(async () => false)

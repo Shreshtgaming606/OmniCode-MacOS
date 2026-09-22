@@ -24,6 +24,10 @@ export default defineConfig(({ mode }) => {
       plugins: [externalizeDepsPlugin()],
       build: {
         rollupOptions: {
+          input: {
+            index: resolve('src/preload/index.ts'),
+            'omni-overlay': resolve('src/preload/omni-overlay.ts')
+          },
           output: {
             // Electron's sandboxed preload loader executes CommonJS. Keeping the
             // renderer sandboxed is more important than emitting preload ESM.
@@ -40,7 +44,15 @@ export default defineConfig(({ mode }) => {
           '@shared': resolve('src/shared')
         }
       },
-      plugins: [react()]
+      plugins: [react()],
+      build: {
+        rollupOptions: {
+          input: {
+            index: resolve('src/renderer/index.html'),
+            'omni-overlay': resolve('src/renderer/omni-overlay.html')
+          }
+        }
+      }
     }
   }
 })

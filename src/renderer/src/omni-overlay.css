@@ -1,0 +1,92 @@
+:root {
+  color-scheme: dark;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+  background: transparent;
+  color: #f6f8ff;
+}
+
+* { box-sizing: border-box; }
+html, body, #omni-overlay-root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+button, textarea { font: inherit; }
+button { color: inherit; }
+
+.omni-overlay-shell {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in srgb, #11151f 94%, transparent);
+  border: 1px solid rgba(142, 174, 255, .28);
+  border-radius: 22px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, .55), inset 0 1px rgba(255, 255, 255, .05);
+  overflow: hidden;
+}
+
+.omni-overlay-header {
+  min-height: 62px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 15px 10px 18px;
+  -webkit-app-region: drag;
+  border-bottom: 1px solid rgba(255, 255, 255, .075);
+}
+
+.omni-overlay-brand, .omni-overlay-brand > span, .omni-overlay-window-actions, .omni-overlay-footer, .omni-overlay-footer > div { display: flex; align-items: center; }
+.omni-overlay-brand { gap: 11px; }
+.omni-overlay-brand > span { width: 36px; height: 36px; justify-content: center; border-radius: 12px; color: #8eb6ff; background: linear-gradient(145deg, rgba(77, 122, 237, .35), rgba(86, 58, 171, .28)); box-shadow: inset 0 0 0 1px rgba(130, 165, 255, .24); }
+.omni-overlay-brand svg { width: 20px; }
+.omni-overlay-brand div { display: grid; gap: 2px; }
+.omni-overlay-brand strong { font-size: 15px; }
+.omni-overlay-brand small { color: #8f98ab; font-size: 11px; }
+.omni-overlay-window-actions { gap: 5px; -webkit-app-region: no-drag; }
+.omni-overlay-window-actions button { width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 9px; background: transparent; color: #9da7bb; cursor: pointer; }
+.omni-overlay-window-actions button:hover { background: rgba(255, 255, 255, .08); color: #fff; }
+.omni-overlay-window-actions svg { width: 15px; }
+
+.omni-overlay-blocked { margin: auto; max-width: 430px; text-align: center; }
+.omni-overlay-blocked strong { font-size: 20px; }
+.omni-overlay-blocked p { color: #9aa4b8; line-height: 1.5; }
+.omni-overlay-blocked button { border: 1px solid rgba(126, 164, 255, .45); background: rgba(75, 118, 224, .22); padding: 9px 14px; border-radius: 10px; cursor: pointer; }
+
+.omni-overlay-status { display: grid; grid-template-columns: 58px 1fr; gap: 15px; padding: 20px 22px 14px; min-height: 118px; }
+.omni-overlay-orb { width: 56px; height: 56px; display: grid; place-items: center; align-self: center; border-radius: 50%; color: #a8c4ff; background: radial-gradient(circle at 35% 30%, #779df5, #4c56ba 56%, #242848 100%); box-shadow: 0 0 0 7px rgba(102, 131, 224, .09), 0 0 34px rgba(93, 124, 232, .3); }
+.omni-overlay-orb.active { animation: pulse 1.8s ease-in-out infinite; }
+.omni-overlay-orb svg { width: 26px; }
+.omni-overlay-status > div { min-width: 0; }
+.omni-overlay-status small, .omni-overlay-plan small { display: block; color: #7f9fe4; text-transform: uppercase; letter-spacing: .1em; font-size: 9px; font-weight: 700; margin-bottom: 5px; }
+.omni-overlay-status strong { display: block; font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.omni-overlay-status p, .omni-overlay-plan p { color: #9ca6ba; font-size: 12px; line-height: 1.45; margin: 5px 0 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+.omni-overlay-plan { margin: 0 22px 10px; padding: 10px 12px; display: grid; grid-template-columns: 36px 1fr; gap: 11px; background: rgba(255, 255, 255, .035); border: 1px solid rgba(255, 255, 255, .07); border-radius: 12px; }
+.omni-overlay-plan > span { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 9px; color: #a9c3ff; background: rgba(83, 118, 210, .18); font-size: 11px; font-weight: 700; }
+.omni-overlay-plan strong { font-size: 12px; }
+
+.omni-overlay-events { margin: 0 22px 10px; display: grid; gap: 5px; overflow: auto; }
+.omni-overlay-events > div { display: grid; grid-template-columns: 8px 1fr; gap: 8px; align-items: start; }
+.omni-overlay-events span { width: 6px; height: 6px; border-radius: 50%; margin-top: 5px; background: #75839b; }
+.omni-overlay-events span[data-status="succeeded"] { background: #55d69a; }
+.omni-overlay-events span[data-status="failed"] { background: #ff7e89; }
+.omni-overlay-events span[data-status="running"] { background: #76a4ff; }
+.omni-overlay-events p { margin: 0; color: #8f99ad; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.omni-overlay-events strong { color: #d6dbea; margin-right: 7px; }
+
+.omni-overlay-error { margin: 0 22px 8px; padding: 8px 10px; color: #ffc0c6; background: rgba(166, 48, 65, .16); border: 1px solid rgba(255, 101, 120, .25); border-radius: 9px; font-size: 11px; }
+.omni-overlay-compose { margin: auto 16px 10px; min-height: 66px; display: grid; grid-template-columns: 1fr 44px; gap: 8px; padding: 8px; border-radius: 15px; background: rgba(4, 7, 13, .45); border: 1px solid rgba(134, 163, 226, .18); }
+.omni-overlay-compose:focus-within { border-color: rgba(110, 151, 250, .55); box-shadow: 0 0 0 3px rgba(83, 123, 226, .1); }
+.omni-overlay-compose textarea { resize: none; border: 0; outline: 0; padding: 5px 7px; color: #eef2ff; background: transparent; line-height: 1.4; font-size: 13px; }
+.omni-overlay-compose textarea::placeholder { color: #667086; }
+.omni-overlay-compose button { width: 42px; height: 42px; align-self: center; display: grid; place-items: center; border: 0; border-radius: 12px; cursor: pointer; background: linear-gradient(145deg, #5d86eb, #575fca); box-shadow: 0 5px 18px rgba(67, 96, 195, .3); }
+.omni-overlay-compose button:disabled { opacity: .35; cursor: default; box-shadow: none; }
+.omni-overlay-compose svg { width: 18px; }
+
+.omni-overlay-footer { min-height: 42px; justify-content: space-between; padding: 6px 16px 8px 21px; border-top: 1px solid rgba(255, 255, 255, .055); color: #778298; font-size: 10px; }
+.omni-overlay-footer > div { gap: 5px; }
+.omni-overlay-footer button { display: flex; align-items: center; gap: 5px; border: 0; border-radius: 8px; padding: 6px 8px; color: #9ba6ba; background: transparent; font-size: 10px; cursor: pointer; }
+.omni-overlay-footer button:hover:not(:disabled) { background: rgba(255, 255, 255, .07); color: #fff; }
+.omni-overlay-footer button:disabled { opacity: .3; cursor: default; }
+.omni-overlay-footer svg { width: 12px; }
+.spin { animation: spin .8s linear infinite; }
+
+@keyframes pulse { 50% { transform: scale(1.045); box-shadow: 0 0 0 10px rgba(102, 131, 224, .06), 0 0 44px rgba(93, 124, 232, .45); } }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .omni-overlay-orb.active, .spin { animation: none; } }

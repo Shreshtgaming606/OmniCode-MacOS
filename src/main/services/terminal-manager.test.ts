@@ -25,7 +25,7 @@ vi.mock('./shell-environment', () => ({
   resolveShellEnvironment: vi.fn(async () => ({ SHELL: '/bin/zsh', PATH: '/usr/bin:/bin' }))
 }))
 
-import { TerminalManager } from './terminal-manager'
+import { agentShellArguments, sanitizeAgentEnvironment, TerminalManager } from './terminal-manager'
 
 describe('TerminalManager agent sessions', () => {
   beforeEach(() => { spawned.length = 0 })
@@ -71,5 +71,25 @@ describe('TerminalManager agent sessions', () => {
     manager.interruptAgentCommand('task-a', session.id)
     expect(spawned[0]?.writes).toEqual(['\x03'])
     expect(() => manager.interruptAgentCommand('task-b', session.id)).toThrow(/not available to this task/i)
+  })
+
+  it('strips credentials and auth sockets from the agent process environment', () => {
+    expect(sanitizeAgentEnvironment({
+      HOME: '/Users/test', PATH: '/usr/bin:/bin', LANG: 'en_US.UTF-8',
+      OPENAI_API_KEY: 'secret', GOOGLE_APPLICATION_CREDENTIALS: '/tmp/private.json',
+      SSH_AUTH_SOCK: '/tmp/agent.sock', GITHUB_TOKEN: 'secret', LC_ALL: 'C'
+    })).toEqual(expect.objectContaining({
+      HOME: '/Users/test', PATH: '/usr/bin:/bin', LANG: 'en_US.UTF-8', LC_ALL: 'C',
+      TERM: 'xterm-256color', TERM_PROGRAM: 'OmniCode-Agent'
+    }))
+    const sanitized = sanitizeAgentEnvironment({ OPENAI_API_KEY: 'secret', SSH_AUTH_SOCK: '/tmp/agent.sock' })
+    expect(sanitized).not.toHaveProperty('OPENAI_API_KEY')
+    expect(sanitized).not.toHaveProperty('SSH_AUTH_SOCK')
+  })
+
+  it('starts agent shells without loading user profile files', () => {
+    expect(agentShellArguments('/bin/zsh', 'npm test')).toEqual(['-f', '-c', 'npm test'])
+    expect(agentShellArguments('/bin/bash', 'npm test')).toEqual(['--noprofile', '--norc', '-c', 'npm test'])
+    expect(agentShellArguments('/opt/homebrew/bin/fish', 'npm test')).toEqual(['--no-config', '-c', 'npm test'])
   })
 })

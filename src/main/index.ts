@@ -1,4 +1,20 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, Notification, session, shell } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  globalShortcut,
+  ipcMain,
+  Menu,
+  nativeImage,
+  nativeTheme,
+  Notification,
+  screen,
+  session,
+  shell,
+  systemPreferences,
+  Tray
+} from 'electron'
 import path from 'node:path'
 import { promises as fs } from 'node:fs'
 import { randomUUID } from 'node:crypto'
@@ -22,12 +38,13 @@ import { WorkConversationManager } from './services/work-conversation-manager'
 import { ModelCatalogManager } from './services/model-catalog-manager'
 import { ConnectorManager } from './services/connector-manager'
 import { ToolRegistry } from './services/tool-registry'
+import { PermissionManager, stricterApprovalMode } from './services/permission-manager'
 import { BrowserConnector } from './connectors/browser-connector'
 import { GmailConnector } from './connectors/gmail-connector'
 import { GoogleDriveConnector } from './connectors/google-drive-connector'
 import { GoogleOAuthManager, readGoogleOAuthConfig } from './services/google-oauth-manager'
 import { SecureKeychainStore } from './services/secure-keychain-store'
-import type { ToolConfirmationRequest, ToolExecutionRequest } from '../shared/tool-contracts'
+import type { JsonValue, ToolConfirmationRequest, ToolExecutionRequest } from '../shared/tool-contracts'
 import type { WorkAgentChatRequest, WorkAgentStreamEvent } from '../shared/work-contracts'
 import { modelCanUseWorkTools, WorkAgentManager } from './services/work-agent-manager'
 import { WorkAttachmentManager } from './services/work-attachment-manager'
@@ -38,7 +55,16 @@ import { CodeAgentActivityManager } from './services/code-agent-activity-manager
 import { CodeAgentToolService } from './services/code-agent-tool-service'
 import { CodeAgentManager } from './services/code-agent-manager'
 import { CodeApplicationManager } from './services/code-application-manager'
-import type { GitCloneProgress } from '../shared/contracts'
+import { OmniSettingsManager, type OmniSettingsUpdate } from './services/omni-settings-manager'
+import { OmniTaskStore } from './services/omni-task-store'
+import { OmniToolRouter } from './services/omni-tool-router'
+import { OmniController } from './services/omni-controller'
+import { OmniVoiceService } from './services/omni-voice-service'
+import { OmniCursorService } from './services/omni-cursor-service'
+import { OmniComputerToolService } from './services/omni-computer-tool-service'
+import { createOmniLoginItemSettings, shouldStartOmniInBackground } from './services/omni-background-launch'
+import type { GitCloneProgress, OmniSettingsChanges } from '../shared/contracts'
+import type { OmniExecutionMode, OmniPermissionId, OmniPermissionsSnapshot, OmniSettings, OmniStartRequest } from '../shared/omni-contracts'
 import type {
   ToolAuthorizationDecision,
   WorkActionHistoryEntry,
@@ -48,6 +74,12 @@ import type {
 } from '../shared/tool-contracts'
 
 let mainWindow: BrowserWindow | null = null
+let omniOverlayWindow: BrowserWindow | null = null
+let omniTray: Tray | null = null
+let registeredOmniShortcut: string | null = null
+let pendingOmniActivation = false
+let omniOverlayActivationSource: OmniStartRequest['activationSource'] = 'overlay'
+let omniController: OmniController
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 if (!hasSingleInstanceLock) app.quit()
 let rendererReady = false
@@ -77,6 +109,19 @@ const workTransfers = new WorkTransferStore(path.join(app.getPath('userData'), '
 const workPermissionSettings = new WorkPermissionSettingsManager(path.join(app.getPath('userData'), 'work-action-settings.json'))
 const workActionHistory = new WorkActionHistoryManager(path.join(app.getPath('userData'), 'work-action-history.json'))
 const codeAgentActivity = new CodeAgentActivityManager(path.join(app.getPath('userData'), 'code-agent-activity.json'))
+const omniSettings = new OmniSettingsManager(path.join(app.getPath('userData'), 'omni-settings.json'))
+const omniTasks = new OmniTaskStore(path.join(app.getPath('userData'), 'omni-tasks.json'))
+const omniVoice = new OmniVoiceService()
+const permissionManager = new PermissionManager()
+const omniCursor = new OmniCursorService()
+const omniComputerTools = new ToolRegistry(permissionManager)
+const omniComputerToolService = new OmniComputerToolService({
+  cursor: omniCursor,
+  onUserTakeover: async (taskId) => {
+    await omniController.pauseForUserTakeover(taskId)
+      .catch((error) => diagnostics.failure('omni:cursor:takeover', error))
+  }
+})
 const cloudModelCatalog = new ModelCatalogManager({
   getCredential: async (provider) => {
     try {
@@ -88,12 +133,17 @@ const cloudModelCatalog = new ModelCatalogManager({
   },
   cachePath: path.join(app.getPath('userData'), 'cloud-model-catalog.json')
 })
-const workTools = new ToolRegistry()
+const workTools = new ToolRegistry(permissionManager)
 const workConnectors = new ConnectorManager()
 const browserConnector = new BrowserConnector()
 const codeAgentFocus = new Map<string, 'automatic' | 'when-needed' | 'never'>()
 const codeBrowserConnector = new BrowserConnector({
   mode: 'code', allowLoopback: true, connectorId: 'code-browser',
+  shouldShow: (taskId) => !taskId || codeAgentFocus.get(taskId) !== 'never'
+})
+const omniBrowserTools = new ToolRegistry(permissionManager)
+const omniBrowserConnector = new BrowserConnector({
+  mode: 'omni', allowLoopback: true, connectorId: 'omni-browser',
   shouldShow: (taskId) => !taskId || codeAgentFocus.get(taskId) !== 'never'
 })
 const codeApplications = new CodeApplicationManager()
@@ -111,7 +161,7 @@ const googleOAuth = new GoogleOAuthManager(
 const gmailConnector = new GmailConnector(googleOAuth, fetch, workTransfers, saveWorkTransfer)
 const googleDriveConnector = new GoogleDriveConnector(googleOAuth, fetch, workTransfers, saveWorkTransfer)
 const workAgent = new WorkAgentManager(ai)
-const codeTools = new ToolRegistry()
+const codeTools = new ToolRegistry(permissionManager)
 const codeToolService = new CodeAgentToolService({
   fileSystem,
   diffs,
@@ -137,6 +187,8 @@ const codeToolService = new CodeAgentToolService({
 })
 codeBrowserConnector.registerTools(codeTools)
 codeToolService.register(codeTools)
+omniBrowserConnector.registerTools(omniBrowserTools)
+omniComputerToolService.register(omniComputerTools)
 const codeAgent = new CodeAgentManager({
   activity: codeAgentActivity,
   agent: workAgent,
@@ -156,6 +208,37 @@ const codeAgent = new CodeAgentManager({
     if (mainWindow?.webContents.id === senderId && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send('agent:event', event)
   },
   onTaskStarted: (taskId, focusBehavior) => { codeAgentFocus.set(taskId, focusBehavior) },
+  onTaskFinished: (taskId) => { codeAgentFocus.delete(taskId) }
+})
+omniController = new OmniController({
+  store: omniTasks,
+  agent: workAgent,
+  createRouter: (taskId) => createOmniToolRouter(taskId),
+  canUseTools: async (provider, model) => provider !== 'ollama' || modelCanUseWorkTools(provider, model, await ai.models()),
+  confirm: (taskId, request, signal) => confirmOmniTool(taskId, request, signal),
+  cleanupTask: async (taskId) => {
+    await Promise.allSettled([
+      codeToolService.cleanupTask(taskId),
+      omniComputerToolService.cleanupTask(taskId),
+      omniBrowserConnector.disconnect()
+    ])
+  },
+  resumeTask: (taskId) => omniComputerToolService.resumeTask(taskId),
+  onTaskChanged: (task) => {
+    broadcastOmni('omni:task-changed', task)
+    if (task.status === 'completed' || task.status === 'failed' || task.status === 'stopped') {
+      void omniSettings.get()
+        .then((value) => omniTasks.pruneExpired(value.privacy.activityRetentionDays))
+        .catch((error) => diagnostics.failure('omni:retention', error))
+    }
+  },
+  onEvent: (event) => broadcastOmni('omni:event', event),
+  onSpeak: (taskId, text) => { void speakOmniResponse(taskId, text) },
+  onTaskStarted: (taskId, mode) => { codeAgentFocus.set(taskId, mode === 'invisible' ? 'never' : 'automatic') },
+  onExecutionModeChanged: (taskId, mode) => {
+    codeAgentFocus.set(taskId, mode === 'invisible' ? 'never' : 'automatic')
+    if (mode === 'invisible') void omniComputerToolService.cleanupTask(taskId)
+  },
   onTaskFinished: (taskId) => { codeAgentFocus.delete(taskId) }
 })
 const activeWorkAgentRequests = new Map<string, { controller: AbortController; senderId: number }>()
@@ -422,19 +505,41 @@ async function confirmToolForSender(
   })
 }
 
-async function recordWorkAction(entry: Omit<WorkActionHistoryEntry, 'id'>, sender: Electron.WebContents): Promise<void> {
+function broadcastToMainWindow(channel: string, payload?: unknown): void {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return
+  mainWindow.webContents.send(channel, payload)
+}
+
+function broadcastOmni(channel: string, payload: unknown): void {
+  broadcastToMainWindow(channel, payload)
+  if (omniOverlayWindow && !omniOverlayWindow.isDestroyed() && !omniOverlayWindow.webContents.isDestroyed()) {
+    omniOverlayWindow.webContents.send(channel, payload)
+  }
+}
+
+async function recordWorkAction(entry: Omit<WorkActionHistoryEntry, 'id'>, sender?: Electron.WebContents): Promise<void> {
   try {
     const stored = await workActionHistory.add(entry)
-    if (!sender.isDestroyed()) sender.send('work:activity-changed', stored)
+    const target = sender && !sender.isDestroyed() ? sender : mainWindow?.webContents
+    if (target && !target.isDestroyed()) target.send('work:activity-changed', stored)
   } catch (error) {
     await diagnostics.failure('work:activity:add', error).catch(() => undefined)
   }
 }
 
-async function executeWorkTool(
-  event: Electron.IpcMainInvokeEvent,
-  request: ToolExecutionRequest,
+interface ConnectedToolExecutionOptions {
   signal?: AbortSignal
+  sender?: Electron.WebContents
+  approvalMode?: WorkApprovalMode
+  confirm(request: ToolConfirmationRequest, signal?: AbortSignal): Promise<boolean>
+  onDecision?(decision: ToolAuthorizationDecision): void
+  onProgress?(value: JsonValue): void
+  executionId?: string
+}
+
+async function executeConnectedTool(
+  request: ToolExecutionRequest,
+  options: ConnectedToolExecutionOptions
 ) {
   if (!request || request.mode !== 'work') throw new Error('Connected-app tools are available only in Work Mode.')
   const tool = workTools.list('work').find((candidate) => candidate.id === request.toolId)
@@ -442,7 +547,10 @@ async function executeWorkTool(
   const connector = (await workConnectors.list()).find((candidate) => candidate.id === tool.connectorId)
   if (!connector) throw new Error('The tool connector is not registered.')
   const permissionSettings = await workPermissionSettings.get()
-  const approvalMode = workPermissionSettings.effectiveMode(permissionSettings, connector.id)
+  const connectorApprovalMode = workPermissionSettings.effectiveMode(permissionSettings, connector.id)
+  const approvalMode = options.approvalMode
+    ? stricterApprovalMode(options.approvalMode, connectorApprovalMode)
+    : connectorApprovalMode
   const timestamp = Date.now()
   let decision: ToolAuthorizationDecision | undefined
   try {
@@ -454,10 +562,13 @@ async function executeWorkTool(
     const result = await workTools.execute(request, {
       accessLevel: connector.accessLevel,
       approvalMode,
-      confirm: (confirmation, confirmationSignal) => confirmWorkTool(event, confirmation, confirmationSignal),
-      signal,
-      onDecision: (value) => { decision = value }
-    }, { signal })
+      confirm: options.confirm,
+      signal: options.signal,
+      onDecision: (value) => {
+        decision = value
+        options.onDecision?.(value)
+      }
+    }, { signal: options.signal, executionId: options.executionId, onProgress: options.onProgress })
     await recordWorkAction({
       timestamp,
       completedAt: Date.now(),
@@ -471,11 +582,11 @@ async function executeWorkTool(
       approval: result.authorization.requiredApproval ? 'user-approved' : 'automatic',
       result: 'succeeded',
       summary: `${tool.name} completed successfully.`
-    }, event.sender)
+    }, options.sender)
     return result
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    const cancelled = signal?.aborted === true || /cancelled|canceled/iu.test(message)
+    const cancelled = options.signal?.aborted === true || /cancelled|canceled/iu.test(message)
     const blocked = !cancelled && (!decision || /blocked|read only|connect .* before|has not granted/iu.test(message))
     await recordWorkAction({
       timestamp,
@@ -490,9 +601,188 @@ async function executeWorkTool(
       approval: cancelled && decision?.requiredApproval ? 'user-cancelled' : blocked ? 'blocked' : decision?.requiredApproval ? 'user-approved' : 'automatic',
       result: cancelled ? 'cancelled' : blocked ? 'blocked' : 'failed',
       summary: `${tool.name} ${cancelled ? 'was cancelled before completion' : blocked ? 'was blocked by its safety or connection boundary' : 'failed'}.`
-    }, event.sender)
+    }, options.sender)
     throw error
   }
+}
+
+async function executeWorkTool(
+  event: Electron.IpcMainInvokeEvent,
+  request: ToolExecutionRequest,
+  signal?: AbortSignal
+) {
+  return executeConnectedTool(request, {
+    signal,
+    sender: event.sender,
+    confirm: (confirmation, confirmationSignal) => confirmWorkTool(event, confirmation, confirmationSignal)
+  })
+}
+
+async function confirmOmniTool(
+  _taskId: string,
+  request: ToolConfirmationRequest,
+  signal?: AbortSignal
+): Promise<boolean> {
+  if (signal?.aborted) return false
+  const sender = omniOverlayWindow?.isVisible()
+    ? omniOverlayWindow.webContents
+    : mainWindow?.webContents
+  if (!sender || sender.isDestroyed()) return false
+  const approval = await createWorkApprovalRequest(request)
+  if (signal?.aborted) return false
+  return nativeWorkConfirmation(sender, approval)
+}
+
+async function createOmniToolRouter(taskId: string): Promise<OmniToolRouter> {
+  const router = new OmniToolRouter()
+  for (const descriptor of codeTools.list('code').filter((tool) => tool.id !== 'agent.update-plan' && tool.connectorId !== 'code-browser')) {
+    router.register({
+      descriptor,
+      targetMode: 'code',
+      execute: (request, context) => codeTools.execute(request, {
+        accessLevel: 'trusted',
+        approvalMode: context.approvalMode,
+        confirm: context.confirm,
+        signal: context.signal,
+        onDecision: context.onDecision
+      }, {
+        signal: context.signal,
+        executionId: taskId,
+        onProgress: context.onProgress
+      })
+    })
+  }
+  for (const descriptor of omniBrowserTools.list('omni')) {
+    router.register({
+      descriptor,
+      targetMode: 'omni',
+      execute: (request, context) => omniBrowserTools.execute(request, {
+        accessLevel: 'trusted',
+        approvalMode: context.approvalMode,
+        confirm: context.confirm,
+        signal: context.signal,
+        onDecision: context.onDecision
+      }, {
+        signal: context.signal,
+        executionId: taskId,
+        onProgress: context.onProgress
+      })
+    })
+  }
+  for (const descriptor of omniComputerTools.list('omni')) {
+    router.register({
+      descriptor,
+      targetMode: 'omni',
+      executionModes: ['cursor'],
+      execute: (request, context) => omniComputerTools.execute(request, {
+        accessLevel: 'trusted',
+        approvalMode: context.approvalMode,
+        confirm: context.confirm,
+        signal: context.signal,
+        onDecision: context.onDecision
+      }, {
+        signal: context.signal,
+        executionId: taskId,
+        onProgress: context.onProgress
+      })
+    })
+  }
+  const connectorStatuses = new Map((await workConnectors.list(true)).map((connector) => [connector.id, connector]))
+  for (const descriptor of workTools.list('work').filter((tool) => {
+    if (tool.connectorId === 'browser') return false
+    const connector = connectorStatuses.get(tool.connectorId)
+    if (!connector || connector.status.state !== 'connected') return false
+    const grantedScopes = new Set(connector.status.grantedScopes)
+    return tool.requiredScopes.every((scope) => grantedScopes.has(scope))
+  })) {
+    router.register({
+      descriptor,
+      targetMode: 'work',
+      execute: (request, context) => executeConnectedTool(request, {
+        signal: context.signal,
+        approvalMode: context.approvalMode,
+        confirm: context.confirm,
+        onDecision: context.onDecision,
+        onProgress: context.onProgress,
+        executionId: taskId
+      })
+    })
+  }
+  return router
+}
+
+function omniSettingsUpdateFromRenderer(value: unknown, acknowledgeFullAccess: unknown): OmniSettingsUpdate {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Omni settings changes are invalid.')
+  const changes = value as OmniSettingsChanges
+  const update: OmniSettingsUpdate = {}
+  if (changes.enabled !== undefined) update.enabled = changes.enabled
+  if (changes.launchHelperAtLogin !== undefined) update.launchHelperAtLogin = changes.launchHelperAtLogin
+  if (changes.menuBarItem !== undefined) update.menuBarItem = changes.menuBarItem
+  if (changes.activation !== undefined) update.activation = changes.activation
+  if (changes.voice !== undefined) update.voice = changes.voice
+  if (changes.model !== undefined) update.model = changes.model
+  if (changes.executionMode !== undefined) update.executionMode = changes.executionMode
+  if (changes.approvalMode !== undefined) update.approvalMode = changes.approvalMode
+  if (changes.privacy !== undefined) update.privacy = changes.privacy
+  if (acknowledgeFullAccess === true) update.fullAccessWarningAcknowledged = true
+  return update
+}
+
+async function speakOmniResponse(taskId: string, text: string): Promise<void> {
+  try {
+    const [value, task] = await Promise.all([omniSettings.get(), omniController.get(taskId)])
+    if (!value.enabled || !value.voice.spokenResponses || task.status === 'stopped' || task.status === 'failed') return
+    await omniVoice.speak(text, {
+      rate: value.voice.speakingRate,
+      ...(value.voice.voiceId ? { voiceId: value.voice.voiceId } : {})
+    })
+  } catch (error) {
+    await diagnostics.failure('omni:voice:speak', error).catch(() => undefined)
+  }
+}
+
+function mediaPermissionState(kind: 'microphone' | 'screen'): OmniPermissionsSnapshot['permissions'][OmniPermissionId] {
+  if (process.platform !== 'darwin') return 'unavailable'
+  try {
+    const state = systemPreferences.getMediaAccessStatus(kind)
+    return state === 'granted' || state === 'denied' || state === 'restricted' || state === 'not-determined'
+      ? state
+      : 'unavailable'
+  } catch {
+    return 'unavailable'
+  }
+}
+
+function omniPermissionsSnapshot(): OmniPermissionsSnapshot {
+  let accessibility: OmniPermissionsSnapshot['permissions'][OmniPermissionId] = 'unavailable'
+  if (process.platform === 'darwin') {
+    try { accessibility = systemPreferences.isTrustedAccessibilityClient(false) ? 'granted' : 'not-determined' } catch { accessibility = 'unavailable' }
+  }
+  return {
+    checkedAt: Date.now(),
+    permissions: {
+      microphone: mediaPermissionState('microphone'),
+      'speech-recognition': 'unavailable',
+      accessibility,
+      'screen-recording': mediaPermissionState('screen'),
+      automation: process.platform === 'darwin' ? 'not-determined' : 'unavailable',
+      'files-and-folders': process.platform === 'darwin' ? 'not-determined' : 'unavailable'
+    }
+  }
+}
+
+async function openOmniPermissionSettings(permissionId: OmniPermissionId): Promise<void> {
+  const paneByPermission: Record<OmniPermissionId, string> = {
+    microphone: 'Privacy_Microphone',
+    'speech-recognition': 'Privacy_SpeechRecognition',
+    accessibility: 'Privacy_Accessibility',
+    'screen-recording': 'Privacy_ScreenCapture',
+    automation: 'Privacy_Automation',
+    'files-and-folders': 'Privacy_FilesAndFolders'
+  }
+  const pane = paneByPermission[permissionId]
+  if (!pane) throw new Error('Choose a supported macOS permission.')
+  await shell.openExternal(`x-apple.systempreferences:com.apple.preference.security?${pane}`)
 }
 
 function isGoogleConnector(id: string): boolean {
@@ -513,32 +803,46 @@ async function disconnectWorkConnector(id: string) {
   return connectors.find((connector) => connector.id === id)?.status ?? status
 }
 
-function isTrustedRendererUrl(value: string): boolean {
+function trustedRendererUrl(value: string, surface: 'main' | 'omni-overlay'): boolean {
   try {
     const candidate = new URL(value)
     if (process.env.ELECTRON_RENDERER_URL) {
       const development = new URL(process.env.ELECTRON_RENDERER_URL)
-      return candidate.origin === development.origin && candidate.pathname === development.pathname
+      const expected = surface === 'main'
+        ? development
+        : new URL('omni-overlay.html', development.href.endsWith('/') ? development.href : `${development.href}/`)
+      return candidate.origin === expected.origin && candidate.pathname === expected.pathname
     }
     if (candidate.protocol !== 'file:') return false
-    const rendererPath = path.resolve(__dirname, '../renderer/index.html')
+    const rendererPath = path.resolve(__dirname, `../renderer/${surface === 'main' ? 'index' : 'omni-overlay'}.html`)
     return path.resolve(decodeURIComponent(candidate.pathname)) === rendererPath
   } catch {
     return false
   }
 }
 
-function assertTrustedSender(event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent): void {
+function isTrustedRendererUrl(value: string): boolean {
+  return trustedRendererUrl(value, 'main')
+}
+
+const OMNI_OVERLAY_CHANNELS = new Set([
+  'omni:overlay:settings', 'omni:overlay:start', 'omni:overlay:pause', 'omni:overlay:resume',
+  'omni:overlay:stop', 'omni:overlay:get', 'omni:overlay:list', 'omni:overlay:hide', 'omni:overlay:open-main'
+])
+
+function assertTrustedSender(event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent, channel?: string): void {
   const senderFrame = event.senderFrame
-  if (
-    !mainWindow ||
-    event.sender !== mainWindow.webContents ||
-    !senderFrame ||
-    senderFrame !== event.sender.mainFrame ||
-    !isTrustedRendererUrl(senderFrame.url)
-  ) {
+  if (!senderFrame || senderFrame !== event.sender.mainFrame) {
     throw new Error('OmniCode blocked an IPC request from an untrusted page or frame.')
   }
+  if (mainWindow && event.sender === mainWindow.webContents && isTrustedRendererUrl(senderFrame.url)) return
+  if (
+    channel && OMNI_OVERLAY_CHANNELS.has(channel) && omniOverlayWindow &&
+    event.sender === omniOverlayWindow.webContents && trustedRendererUrl(senderFrame.url, 'omni-overlay')
+  ) {
+    return
+  }
+  throw new Error('OmniCode blocked an IPC request from an untrusted page or frame.')
 }
 
 function handle(
@@ -547,12 +851,164 @@ function handle(
 ): void {
   ipcMain.handle(channel, async (event, ...args) => {
     try {
-      assertTrustedSender(event)
+      assertTrustedSender(event, channel)
       return await listener(event, ...args)
     } catch (error) {
       await diagnostics.failure(channel, error).catch(() => undefined)
       throw error
     }
+  })
+}
+
+function omniTrayIcon(): Electron.NativeImage {
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18"><path fill="white" d="M2.2 9.9h2.1l1.2-4.3 2.2 8.1 2-10 1.8 7.2 1-3.1h3.3v2h-1.9l-2.6 5.6-1.4-5.5-2 7.1-2.5-6.7-.4 1.5H2.2z"/></svg>'
+  const icon = nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`)
+  icon.setTemplateImage(true)
+  return icon
+}
+
+function updateOmniTray(enabled: boolean): void {
+  if (!enabled) {
+    omniTray?.destroy()
+    omniTray = null
+    return
+  }
+  if (!omniTray) {
+    omniTray = new Tray(omniTrayIcon())
+    omniTray.setToolTip('Omni')
+    omniTray.on('click', () => { void showOmniOverlay('menu-bar') })
+  }
+  omniTray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Show Omni', click: () => { void showOmniOverlay('menu-bar') } },
+    { label: 'Open OmniCode', click: () => openMainForOmni() },
+    { type: 'separator' },
+    { label: 'Quit OmniCode', click: () => app.quit() }
+  ]))
+}
+
+async function applyOmniRuntimeSettings(value: OmniSettings): Promise<void> {
+  if (registeredOmniShortcut) {
+    globalShortcut.unregister(registeredOmniShortcut)
+    registeredOmniShortcut = null
+  }
+  if (value.enabled && value.activation.shortcut) {
+    try {
+      if (globalShortcut.register(value.activation.shortcut, () => { void showOmniOverlay('global-shortcut') })) {
+        registeredOmniShortcut = value.activation.shortcut
+      } else {
+        await diagnostics.failure('omni:shortcut', new Error(`The global shortcut ${value.activation.shortcut} is unavailable.`)).catch(() => undefined)
+      }
+    } catch (error) {
+      await diagnostics.failure('omni:shortcut', error).catch(() => undefined)
+    }
+  }
+  updateOmniTray(value.enabled && value.menuBarItem)
+  if (!value.enabled) omniOverlayWindow?.hide()
+  if (app.isPackaged) {
+    app.setLoginItemSettings(createOmniLoginItemSettings(value.enabled, value.launchHelperAtLogin))
+  }
+}
+
+function showMainWindow(): void {
+  if (app.dock && !app.dock.isVisible()) void app.dock.show()
+  if (!mainWindow || mainWindow.isDestroyed()) createWindow()
+  mainWindow?.show()
+  mainWindow?.focus()
+}
+
+function openMainForOmni(): void {
+  pendingOmniActivation = true
+  showMainWindow()
+  if (rendererReady) {
+    pendingOmniActivation = false
+    broadcastToMainWindow('app:command', 'activate-omni')
+  }
+  omniOverlayWindow?.hide()
+}
+
+function createOmniOverlayWindow(): BrowserWindow {
+  if (omniOverlayWindow && !omniOverlayWindow.isDestroyed()) return omniOverlayWindow
+  const overlay = new BrowserWindow({
+    width: 720,
+    height: 520,
+    minWidth: 620,
+    minHeight: 420,
+    maxWidth: 820,
+    maxHeight: 660,
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: true,
+    movable: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    fullscreenable: false,
+    hasShadow: true,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      preload: path.join(__dirname, '../preload/omni-overlay.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
+  })
+  omniOverlayWindow = overlay
+  overlay.setAlwaysOnTop(true, 'floating')
+  overlay.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  overlay.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  overlay.webContents.on('will-navigate', (event, url) => {
+    if (!trustedRendererUrl(url, 'omni-overlay')) event.preventDefault()
+  })
+  overlay.webContents.on('render-process-gone', (_event, details) => {
+    void diagnostics.failure('omni:overlay:process-gone', new Error(`${details.reason}; exit code ${details.exitCode}`)).catch(() => undefined)
+  })
+  if (process.env.ELECTRON_RENDERER_URL) {
+    const base = process.env.ELECTRON_RENDERER_URL.endsWith('/') ? process.env.ELECTRON_RENDERER_URL : `${process.env.ELECTRON_RENDERER_URL}/`
+    void overlay.loadURL(new URL('omni-overlay.html', base).toString())
+  } else {
+    void overlay.loadFile(path.join(__dirname, '../renderer/omni-overlay.html'))
+  }
+  overlay.on('closed', () => { if (omniOverlayWindow === overlay) omniOverlayWindow = null })
+  return overlay
+}
+
+async function showOmniOverlay(source: OmniStartRequest['activationSource']): Promise<void> {
+  const settingsValue = await omniSettings.get()
+  if (!settingsValue.enabled) {
+    openMainForOmni()
+    return
+  }
+  omniOverlayActivationSource = source
+  const overlay = createOmniOverlayWindow()
+  const workArea = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea
+  const [width] = overlay.getSize()
+  overlay.setPosition(Math.round(workArea.x + (workArea.width - width) / 2), workArea.y + 44, false)
+  if (overlay.webContents.isLoading()) overlay.webContents.once('did-finish-load', () => { overlay.show(); overlay.focus() })
+  else { overlay.show(); overlay.focus() }
+}
+
+async function requireOmniCursorReady(): Promise<void> {
+  const status = await omniCursor.permissions()
+  if (status.nativeHelper !== 'available') {
+    throw new Error('Omni Cursor Mode is unavailable because its signed native helper is missing. Reinstall OmniCode or rebuild the app.')
+  }
+  if (status.accessibility !== 'granted') {
+    throw new Error('Omni Cursor Mode requires Accessibility permission in System Settings.')
+  }
+}
+
+async function startOmniTask(input: unknown, activationSource: OmniStartRequest['activationSource']) {
+  const saved = await omniSettings.get()
+  if (!saved.enabled) throw new Error('Enable Omni before starting a system-assistant task.')
+  if (!saved.model.modelId.trim()) throw new Error('Choose an Omni model before starting a task.')
+  if (saved.executionMode === 'cursor') await requireOmniCursorReady()
+  return omniController.start({
+    provider: saved.model.provider,
+    model: saved.model.modelId,
+    input: typeof input === 'string' ? input : '',
+    activationSource,
+    executionMode: saved.executionMode,
+    approvalMode: saved.approvalMode
   })
 }
 
@@ -616,8 +1072,8 @@ function createWindow(): void {
     cancelWorkAgentRequests()
     cancelGitCloneRequests()
     cancelWorkApprovals()
-    terminals.shutdown()
-    if (!quitRequested) {
+    if (!omniController.hasActiveTask()) terminals.shutdown()
+    if (!quitRequested && !omniController.hasActiveTask()) {
       void server.stop()
       void fileSystem.unwatch()
     }
@@ -662,6 +1118,10 @@ function registerIpc(): void {
     rendererReady = true
     const pending = pendingOpenPaths.splice(0)
     for (const target of pending) mainWindow.webContents.send('app:command', 'open-path', target)
+    if (pendingOmniActivation) {
+      pendingOmniActivation = false
+      mainWindow.webContents.send('app:command', 'activate-omni')
+    }
     return pending.length
   })
   handle('app:close-window', (event) => {
@@ -1034,6 +1494,51 @@ function registerIpc(): void {
     return true
   })
 
+  handle('omni:settings:get', () => omniSettings.get())
+  handle('omni:settings:update', async (_event, changes: unknown, acknowledgeFullAccess?: boolean) => {
+    const updated = await omniSettings.update(omniSettingsUpdateFromRenderer(changes, acknowledgeFullAccess))
+    await applyOmniRuntimeSettings(updated)
+    await omniTasks.pruneExpired(updated.privacy.activityRetentionDays)
+    broadcastOmni('omni:settings-changed', updated)
+    return updated
+  })
+  handle('omni:task:start', (_event, request: OmniStartRequest) => startOmniTask(request?.input, 'main-window'))
+  handle('omni:task:pause', (_event, taskId: string) => omniController.pause(taskId))
+  handle('omni:task:resume', (_event, taskId: string) => omniController.resume(taskId))
+  handle('omni:task:stop', async (_event, taskId: string) => {
+    await omniVoice.stop()
+    return omniController.stop(taskId)
+  })
+  handle('omni:task:switch-execution', async (_event, taskId: string, mode: OmniExecutionMode) => {
+    if (mode === 'cursor') await requireOmniCursorReady()
+    return omniController.switchExecutionMode(taskId, mode)
+  })
+  handle('omni:task:modify-plan', (_event, taskId: string, instruction: string) => omniController.modifyPlan(taskId, instruction))
+  handle('omni:task:skip-step', (_event, taskId: string) => omniController.skipStep(taskId))
+  handle('omni:task:get', (_event, taskId: string) => omniController.get(taskId))
+  handle('omni:task:list', () => omniController.list())
+  handle('omni:task:clear-history', () => omniController.clearHistory())
+  handle('omni:activation:show-overlay', () => showOmniOverlay('main-window'))
+  handle('omni:permissions:status', () => omniPermissionsSnapshot())
+  handle('omni:permissions:open-settings', (_event, permissionId: OmniPermissionId) => openOmniPermissionSettings(permissionId))
+  handle('omni:voice:availability', () => omniVoice.availability())
+  handle('omni:voice:voices', () => omniVoice.voices())
+  handle('omni:voice:stop', () => omniVoice.stop())
+  handle('omni:cursor:status', () => omniCursor.permissions())
+
+  handle('omni:overlay:settings', () => omniSettings.get())
+  handle('omni:overlay:start', (_event, input: string) => startOmniTask(input, omniOverlayActivationSource))
+  handle('omni:overlay:pause', (_event, taskId: string) => omniController.pause(taskId))
+  handle('omni:overlay:resume', (_event, taskId: string) => omniController.resume(taskId))
+  handle('omni:overlay:stop', async (_event, taskId: string) => {
+    await omniVoice.stop()
+    return omniController.stop(taskId)
+  })
+  handle('omni:overlay:get', (_event, taskId: string) => omniController.get(taskId))
+  handle('omni:overlay:list', () => omniController.list())
+  handle('omni:overlay:hide', () => { omniOverlayWindow?.hide() })
+  handle('omni:overlay:open-main', () => { openMainForOmni() })
+
   handle('ai:ollama-status', () => ai.ollamaStatus())
   handle('ai:models', () => ai.models())
   handle('ai:model-catalog', (_event, query?: string) => ai.modelCatalog(query))
@@ -1133,23 +1638,32 @@ function registerIpc(): void {
   handle('settings:write', (_event, root: string, value) => settings.write(assertCurrentWorkspace(root), value))
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   if (!hasSingleInstanceLock) return
+  const backgroundLaunch = shouldStartOmniInBackground({
+    argumentsList: process.argv,
+    isPackaged: app.isPackaged,
+    wasOpenedAtLogin: process.platform === 'darwin' ? app.getLoginItemSettings().wasOpenedAtLogin : false
+  })
   app.setName('OmniCode')
+  if (backgroundLaunch) app.dock?.hide()
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
   session.defaultSession.setPermissionCheckHandler(() => false)
+  await omniTasks.recoverInterrupted().catch((error) => diagnostics.failure('omni:recovery', error))
+  const initialOmniSettings = await omniSettings.get()
+  await omniTasks.pruneExpired(initialOmniSettings.privacy.activityRetentionDays).catch((error) => diagnostics.failure('omni:retention', error))
   registerIpc()
-  createWindow()
+  if (!backgroundLaunch) createWindow()
+  void applyOmniRuntimeSettings(initialOmniSettings).catch((error) => diagnostics.failure('omni:startup', error))
   void diagnostics.lifecycle('ready', `OmniCode ${app.getVersion()} started on ${process.platform}/${process.arch}.`).catch(() => undefined)
   void openLaunchArguments(process.argv)
   installApplicationMenu(() => mainWindow)
-  app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
+  app.on('activate', () => showMainWindow())
 })
 
 app.on('second-instance', (_event, argv) => {
   void openLaunchArguments(argv)
-  mainWindow?.show()
-  mainWindow?.focus()
+  if (!shouldStartOmniInBackground({ argumentsList: argv, isPackaged: app.isPackaged })) showMainWindow()
 })
 
 app.on('open-file', (event, target) => {
@@ -1166,15 +1680,21 @@ app.on('will-quit', (event) => {
   if (finalCleanupStarted) return
   event.preventDefault()
   finalCleanupStarted = true
+  if (registeredOmniShortcut) globalShortcut.unregister(registeredOmniShortcut)
+  omniTray?.destroy()
+  omniTray = null
   ai.shutdown()
   runtimeInstaller.shutdown()
   terminals.shutdown()
   void Promise.allSettled([
+    omniController.stopAll(),
+    omniVoice.dispose(),
     server.stop(),
     fileSystem.unwatch(),
     workTransfers.clear(),
     workConnectors.disconnect('browser'),
     codeBrowserConnector.disconnect(),
+    omniBrowserConnector.disconnect(),
     diagnostics.lifecycle('shutdown', 'OmniCode completed its shutdown sequence.')
   ]).finally(() => app.exit(0))
 })

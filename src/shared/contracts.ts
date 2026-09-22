@@ -36,6 +36,19 @@ import type {
   CodeAgentTaskSummary,
   CodeAgentVisibility
 } from './code-agent-contracts'
+import type {
+  OmniEvent,
+  OmniExecutionMode,
+  OmniInstalledVoice,
+  OmniPermissionId,
+  OmniPermissionsSnapshot,
+  OmniSettings,
+  OmniStartRequest,
+  OmniTask,
+  OmniTaskSummary,
+  OmniVoiceAvailability
+} from './omni-contracts'
+import type { OmniCursorPermissionStatus } from './omni-cursor-contracts'
 
 export type ThemePreference = 'system' | 'dark' | 'light'
 
@@ -529,6 +542,77 @@ export interface WorkAPI {
   }
 }
 
+/** Renderer-safe settings changes. Full Access acknowledgement is a separate, explicit IPC argument. */
+export interface OmniSettingsChanges {
+  enabled?: boolean
+  launchHelperAtLogin?: boolean
+  menuBarItem?: boolean
+  activation?: Partial<OmniSettings['activation']>
+  voice?: Partial<OmniSettings['voice']>
+  model?: Partial<OmniSettings['model']>
+  executionMode?: OmniSettings['executionMode']
+  approvalMode?: OmniSettings['approvalMode']
+  privacy?: Partial<OmniSettings['privacy']>
+}
+
+export interface OmniAPI {
+  settings: {
+    get(): Promise<OmniSettings>
+    update(changes: OmniSettingsChanges, acknowledgeFullAccess?: boolean): Promise<OmniSettings>
+    onChanged(callback: (settings: OmniSettings) => void): () => void
+  }
+  tasks: {
+    start(request: OmniStartRequest): Promise<OmniTask>
+    pause(taskId: string): Promise<OmniTask>
+    resume(taskId: string): Promise<OmniTask>
+    stop(taskId: string): Promise<OmniTask>
+    switchExecutionMode(taskId: string, mode: OmniExecutionMode): Promise<OmniTask>
+    modifyPlan(taskId: string, instruction: string): Promise<OmniTask>
+    skipStep(taskId: string): Promise<OmniTask>
+    get(taskId: string): Promise<OmniTask>
+    list(): Promise<OmniTaskSummary[]>
+    clearHistory(): Promise<void>
+    onTaskChanged(callback: (task: OmniTaskSummary) => void): () => void
+    onEvent(callback: (event: OmniEvent) => void): () => void
+  }
+  activation: {
+    showOverlay(): Promise<void>
+  }
+  permissions: {
+    status(): Promise<OmniPermissionsSnapshot>
+    openSettings(permissionId: OmniPermissionId): Promise<void>
+  }
+  voice: {
+    availability(): Promise<OmniVoiceAvailability>
+    voices(): Promise<OmniInstalledVoice[]>
+    stop(): Promise<boolean>
+  }
+  cursor: {
+    status(): Promise<OmniCursorPermissionStatus>
+  }
+}
+
+/** Deliberately smaller API exposed to the global Omni overlay preload. */
+export interface OmniOverlayAPI {
+  settings: {
+    get(): Promise<OmniSettings>
+  }
+  tasks: {
+    start(input: string): Promise<OmniTask>
+    pause(taskId: string): Promise<OmniTask>
+    resume(taskId: string): Promise<OmniTask>
+    stop(taskId: string): Promise<OmniTask>
+    get(taskId: string): Promise<OmniTask>
+    list(): Promise<OmniTaskSummary[]>
+    onTaskChanged(callback: (task: OmniTaskSummary) => void): () => void
+    onEvent(callback: (event: OmniEvent) => void): () => void
+  }
+  activation: {
+    hide(): Promise<void>
+    openMainWindow(): Promise<void>
+  }
+}
+
 export interface OmniCodeAPI {
   workspace: WorkspaceAPI
   terminal: TerminalAPI
@@ -557,6 +641,7 @@ export interface OmniCodeAPI {
   }
   git: GitAPI
   work: WorkAPI
+  omni: OmniAPI
   ai: {
     ollamaStatus(): Promise<OllamaStatus>
     models(): Promise<AIModel[]>

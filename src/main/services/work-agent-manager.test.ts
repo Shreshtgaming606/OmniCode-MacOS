@@ -127,6 +127,32 @@ describe('WorkAgentManager', () => {
     expect(response.toolActivities[0]).not.toHaveProperty('result')
   })
 
+  it('redacts secrets from successful tool results before the next provider turn', async () => {
+    const toolTurn = vi.fn()
+      .mockResolvedValueOnce({ content: '', calls: [{ callId: 'secret-call', name: 'tool_0_browser_read', toolId: 'browser.read', input: {} }] })
+      .mockResolvedValueOnce({ content: 'The result was handled safely.', calls: [] })
+    const manager = new WorkAgentManager({ toolTurn } as unknown as AIManager)
+
+    await manager.chat({
+      provider: 'google', model: 'gemini-test', messages: [{ role: 'user', content: 'Read the page.' }]
+    }, [browserTool], async () => ({
+      toolId: 'browser.read', startedAt: '2026-01-01T00:00:00Z', completedAt: '2026-01-01T00:00:01Z',
+      result: {
+        body: 'Authorization: Bearer provider-secret-token-12345',
+        credentials: { value: 'nested-keychain-value' },
+        title: 'Useful title'
+      },
+      authorization: automaticAuthorization
+    }))
+
+    const modelMessages = toolTurn.mock.calls[1]?.[0].messages
+    const toolMessage = modelMessages.find((message: { role: string }) => message.role === 'tool')
+    expect(toolMessage?.content).toContain('Useful title')
+    expect(toolMessage?.content).toContain('[REDACTED_SECRET]')
+    expect(toolMessage?.content).not.toContain('provider-secret-token-12345')
+    expect(toolMessage?.content).not.toContain('nested-keychain-value')
+  })
+
   it('skips already-proposed actions when the user changes the course at an action boundary', async () => {
     const toolTurn = vi.fn()
       .mockResolvedValueOnce({ content: '', calls: [{ callId: 'stale-call', name: 'tool_0_browser_read', toolId: 'browser.read', input: {} }] })

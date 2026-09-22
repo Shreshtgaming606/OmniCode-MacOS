@@ -1,9 +1,96 @@
 # OmniCode Known Issues
 
-Last updated: 2026-09-15
+Last updated: 2026-09-21
 
 Resolved issues remain in this file with a resolution so audit history is not
 lost. Secrets, tokens, and authorization headers must never be included here.
+
+## OMI-049 — Omni Phase 1 scaffolding was not verified — Resolved
+
+- Severity: High for release readiness at discovery
+- Reproduction: Inspect the working tree after the clean 0.5.1 checkpoint and
+  attempt to treat the new Omni contracts, settings/task stores, or renderer
+  shell as a completed feature.
+- Expected: The third mode has validated contracts, private fail-closed
+  persistence, complete main/preload wiring, an honest usable shell, focused
+  tests, a full regression run, passing typecheck/build, and packaged evidence.
+- Actual: The initial source scaffolding had not yet crossed its integration and
+  regression gates.
+- Suspected cause: The first implementation pass began with contracts,
+  persistence, and presentation structure before integration gates.
+- Relevant files: `src/shared/omni-contracts.ts`,
+  `src/main/services/omni-settings-manager.ts`,
+  `src/main/services/omni-task-store.ts`,
+  `src/shared/work-contracts.ts`, `src/renderer/src/components/modes/`,
+  `src/renderer/src/components/omni/`.
+- Current status: ✅ Resolved — the controller, settings/task stores, router,
+  shared permission path, third-mode UI, restricted overlay, background launch,
+  TTS, native-Cursor foundation, and tool-result safety boundaries are wired.
+  The current complete serial run passed 66 files with 559 tests and one
+  intentionally skipped native-Keychain file/test; typecheck, the production
+  build, native helper, x64 package, and packaged readiness smoke pass. A built-app live smoke rendered all three modes, verified the
+  overlay boundary/global shortcut/TTS query, and confirmed missing-model
+  failure creates no false history. Final approval-display/terminal hardening
+  passed 16 focused tests plus typecheck; full-suite/build rerun, installer-
+  level, and configured-model task audits remain release gates, not unverified
+  scaffolding.
+
+## OMI-050 — Omni has no post-quit native activation helper
+
+- Severity: High for the promised voice-first system-assistant experience
+- Reproduction: Press `⌘⇧Space` while OmniCode is foreground, minimized, on
+  another Space, after its main window closes, or after the application quits.
+- Expected: A conflict-aware owner activates a compact accessible Omni overlay;
+  a separately enabled lightweight helper can activate the app after quit/login
+  without loading the editor or AI stack while idle.
+- Actual: Resident global shortcut registration, a restricted overlay, optional
+  tray, and packaged main-app login/background launch now exist. A built-app
+  smoke reopened the restricted overlay via real `⌘⇧Space` while another
+  application was foreground. Packaged login startup skips the main window and
+  hides the Dock. There is still no separately signed lightweight native helper
+  capable of owning activation after explicit `Command-Q`.
+- Suspected cause: Post-quit activation requires a new privileged native helper,
+  stable signed identity, and authenticated lifecycle/IPC rather than leaving
+  the full Electron application running after the user explicitly quits it.
+- Relevant files: `src/main/index.ts`,
+  `src/main/services/omni-background-launch.ts`,
+  `src/preload/omni-overlay.ts`,
+  `src/renderer/src/omni-overlay.tsx`,
+  `docs/development/OMNI_BACKGROUND_SERVICE.md`,
+  `docs/development/OMNI_ARCHITECTURE.md`.
+- Current status: 🟡 Partially resolved — resident activation, restricted
+  overlay, and main-app background login are implemented. Post-quit helper
+  claims remain blocked by helper implementation, Apple Developer ID signing,
+  notarization/stapling, stable identity, and matching Intel/Apple Silicon
+  execution tests. Packaged login/Space/closed-window/conflict testing also
+  remains.
+
+## OMI-051 — Omni voice input and local wake activation are unavailable
+
+- Severity: High for the promised voice-first interaction
+- Reproduction: Attempt to start listening, view a real partial/final
+  transcript, hear a response, interrupt speech, or enable local “Hey Omni.”
+- Expected: Native permission-aware STT/TTS works on demand; optional wake
+  detection runs locally in the lightweight helper with no pre-wake network
+  traffic and bounded measured resource use.
+- Actual: OmniCode now has real bounded macOS TTS using fixed `/usr/bin/say`,
+  installed voice discovery, safe rate/voice/text handling, Stop, cancellation,
+  and concurrency control. The serial baseline and built-app availability/voice-
+  list route passed. It still has no microphone capture, speech-recognition
+  provider, partial/final transcript, wake engine/model, or required signed
+  capturing helper/entitlements. Renderer media remains deny-by-default.
+- Suspected cause: Voice requires a native audio bridge and packaging work; a
+  wake feature also requires selecting, licensing, bundling, and measuring a
+  compatible local engine/model rather than adding a cosmetic setting.
+- Relevant files: `src/main/index.ts`, `package.json`,
+  `docs/development/OMNI_VOICE.md`,
+  `docs/development/OMNI_BACKGROUND_SERVICE.md`,
+  `docs/development/OMNI_SECURITY.md`.
+- Current status: 🟡 Partially resolved — speech output is implemented and
+  automated/live-query verified. Push-to-talk STT is not implemented. Wake
+  activation remains blocked until a licensed local engine/model and signed
+  both-architecture helper are implemented and verified; no Listening or Wake
+  Enabled success state may be shown in the meantime.
 
 ## OMI-048 — Code Agent lacked a structured visible course of action — Resolved
 
@@ -821,23 +908,34 @@ lost. Secrets, tokens, and authorization headers must never be included here.
   inspect/write/read workflow. A later 429 quota response remained an honest
   external account limit rather than being misreported as application success.
 
-## OMI-047 — Structured arbitrary macOS app control is unavailable
+## OMI-047 — Omni Cursor Mode is not yet release-complete
 
-- Severity: Medium; blocks only external-application interaction, not app launch
-- Reproduction: Ask Code Agent to observe an arbitrary external application and
-  click/type inside it after launch.
+- Severity: Medium; blocks release-ready general external-application control
+- Reproduction: Ask Code Agent or Omni to observe an arbitrary external
+  application and click/type inside it after launch.
 - Expected: A permission-aware native ComputerTool observes and interacts with
   only the approved application/session.
-- Actual: OmniCode can safely launch an allowlisted app or workspace document,
-  report Accessibility/Screen Recording state, and open the exact permission
-  pane, but reports structured computer control as `not-implemented`.
-- Suspected cause: Electron has no safe built-in macOS Accessibility controller;
-  a native AX bridge with explicit window/element scoping, capture lifecycle,
-  and independent security review is required.
+- Actual: OmniCode now has a fixed Swift helper and task-owned tools for bounded
+  pointer observation/move/click/scroll/text/key input and fixed-app focus. The
+  helper and Accessibility gate work, both architectures compile, and live
+  read-only observation passes. Semantic AX/screen element discovery, secure-
+  field classification, an always-available emergency-stop chord, signed
+  packaged TCC identity, and live input E2E are still absent.
+- Suspected cause: The initial safe foundation deliberately excludes broad
+  screen capture and semantic AX control until their privacy, targeting,
+  emergency-stop, and packaged-permission boundaries are implemented.
 - Relevant files: `src/main/services/code-application-manager.ts`,
   `src/main/services/code-agent-tool-service.ts`,
-  `src/main/services/agent-command-policy.ts`.
-- Current status: 🔵 Blocked / External Requirement — unrestricted AppleScript,
-  `osascript`, screen capture, and shell automation remain blocked. Implementing
-  a trustworthy native ComputerTool is a separate audited platform integration;
-  OmniCode does not present launch-only behavior as full UI control.
+  `src/main/services/agent-command-policy.ts`,
+  `src/main/services/omni-cursor-service.ts`,
+  `src/main/services/omni-computer-tool-service.ts`,
+  `native/omni-cursor-helper/main.swift`,
+  `docs/development/OMNI_CURSOR_MODE.md`,
+  `docs/development/OMNI_SECURITY.md`.
+- Current status: 🟡 Partially resolved — the narrow CGEvent foundation,
+  authorization, secret scan, task/session cancellation, and takeover pause are
+  implemented and regression-tested. Unrestricted AppleScript, screenshots,
+  and shell automation remain blocked. General release still requires semantic
+  AX/screen targeting, secure-field blocks, native emergency stop, live safe-
+  app input verification, signed/notarized nested code, and matching Intel and
+  Apple Silicon runtime tests.

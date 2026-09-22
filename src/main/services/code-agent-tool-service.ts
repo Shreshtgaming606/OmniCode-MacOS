@@ -189,10 +189,10 @@ export class CodeAgentToolService {
       }
     })
 
-    const terminalBase = { action: 'write' as const, category: 'system' as const, risk: 'high' as const, reversible: false, externalSideEffect: false, confirmation: 'policy' as const, requiredScopes: [] }
+    const terminalBase = { action: 'write' as const, category: 'system' as const, risk: 'high' as const, reversible: false, externalSideEffect: false, confirmation: 'always' as const, requiredScopes: [] }
     entries.push({
       descriptor: {
-        ...base('terminal.run', 'Run terminal command', 'Run one reviewed command in a real login-shell PTY and wait for its exit.', 'terminal'), ...terminalBase,
+        ...base('terminal.run', 'Run terminal command', 'Run one directly approved command in a real PTY with a credential-stripped toolchain environment and wait for its exit.', 'terminal'), ...terminalBase,
         inputSchema: { type: 'object', properties: { command: { type: 'string', minLength: 1, maxLength: 2_000 }, reason: { type: 'string', minLength: 1, maxLength: 1_000 } }, required: ['command', 'reason'], additionalProperties: false }, timeoutMs: 120_000, maxResultBytes: 256 * 1024
       },
       execute: async (input, context) => {
@@ -226,7 +226,7 @@ export class CodeAgentToolService {
     })
     entries.push({
       descriptor: {
-        ...base('terminal.start', 'Start terminal command', 'Start a long-running command in a task-owned login-shell PTY.', 'terminal'), ...terminalBase,
+        ...base('terminal.start', 'Start terminal command', 'Start a directly approved long-running command in a task-owned PTY with a credential-stripped toolchain environment.', 'terminal'), ...terminalBase,
         inputSchema: { type: 'object', properties: { command: { type: 'string', minLength: 1, maxLength: 2_000 }, reason: { type: 'string', minLength: 1, maxLength: 1_000 } }, required: ['command', 'reason'], additionalProperties: false }
       },
       execute: async (input, context) => {
@@ -375,11 +375,14 @@ export class CodeAgentToolService {
           action: 'write', category: 'system', risk: 'medium', reversible: true, externalSideEffect: false, confirmation: 'policy', requiredScopes: [],
           inputSchema: { type: 'object', properties: { application: { type: 'string', enum: ['safari', 'chrome', 'finder', 'terminal', 'simulator', 'xcode', 'preview', 'textedit'] }, path: { type: 'string', maxLength: 1_024 } }, required: ['application'], additionalProperties: false }
         },
-        execute: async (input, context) => this.options.applications?.launch(
-          String(input.application), workspace(),
-          typeof input.path === 'string' && input.path ? relativeInput(input.path) : undefined,
-          this.options.focusBehavior?.(owner(context)) === 'never'
-        ) as unknown as JsonValue
+        execute: async (input, context) => {
+          const relativeTarget = typeof input.path === 'string' && input.path ? relativeInput(input.path) : undefined
+          return this.options.applications?.launch(
+            String(input.application), relativeTarget ? workspace() : '',
+            relativeTarget,
+            this.options.focusBehavior?.(owner(context)) === 'never'
+          ) as unknown as JsonValue
+        }
       })
       entries.push({
         descriptor: {

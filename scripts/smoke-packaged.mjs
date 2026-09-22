@@ -108,6 +108,11 @@ await waitFor(`document.querySelector('.app-shell') && window.omnicode`)
 
 const workspaceLiteral = JSON.stringify(workspace)
 await waitFor(`document.querySelector('.workbench')`)
+const recentBeforeOpen = await evaluate(`return await window.omnicode.workspace.recentWorkspaces()`)
+if (!recentBeforeOpen.includes(workspace)) {
+  throw new Error('The smoke workspace is not authorized. Launch the packaged app with the workspace path as an argument before running this script.')
+}
+await evaluate(`return await window.omnicode.workspace.reopenWorkspace(${workspaceLiteral})`)
 await waitFor(`await window.omnicode.workspace.readTree(${workspaceLiteral}).then(() => true).catch(() => false)`)
 const appResult = await evaluate(`
   const workspace = ${workspaceLiteral}
@@ -172,6 +177,39 @@ if (serverResult.publicStatus !== 200 || serverResult.gitStatus !== 403 || serve
   throw new Error(`Static-server boundary smoke test failed: ${JSON.stringify(serverResult)}`)
 }
 
+const omniNative = await evaluate(`
+  const [cursor, voice] = await Promise.all([
+    window.omnicode.omni.cursor.status(),
+    window.omnicode.omni.voice.availability()
+  ])
+  return { cursor, voice }
+`)
+if (omniNative.cursor.nativeHelper !== 'available') {
+  throw new Error(`The packaged Omni cursor helper is unavailable: ${JSON.stringify(omniNative.cursor)}`)
+}
+
+await evaluate(`
+  localStorage.setItem('omnicode.appMode', 'omni')
+  return true
+`)
+await call('Page.reload', { ignoreCache: true })
+await waitFor(`document.querySelector('.omni-mode[data-active="true"]') && window.omnicode`)
+await waitFor(`!document.querySelector('.omni-mode[data-active="true"]')?.textContent?.includes('Connecting to the Omni controller')`, 30_000)
+const omniUI = await evaluate(`
+  const root = document.querySelector('.omni-mode[data-active="true"]')
+  const cursorOption = root?.querySelector('select option[value="cursor"]')
+  return {
+    visible: Boolean(root),
+    text: root?.textContent ?? '',
+    cursorDisabled: cursorOption instanceof HTMLOptionElement ? cursorOption.disabled : null
+  }
+`)
+const cursorExpectedReady = omniNative.cursor.accessibility === 'granted'
+if (!omniUI.visible || omniUI.cursorDisabled !== !cursorExpectedReady ||
+    !omniUI.text.includes(cursorExpectedReady ? 'Structured cursor ready' : 'Native cursor unavailable')) {
+  throw new Error(`Omni Cursor readiness UI is inaccurate: ${JSON.stringify({ omniNative, omniUI })}`)
+}
+
 if (screenshotPath) {
   const screenshot = await call('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false })
   await fs.writeFile(screenshotPath, Buffer.from(screenshot.data, 'base64'))
@@ -196,6 +234,12 @@ console.log(JSON.stringify({
   workspace: appResult,
   terminal: terminalResult,
   staticServer: serverResult,
+  omni: {
+    cursor: omniNative.cursor,
+    voiceAvailable: omniNative.voice.available,
+    uiVisible: omniUI.visible,
+    cursorOptionDisabled: omniUI.cursorDisabled
+  },
   navigationBlocked: true,
   screenshotPath,
   runtimeErrors: unexpectedErrors

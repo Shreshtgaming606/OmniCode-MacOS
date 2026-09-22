@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
+import os from 'node:os'
 import { EventEmitter } from 'node:events'
 import * as pty from 'node-pty'
 import type { TerminalDataEvent, TerminalExitEvent, TerminalSessionInfo } from '../../shared/contracts'
@@ -33,6 +34,43 @@ interface ManagedAgentTerminal extends AgentTerminalSnapshot {
 const AGENT_OUTPUT_LIMIT = 64 * 1024
 const AGENT_SESSION_LIMIT = 64
 const SENSITIVE_PROMPT = /(?:password|passphrase|private\s+key|access\s+token|api[_ -]?key|secret)\s*[:?]\s*$/iu
+const AGENT_ENVIRONMENT_ALLOWLIST = new Set([
+  'HOME', 'USER', 'LOGNAME', 'SHELL', 'PATH', 'TMPDIR', 'LANG',
+  'JAVA_HOME', 'JDK_HOME', 'GOPATH', 'GOROOT', 'CARGO_HOME', 'RUSTUP_HOME',
+  'NVM_DIR', 'NODE_PATH', 'PYENV_ROOT', 'RBENV_ROOT', 'GEM_HOME', 'GEM_PATH',
+  'ANDROID_HOME', 'ANDROID_SDK_ROOT', 'SDKROOT', 'DEVELOPER_DIR',
+  'CPATH', 'LIBRARY_PATH', 'PKG_CONFIG_PATH'
+])
+
+/**
+ * Agent commands need the user's real toolchain PATH, but must not inherit
+ * cloud credentials, auth sockets, or arbitrary login-shell exports. Keep a
+ * deliberately small build-tool environment and launch the shell without rc
+ * files. This is defense in depth; terminal tools still require a direct,
+ * non-bypassable confirmation before execution.
+ */
+export function sanitizeAgentEnvironment(environment: NodeJS.ProcessEnv): Record<string, string> {
+  const sanitized: Record<string, string> = {}
+  for (const [name, value] of Object.entries(environment)) {
+    if (typeof value !== 'string') continue
+    if (!AGENT_ENVIRONMENT_ALLOWLIST.has(name) && !name.startsWith('LC_')) continue
+    sanitized[name] = value
+  }
+  sanitized.PATH ||= '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin'
+  sanitized.HOME ||= os.homedir()
+  sanitized.TERM = 'xterm-256color'
+  sanitized.COLORTERM = 'truecolor'
+  sanitized.TERM_PROGRAM = 'OmniCode-Agent'
+  return sanitized
+}
+
+export function agentShellArguments(shell: string, command: string): string[] {
+  const name = path.basename(shell)
+  if (name === 'zsh') return ['-f', '-c', command]
+  if (name === 'bash') return ['--noprofile', '--norc', '-c', command]
+  if (name === 'fish') return ['--no-config', '-c', command]
+  return ['-c', command]
+}
 
 function boundedOutput(previous: string, next: string): string {
   const combined = `${previous}${next}`
@@ -106,13 +144,8 @@ export class TerminalManager extends EventEmitter {
     if (!existsSync(cwd)) throw new Error('The terminal working directory no longer exists.')
     const shells = await this.listShells()
     const shell = shells.find((candidate) => path.basename(candidate) === 'zsh') ?? shells[0] ?? '/bin/zsh'
-    const processEnvironment = Object.fromEntries(
-      Object.entries(await resolveShellEnvironment()).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
-    )
-    processEnvironment.TERM = 'xterm-256color'
-    processEnvironment.COLORTERM = 'truecolor'
-    processEnvironment.TERM_PROGRAM = 'OmniCode-Agent'
-    const args = ['-l', '-c', options.command.trim()]
+    const processEnvironment = sanitizeAgentEnvironment(await resolveShellEnvironment())
+    const args = agentShellArguments(shell, options.command.trim())
     const terminalProcess = pty.spawn(shell, args, {
       name: 'xterm-256color', cols: 120, rows: 40, cwd, env: processEnvironment
     })

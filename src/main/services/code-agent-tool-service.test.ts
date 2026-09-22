@@ -106,9 +106,11 @@ describe('CodeAgentToolService', () => {
 
   it('runs real-command plumbing only after policy validation and keeps PTYs task-owned', async () => {
     const value = await setup()
+    const confirm = vi.fn(async () => true)
     await expect(value.registry.execute({
       toolId: 'terminal.run', mode: 'code', input: { command: 'npm test', reason: 'Verify changes.' }
-    }, full, { executionId: 'task-a' })).resolves.toMatchObject({ result: { status: 'exited', exitCode: 0 } })
+    }, { ...full, confirm }, { executionId: 'task-a' })).resolves.toMatchObject({ result: { status: 'exited', exitCode: 0 } })
+    expect(confirm).toHaveBeenCalledOnce()
     expect(value.terminals.startAgentCommand).toHaveBeenCalledWith(expect.objectContaining({ ownerId: 'task-a', command: 'npm test' }))
     await expect(value.registry.execute({
       toolId: 'terminal.run', mode: 'code', input: { command: 'printenv', reason: 'Find secrets.' }

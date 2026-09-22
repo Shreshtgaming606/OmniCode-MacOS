@@ -28,6 +28,10 @@ describe('stored renderer preferences', () => {
     expect(storedModelName(values)).toBe('gemini-3.5-flash')
   })
 
+  it('accepts Omni as a stored application mode', () => {
+    expect(storedAppMode(storage({ 'omnicode.appMode': 'omni' }))).toBe('omni')
+  })
+
   it('falls back for absent, corrupt, multiline, and oversized values', () => {
     expect(storedTheme(storage({ 'omnicode.theme': 'sepia' }))).toBe('system')
     expect(storedAppMode(storage({ 'omnicode.appMode': 'future' }))).toBe('code')

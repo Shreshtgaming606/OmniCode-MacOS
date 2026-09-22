@@ -23,6 +23,14 @@ const APPROVAL_MODES = new Set<WorkApprovalMode>(['ask', 'auto', 'full'])
 const RISK_ORDER: ToolRiskLevel[] = ['low', 'medium', 'high', 'critical']
 const CREDENTIAL_FIELD = /(?:password|passcode|secret|token|authorization|credential|private[_-]?key)/iu
 
+const APPROVAL_STRICTNESS: Record<WorkApprovalMode, number> = { ask: 0, auto: 1, full: 2 }
+
+/** Returns the policy that grants no more authority than either input policy. */
+export function stricterApprovalMode(left: WorkApprovalMode, right: WorkApprovalMode): WorkApprovalMode {
+  if (!APPROVAL_MODES.has(left) || !APPROVAL_MODES.has(right)) throw new Error('The approval policy is invalid.')
+  return APPROVAL_STRICTNESS[left] <= APPROVAL_STRICTNESS[right] ? left : right
+}
+
 function confirmationSummary(tool: ToolDescriptor): string {
   if (tool.category === 'communication') return `${tool.name} will communicate with people outside this chat.`
   if (tool.category === 'financial') return `${tool.name} can cause a purchase, payment, or financial transfer.`

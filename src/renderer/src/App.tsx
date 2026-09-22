@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Editor, { DiffEditor, type OnMount } from '@monaco-editor/react'
 import type { CancellationToken, Position, editor, languages } from 'monaco-editor'
 import {
-  Bot, Bug, ChevronDown, CircleAlert, CircleDot, Code2, Command, Cpu, FileCode2, Files,
+  AudioWaveform, Bot, Bug, ChevronDown, CircleAlert, CircleDot, Code2, Command, Cpu, FileCode2, Files,
   GitBranch, Menu, PanelBottom, Play, Plus, Save, Search, Settings, Sparkles, TerminalSquare,
   X, Boxes, FolderOpen, GitFork, Server, CheckCircle2, LoaderCircle, Info, TriangleAlert
 } from 'lucide-react'
@@ -21,6 +21,7 @@ import { SourceControlView } from './components/SourceControlView'
 import { TerminalPanel, type TerminalRunRequest } from './components/TerminalPanel'
 import { ToolsView } from './components/ToolsView'
 import { ModeSwitcher } from './components/modes/ModeSwitcher'
+import { OmniMode } from './components/omni/OmniMode'
 import { WorkMode } from './components/work/WorkMode'
 import { fileName, flattenFiles, languageDefinitionForPath, languageForPath } from './lib/languages'
 import { storedAgentPermission, storedAIProvider, storedAppMode, storedModelName, storedTheme } from './lib/preferences'
@@ -96,6 +97,19 @@ function ToastNotice({ toast, onClose }: { toast: ToastState; onClose(): void })
     <span><strong>{label}</strong><small>{toast.message}</small></span>
     <button type="button" title="Dismiss notification" aria-label="Dismiss notification" onClick={onClose}><X /></button>
   </div>
+}
+
+const MODE_TITLEBAR: Record<Exclude<AppMode, 'code'>, {
+  description: string
+  icon: typeof Sparkles
+}> = {
+  work: { description: 'Conversations, cloud models, and connected apps', icon: Sparkles },
+  omni: { description: 'Voice-first tasks and system assistance', icon: AudioWaveform }
+}
+
+function ModeTitlebarLabel({ mode }: { mode: Exclude<AppMode, 'code'> }) {
+  const { description, icon: Icon } = MODE_TITLEBAR[mode]
+  return <div className={`mode-titlebar-label ${mode}`}><Icon /><span>{description}</span></div>
 }
 
 export function App() {
@@ -858,6 +872,7 @@ export function App() {
       'run-current': () => void runCurrent(), 'server-start': () => void startServer(), 'server-restart': () => void startServer(true),
       'server-stop': () => void window.omnicode.server.stop(), 'inline-ai': handleInlineAI,
       'index-workspace': () => workspacePath && void window.omnicode.ai.index(workspacePath), 'editor-find': () => editorRef.current?.trigger('menu', 'actions.find', null),
+      'activate-omni': () => changeAppMode('omni'),
       'editor-undo': () => {
         const active = document.activeElement
         if (active?.closest('.monaco-editor')) void editorRef.current?.getModel()?.undo()
@@ -925,7 +940,7 @@ export function App() {
       }
     }).catch(reportError)
     return unsubscribe
-  }, [workspacePath, runCurrent, startServer, saveDocument, saveAs, closeDocument, selectNativeFile, openWorkspace, openGrantedPath, handleInlineAI, reportError, showOnboarding])
+  }, [workspacePath, runCurrent, startServer, saveDocument, saveAs, closeDocument, selectNativeFile, openWorkspace, openGrantedPath, handleInlineAI, reportError, showOnboarding, changeAppMode])
 
   const startResize = (kind: 'sidebar' | 'ai' | 'panel', event: React.PointerEvent): void => {
     event.preventDefault()
@@ -965,7 +980,7 @@ export function App() {
         <button className="run-button" disabled={!activeDocument || !workspacePath || !activeLanguage?.runnableOnMacOS} title={!workspacePath && activeDocument ? 'Open the containing folder as a workspace before running this file.' : activeLanguage && !activeLanguage.runnableOnMacOS ? `${activeLanguage.displayName} files are editable but do not have a native macOS run action.` : 'Run current file or project'} onClick={() => void runCurrent()}><Play /><span>Run</span></button>
         <button className="run-menu" title="Run configurations" onClick={() => { setActivity('run'); setSidebarVisible(true) }}><ChevronDown /></button>
         <div className="titlebar-layout"><button className={sidebarVisible ? 'active' : ''} title="Primary sidebar" onClick={() => setSidebarVisible((value) => !value)}><Files /></button><button className={panelVisible ? 'active' : ''} title="Bottom panel" onClick={() => setPanelVisible((value) => !value)}><PanelBottom /></button><button className={aiVisible ? 'active' : ''} title="AI sidebar" onClick={() => setAiVisible((value) => !value)}><Sparkles /></button></div>
-      </> : <div className="work-titlebar-label"><Sparkles /><span>Conversations, cloud models, and connected apps</span></div>}
+      </> : <ModeTitlebarLabel mode={appMode} />}
     </header>
     <div className="mode-content">
     <div className={`code-mode-host${appMode === 'code' ? '' : ' mode-hidden'}`} aria-hidden={appMode !== 'code'}>
@@ -1021,6 +1036,7 @@ export function App() {
     <footer className="status-bar"><button title="Git branch"><GitBranch />{gitStatus?.isRepository ? gitStatus.branch : 'No Git'}</button><button onClick={() => { setPanelVisible(true); setPanelTab('problems') }}><CircleAlert />{problems.length}</button><span className="status-spacer" /><button title={serverState.running ? 'Open local server (stop it from the Run menu)' : 'Open Run view'} onClick={() => serverState.running && serverState.url ? void window.omnicode.server.open() : (setActivity('run'), setSidebarVisible(true))}>{serverState.running ? <><Server className="server-on" /> {serverState.name ?? 'Running'}{serverState.port ? ` :${serverState.port}` : ''}</> : <><Server /> Server off</>}</button>{activeRuntime && <button title={activeRuntime.installed ? `${activeRuntime.path ?? activeRuntime.command}${activeRuntime.version ? ` · ${activeRuntime.version}` : ''}` : activeRuntime.guidance} onClick={() => { setActivity('tools'); setSidebarVisible(true) }}><Boxes />{activeRuntime.name}: {activeRuntime.installed ? 'Ready' : 'Missing'}</button>}<span title={aiAutocomplete ? `${autocompleteProvider}: ${autocompleteModel || 'automatic local model'}` : 'AI autocomplete is disabled'}><Sparkles /> {aiAutocomplete ? 'Autocomplete on' : 'Autocomplete off'}</span><span><Cpu /> {ollamaState.status === 'ready' ? 'Local AI' : 'AI optional'}</span><span>UTF-8</span><span>Ln {cursor.line}, Col {cursor.column}</span><span>{activeLanguage?.displayName ?? 'Plain Text'}</span></footer>
     </div>
     <div className={`work-mode-host${appMode === 'work' ? '' : ' mode-hidden'}`} aria-hidden={appMode !== 'work'}><WorkMode active={appMode === 'work'} onOpenSettings={() => setShowSettings(true)} onError={reportError} onRequireAttention={() => changeAppMode('work')} requestText={requestTextInput} /></div>
+    <div className={`omni-mode-host${appMode === 'omni' ? '' : ' mode-hidden'}`} aria-hidden={appMode !== 'omni'}><OmniMode active={appMode === 'omni'} /></div>
     </div>
     {palette && <div className="palette-backdrop" onMouseDown={() => setPalette(null)}><div className="palette" onMouseDown={(event) => event.stopPropagation()}><div><Command /><input autoFocus value={paletteQuery} onChange={(event) => setPaletteQuery(event.target.value)} placeholder={palette === 'commands' ? 'Type a command' : 'Search files by name'} /></div><div className="palette-results">{palette === 'commands' ? commands.filter(([label]) => label.toLowerCase().includes(paletteQuery.toLowerCase())).map(([label, action]) => <button key={label} onClick={() => { setPalette(null); action() }}><Command /><span>{label}</span></button>) : allFiles.filter((file) => file.path.toLowerCase().includes(paletteQuery.toLowerCase())).slice(0, 100).map((file) => <button key={file.path} onClick={() => { setPalette(null); void openFile(file.path) }}><FileCode2 /><span><strong>{file.name}</strong><small>{file.path.replace(`${workspacePath}/`, '')}</small></span></button>)}</div></div></div>}
     {cloneProgress && <div className="modal-backdrop clone-progress-backdrop"><section className="clone-progress-dialog" role="dialog" aria-modal="true" aria-label="Repository clone progress">

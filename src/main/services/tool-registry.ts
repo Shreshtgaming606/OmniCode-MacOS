@@ -85,7 +85,7 @@ function validateDescriptor(descriptor: ToolDescriptor): ToolDescriptor {
   if (!TOOL_ID_PATTERN.test(descriptor.id)) throw new Error('Tool IDs must use connector.action form.')
   if (!CONNECTOR_ID_PATTERN.test(descriptor.connectorId)) throw new Error('Connector IDs contain unsupported characters.')
   if (!descriptor.name.trim() || !descriptor.description.trim()) throw new Error('Tool name and description are required.')
-  if (!descriptor.modes.length || descriptor.modes.some((mode) => mode !== 'code' && mode !== 'work')) throw new Error('Tool modes are invalid.')
+  if (!descriptor.modes.length || descriptor.modes.some((mode) => mode !== 'code' && mode !== 'work' && mode !== 'omni')) throw new Error('Tool modes are invalid.')
   if (!['read', 'write', 'destructive', 'sensitive'].includes(descriptor.action)) throw new Error('Tool action classification is invalid.')
   if (!['read', 'write', 'communication', 'destructive', 'external-submission', 'system', 'financial', 'account-security', 'sensitive-data'].includes(descriptor.category)) {
     throw new Error('Tool action category is invalid.')
@@ -115,7 +115,7 @@ export class ToolRegistry {
   }
 
   list(mode: ToolExecutionRequest['mode'], connectorId?: string): ToolDescriptor[] {
-    if (mode !== 'code' && mode !== 'work') throw new Error('Choose a supported OmniCode mode.')
+    if (mode !== 'code' && mode !== 'work' && mode !== 'omni') throw new Error('Choose a supported OmniCode mode.')
     return [...this.#tools.values()]
       .map((entry) => entry.descriptor)
       .filter((tool) => tool.modes.includes(mode) && (!connectorId || tool.connectorId === connectorId))

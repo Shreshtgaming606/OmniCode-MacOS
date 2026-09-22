@@ -18,7 +18,7 @@ export function storedTheme(storage: Pick<Storage, 'getItem'>): ThemePreference 
 }
 
 export function storedAppMode(storage: Pick<Storage, 'getItem'>): AppMode {
-  return storedEnum(storage, 'omnicode.appMode', ['code', 'work'], 'code')
+  return storedEnum(storage, 'omnicode.appMode', ['code', 'work', 'omni'], 'code')
 }
 
 export function storedAgentPermission(storage: Pick<Storage, 'getItem'>): AgentPermission {

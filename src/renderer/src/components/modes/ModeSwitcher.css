@@ -20,7 +20,7 @@
   top: 3px;
   bottom: 3px;
   left: 3px;
-  width: calc((100% - 9px) / 2);
+  width: calc((100% - 12px) / 3);
   border: 1px solid color-mix(in srgb, var(--border-strong) 72%, transparent);
   border-radius: var(--radius-sm);
   background: var(--bg-raised);
@@ -31,6 +31,10 @@
 
 .mode-switcher[data-active-mode='work']::before {
   transform: translateX(calc(100% + 3px));
+}
+
+.mode-switcher[data-active-mode='omni']::before {
+  transform: translateX(calc(200% + 6px));
 }
 
 .mode-switcher button {

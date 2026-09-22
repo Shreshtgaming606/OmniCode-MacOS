@@ -1,6 +1,6 @@
 # OmniCode Stabilization Status
 
-Last updated: 2026-09-15
+Last updated: 2026-09-21
 
 Status legend:
 
@@ -22,6 +22,10 @@ surface alone is not evidence that its backing operation works.
 - Git: `master` had no commits at audit start. Stabilization checkpoint
   `28bb077` preserves the verified 0.1.1 state; Work Mode continues on
   `codex/work-mode`. No user changes were discarded.
+- Omni expansion baseline: commit `399e4f0` (`Add visible Code Agent planning`)
+  was a clean, recoverable 0.5.1 checkpoint before Omni design and Phase 1
+  work began. The current Omni files are active in-progress work and are not
+  part of that verified baseline; no existing user changes were discarded.
 - Baseline launch: packaged Intel app started on macOS Sonoma without a white
   screen or captured renderer exception. Setup, workspace IPC, real zsh PTY,
   localhost server, and remote-navigation blocking passed the existing smoke.
@@ -57,12 +61,70 @@ surface alone is not evidence that its backing operation works.
   checksum verification. The Intel package ran the smokes; arm64 execution still
   requires matching Apple Silicon hardware.
 
+- Current Omni verification: the complete serial run passed 66 test files with
+  559 tests passed and one intentionally skipped native-Keychain file/test.
+  TypeScript checking and the complete multi-entry production build passed,
+  including the dedicated `omni-overlay.cjs` preload and
+  `omni-overlay.html` renderer. A built-app live smoke rendered the
+  Code/Work/Omni selector, enabled Omni, opened the restricted overlay, verified
+  that `window.omnicode` is absent there while only `window.omniOverlay`
+  settings/tasks/activation groups exist, reopened it with real `⌘⇧Space`
+  while another app was foreground, queried real TTS availability and the
+  installed macOS voice list, and verified a missing selected model fails
+  clearly without creating task history. Approval-display, agent-terminal,
+  model-result, browser-isolation, and native-Cursor hardening pass the complete
+  serial suite, typecheck, 3,121-module production build, x86_64 native-helper
+  build, x64 directory package, and packaged core/Omni readiness smoke. A packaged installer-
+  level Omni audit remains required before release readiness.
+
+## Omni implementation status
+
+The five Omni records (`OMNI_ARCHITECTURE.md`,
+`OMNI_BACKGROUND_SERVICE.md`, `OMNI_CURSOR_MODE.md`, `OMNI_SECURITY.md`, and
+`OMNI_VOICE.md`) now record both the implemented foundation and the remaining
+native/release gates.
+
+- Phase 1 contracts, settings, private task history, provider-neutral
+  controller, mode-aware router, full Omni UI, shared authorization, connected
+  app filtering, isolated browser, and typed Invisible-mode task flow are
+  implemented and focused-test verified.
+- The third Code/Work/Omni selector and preference validation are implemented;
+  all three hosts remain mounted. A packaged three-mode state-preservation audit
+  remains to be recorded.
+- Resident-process `⌘⇧Space` registration, an optional menu-bar item, a
+  dedicated capability-limited overlay, and packaged main-app login registration
+  are implemented. The built-app live smoke verified global activation while
+  another application was foreground. Packaged login startup can initialize
+  Omni without a main window or Dock icon. Another-Space/closed-main-window
+  packaged testing remains; there is no lightweight post-quit helper.
+- Real macOS speech output is implemented with fixed `/usr/bin/say`, voice
+  discovery, safe text/rate/voice handling, Stop, cancellation, and concurrency
+  tests. Microphone capture, speech-to-text, partial transcript, and local “Hey
+  Omni” wake remain unavailable.
+- A fixed-protocol Swift CGEvent helper, task-owned TypeScript service, eight
+  structured computer tools, Accessibility readiness gate, direct approval for
+  input, secret-text rejection, and polling/movement takeover pause are present.
+  Semantic AX/screen observation, an emergency-stop event tap, signed packaged
+  identity, and live pointer/keyboard E2E are not yet complete.
+- The remaining helper/input/cursor phases carry external release risks: a stable
+  signed helper identity requires Apple Developer ID signing, notarization, and
+  architecture-specific execution testing; local wake support also requires a
+  licensed, bundled, measured wake engine/model. These are not represented as
+  working while unresolved.
+
 ## Subsystem inventory
 
 | Subsystem | Status | What exists / UI / backend connection | Tests performed and result | Bugs or fixes | Remaining work |
 | --- | --- | --- | --- | --- | --- |
 | Application startup | ✅ Working & Verified | Electron lifecycle, single-instance handling, secure window options, first-launch setup, React workbench, macOS menu | Fresh packaged launch and console capture passed; refreshed three-cycle soak verified onboarding and reached shell/workspace in 5.4/7.1 s cold and at most 4.3/4.7 s warm, used 392–441 MiB RSS and 1.4–2.6% settled CPU, then quit in 0.6–1.1 s with complete helper cleanup; resize/minimize/zoom/full-screen/close/reopen passed | Removed terminal idle repaint load; added a bounded preload queue; repaired the reusable soak so a genuine fresh-install onboarding surface is validated instead of misreported as a timeout | None in the tested Intel Sonoma lifecycle |
 | Code / Work mode boundary | ✅ Working & Verified | Shared persistent `Code` / `Work` switcher; Code workbench remains mounted while Work has an independent conversation surface | Renderer tests and refreshed packaged smokes performed 12 rapid switches in dark and compact-light layouts, retained exactly one Code and Work host, and returned with Work visible and no stuck overlays | Added a validated persistent mode preference, Code-only command/drop routing, and a reduced-motion-aware sliding selection indicator without remounting either mode | None in the tested packaged mode lifecycle |
+| Omni design and safety records | ✅ Working & Verified | Five permanent records distinguish the implemented controller/tool/persistence/overlay/TTS foundation from remaining helper/STT/wake/cursor targets | Repository and implementation inspection completed; records preserve explicit test/release gates | Replaced stale design-only claims with evidence-backed current disposition | Keep synchronized with implementation and remove no gate without evidence |
+| Omni text-first controller/settings/history/mode UI | ✅ Working & Verified | Bounded contracts; private atomic settings/task stores; main-owned controller; Code/Work/Omni switcher; full Omni UI; plans/activity/history; typed requests and task controls | Current serial run: 66 files/559 tests passed with one native-Keychain skip; focused lifecycle/redaction/cancellation tests and typecheck pass; built app rendered the third mode and missing-model failure produced no false task/history | Fixed concurrent-start race, stale actions after approval/intervention, raw-result persistence, interrupted-task recovery, retention, renderer-trusted escalation, running-task policy mismatch, and failed-tool false completion | Post-Cursor build, real configured-model task, and packaged installer audit remain |
+| Omni tool routing and Invisible mode | ✅ Working & Verified | One shared PermissionManager; source-aware Code/Work routing; stricter connector policy composition; connected/scope-filtered Gmail/Drive catalog; dedicated isolated Omni browser | Router/controller/permission/browser tests and complete serial regression pass; build passes | Removed policy-lowering path, disconnected connector exposure, shared-browser session/focus collision, and visible app launch in Invisible mode | Packaged real connector/browser/code-tool workflow matrix remains |
+| Agent terminal security | ✅ Working & Verified | Every model-driven terminal run/start/input requires direct approval; agent zsh/bash/fish skip login/rc files and inherit a credential-stripped allowlisted toolchain/locale environment | Focused security tests, complete 559-test serial run, and typecheck pass | Removed Full Access bypass risk, shell-profile credential loading, arbitrary inherited exports, and active-task authority-display mismatch | Post-Cursor production build and packaged approval/environment audit remain |
+| Omni global activation/background overlay | 🟡 Partially Working | Configurable resident global shortcut, optional tray, restricted overlay renderer/preload, main-owned state, packaged login background launch without main window/Dock | Built-app live smoke verified `⌘⇧Space` from another foreground app and exact restricted overlay globals; background-launch selection/login settings are unit-tested; production entries build | Added exact overlay window/frame/URL/channel checks, pending main activation, safe native approval owner, and no-window packaged login startup | No post-quit native helper; packaged login/Space/closed-window/focus/conflict audit remains |
+| Omni speech output / voice input / local wake | 🟡 Partially Working | Real macOS `say` TTS, availability/voice list, validated rate/voice, safe stdin text, cancellation/Stop/concurrency; STT/wake contracts only | Voice provider tests, full serial regression, real installed-voice query, and built-app availability/list smoke pass | Added fixed executable/no shell, output bounds, embedded-command stripping, redaction, stale-generation safety, and task-stop speech cancellation | Microphone, STT, partial transcript, local wake model/helper, audible packaged workflow, and both-architecture test remain |
+| Omni Cursor Mode | 🟡 Partially Working | Fixed-protocol Swift helper plus task-owned service expose observe/move/click/double-click/scroll/type/key/fixed-app focus only in Cursor mode; UI gates on helper and Accessibility readiness | Adapter/session/tool/controller tests pass; x86_64 and arm64 helpers compile; live read-only observation passed; x64 package contains the correct helper and packaged UI reported helper available, Accessibility granted, and Cursor enabled | Added strict protocol/limits, abort/timeout, active-display validation, direct approval for input, secret-text blocking, polling/smooth-move takeover pause, cleanup, and accurate UI readiness | Live pointer/keyboard E2E, semantic AX/screen targeting, native emergency stop, secure-field semantics, signed/notarized packaged identity, and Apple Silicon runtime test remain |
 | Shared UI design system | ✅ Working & Verified | Semantic light/dark surface, type, spacing, radius, elevation, motion, focus, and reduced-motion tokens documented and used by the shared shell plus refreshed Work/Connected Apps surfaces | TypeScript, production bundle, 11 focused renderer tests, dark and 960×600 light packaged screenshots, horizontal-overflow checks, `prefers-reduced-motion` emulation, keyboard dismissal, and rapid-switch stress pass | Replaced ad hoc shell/mode/Work values with shared tokens; raised tiny interactive labels; added restrained 120–240 ms motion, 1 ms reduced-motion overrides, accessible live toast states, and Escape dismissal for Connected Apps and Settings | Continue ordinary visual regression checks as UI code changes; no known defect remains in the tested surfaces |
 | Work conversations | ✅ Working & Verified | Main-process private atomic JSON store; create/open/search/rename/pin/delete, messages, Copy/Edit/Regenerate, bounded recovery | Unit tests cover validation, ordering, concurrent writes, private modes, corruption/recovery, and bounds; packaged smoke created, updated, searched, reopened, and deleted a real conversation | Conversation state moved out of renderer-only storage; retries replace the same exchange instead of duplicating it | None within documented limits |
 | Work AI transport | ✅ Working & Verified | Provider-neutral Work agent, native provider streaming, cancellation, bounded tool loop, and persisted partial/final messages | Stream/parser/tool-turn tests pass; live Gemini 3.7 streamed exact responses, Stop retained a cancelled partial response, and a prior packaged live run returned the exact expected streamed marker | Fixed Google tool schemas and thought signatures, Ollama tool wire format, response-size/time bounds, and stop-generation cleanup | OpenAI/Claude success and Ollama inference remain externally blocked by missing configured services |
@@ -121,6 +183,11 @@ These are not failures unless existing UI or documentation claims otherwise:
 - ⚪ Git merge UI and GitHub-specific API authentication
 - ⚪ Code Mode Chat streaming/stop and Code-chat persistence (implemented in Work Mode only)
 - ⚪ Window and panel-layout persistence
-- ⚪ Structured click/type/screen observation for arbitrary external macOS apps;
-  app launch and permission-state reporting are implemented, but unrestricted
-  AppleScript/screenshot automation is intentionally blocked
+- 🟡 Structured pointer/keyboard control foundation for allowlisted external
+  apps; read-only cursor/frontmost-app observation is live-verified, while
+  semantic AX/screen observation and live input E2E remain incomplete
+- ⚪ Native post-quit Omni activation helper (resident shortcut, restricted
+  overlay, tray, and packaged background login launch are implemented)
+- ⚪ Omni microphone/STT and local “Hey Omni” wake activation (macOS TTS is
+  implemented)
+- ⚪ Omni native emergency-stop chord and semantic AX/screen understanding

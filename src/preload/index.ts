@@ -173,6 +173,42 @@ const api: OmniCodeAPI = {
       onEvent: (callback) => subscribe('work:agent:event', callback)
     }
   },
+  omni: {
+    settings: {
+      get: () => ipcRenderer.invoke('omni:settings:get'),
+      update: (changes, acknowledgeFullAccess) => ipcRenderer.invoke('omni:settings:update', changes, acknowledgeFullAccess),
+      onChanged: (callback) => subscribe('omni:settings-changed', callback)
+    },
+    tasks: {
+      start: (request) => ipcRenderer.invoke('omni:task:start', request),
+      pause: (taskId) => ipcRenderer.invoke('omni:task:pause', taskId),
+      resume: (taskId) => ipcRenderer.invoke('omni:task:resume', taskId),
+      stop: (taskId) => ipcRenderer.invoke('omni:task:stop', taskId),
+      switchExecutionMode: (taskId, mode) => ipcRenderer.invoke('omni:task:switch-execution', taskId, mode),
+      modifyPlan: (taskId, instruction) => ipcRenderer.invoke('omni:task:modify-plan', taskId, instruction),
+      skipStep: (taskId) => ipcRenderer.invoke('omni:task:skip-step', taskId),
+      get: (taskId) => ipcRenderer.invoke('omni:task:get', taskId),
+      list: () => ipcRenderer.invoke('omni:task:list'),
+      clearHistory: () => ipcRenderer.invoke('omni:task:clear-history'),
+      onTaskChanged: (callback) => subscribe('omni:task-changed', callback),
+      onEvent: (callback) => subscribe('omni:event', callback)
+    },
+    activation: {
+      showOverlay: () => ipcRenderer.invoke('omni:activation:show-overlay')
+    },
+    permissions: {
+      status: () => ipcRenderer.invoke('omni:permissions:status'),
+      openSettings: (permissionId) => ipcRenderer.invoke('omni:permissions:open-settings', permissionId)
+    },
+    voice: {
+      availability: () => ipcRenderer.invoke('omni:voice:availability'),
+      voices: () => ipcRenderer.invoke('omni:voice:voices'),
+      stop: () => ipcRenderer.invoke('omni:voice:stop')
+    },
+    cursor: {
+      status: () => ipcRenderer.invoke('omni:cursor:status')
+    }
+  },
   ai: {
     ollamaStatus: () => ipcRenderer.invoke('ai:ollama-status'),
     models: () => ipcRenderer.invoke('ai:models'),
