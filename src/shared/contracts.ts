@@ -549,6 +549,8 @@ export interface WorkAPI {
 /** Renderer-safe settings changes. Full Access acknowledgement is a separate, explicit IPC argument. */
 export interface OmniSettingsChanges {
   enabled?: boolean
+  setupCompleted?: boolean
+  showTextInput?: boolean
   launchHelperAtLogin?: boolean
   menuBarItem?: boolean
   activation?: Partial<OmniSettings['activation']>
@@ -589,6 +591,7 @@ export interface OmniAPI {
   voice: {
     availability(): Promise<OmniVoiceAvailability>
     voices(): Promise<OmniInstalledVoice[]>
+    test(): Promise<void>
     stop(): Promise<boolean>
     inputAvailability(): Promise<OmniSpeechInputAvailability>
     startInput(options?: OmniSpeechStartOptions): Promise<{ sessionId: string }>

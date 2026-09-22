@@ -763,6 +763,37 @@ kbd { min-width: 23px; padding: 2px 5px; border: 1px solid var(--border); border
 .setting-toggle > span { display: grid; gap: 2px; }
 .setting-toggle small { color: var(--text-muted); }
 .setting-toggle input { width: 36px; height: 20px; accent-color: var(--accent); }
+.omni-settings-loading { min-height: 80px; display: flex; align-items: center; gap: 8px; color: var(--text-muted); }
+.omni-settings-loading svg { width: 16px; }
+.omni-settings-groups { display: grid; gap: 10px; }
+.omni-settings-group { padding: 13px; display: grid; gap: 10px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-editor); }
+.omni-settings-group > h3 { margin: 0; display: flex; align-items: center; gap: 7px; font-size: var(--font-sm); }
+.omni-settings-group > h3 svg { width: 15px; height: 15px; color: var(--accent); }
+.omni-rerun-setup { width: max-content; min-height: 29px; padding: 0 9px; display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-secondary); background: var(--bg-input); }
+.omni-rerun-setup:hover:not(:disabled) { border-color: var(--border-strong); background: var(--bg-hover); }
+.omni-rerun-setup svg { width: 13px; height: 13px; }
+.omni-settings-fields { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px; }
+.omni-settings-fields.two-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.omni-settings-fields label, .omni-settings-select { display: grid; gap: 5px; color: var(--text-secondary); font-size: var(--font-xs); }
+.omni-settings-fields select, .omni-settings-select select { min-width: 0; width: 100%; height: 30px; padding: 0 7px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); background: var(--bg-input); }
+.omni-settings-fields button { min-height: 30px; padding: 0 9px; display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-secondary); background: var(--bg-input); }
+.omni-settings-fields button svg { width: 13px; height: 13px; }
+.omni-settings-shortcut { padding: 10px; display: flex; align-items: center; gap: 5px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-input); }
+.omni-settings-shortcut > span { margin-right: auto; display: grid; gap: 2px; }
+.omni-settings-shortcut small { color: var(--text-muted); }
+.omni-settings-shortcut kbd { min-width: 31px; padding: 4px 6px; border: 1px solid var(--border-strong); border-radius: var(--radius-xs); color: var(--text-secondary); background: var(--bg-panel); text-align: center; }
+.omni-settings-segments { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.omni-settings-segments button { min-height: 68px; padding: 10px; display: grid; grid-template-columns: 21px minmax(0, 1fr); align-content: center; gap: 3px 7px; border: 1px solid var(--border); border-radius: var(--radius-md); text-align: left; }
+.omni-settings-segments button:hover { background: var(--bg-hover); }
+.omni-settings-segments button.active { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); background: var(--bg-active); }
+.omni-settings-segments button svg { width: 16px; color: var(--accent); }
+.omni-settings-segments button small { grid-column: 2; color: var(--text-muted); }
+.omni-settings-select small, .omni-settings-note { margin: 0; color: var(--text-muted); font-size: var(--font-xs); line-height: 1.45; }
+.omni-settings-permissions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.omni-settings-permissions > div { min-height: 44px; padding: 7px 8px; display: grid; grid-template-columns: 23px minmax(0, 1fr) auto; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); }
+.omni-settings-permissions > div > span { color: var(--warning); }.omni-settings-permissions > div[data-state="granted"] > span { color: var(--success); }
+.omni-settings-permissions svg { width: 14px; }.omni-settings-permissions strong { font-size: var(--font-xs); }.omni-settings-permissions small { color: var(--text-muted); font-size: 9px; text-transform: capitalize; }
+.omni-settings-permissions button { grid-column: 2 / -1; width: max-content; color: var(--accent); font-size: 9px; text-decoration: underline; }
 .provider-setting { min-height: 47px; display: grid; grid-template-columns: minmax(145px, .9fr) minmax(160px, 1fr) auto auto auto; align-items: center; gap: 7px; }
 .provider-setting > div { display: flex; align-items: center; gap: 8px; }
 .provider-setting > div > span { display: grid; }

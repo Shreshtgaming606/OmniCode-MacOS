@@ -27,6 +27,8 @@ describe('Omni settings defaults and validation', () => {
     expect(expected).toEqual({
       version: 1,
       enabled: false,
+      setupCompleted: false,
+      showTextInput: false,
       launchHelperAtLogin: false,
       menuBarItem: false,
       activation: { shortcut: 'CommandOrControl+Shift+Space', voiceActivation: 'shortcut-only' },
@@ -105,6 +107,7 @@ describe('OmniSettingsManager persistence', () => {
 
     await Promise.all([
       value.update({ enabled: true }),
+      value.update({ setupCompleted: true, showTextInput: true }),
       value.update({ launchHelperAtLogin: true, menuBarItem: true }),
       value.update({ activation: { voiceActivation: 'wake-word-and-shortcut' } }),
       value.update({ voice: { voiceId: 'voice.test', speakingRate: 1.5 } }),
@@ -115,6 +118,8 @@ describe('OmniSettingsManager persistence', () => {
 
     expect(await value.get()).toMatchObject({
       enabled: true,
+      setupCompleted: true,
+      showTextInput: true,
       launchHelperAtLogin: true,
       menuBarItem: true,
       activation: { voiceActivation: 'wake-word-and-shortcut' },
@@ -127,6 +132,15 @@ describe('OmniSettingsManager persistence', () => {
     expect((await fs.stat(file)).mode & 0o777).toBe(0o600)
     expect(await fs.readdir(path.dirname(file))).toEqual(['settings.json'])
     expect(validateOmniSettings(JSON.parse(await fs.readFile(file, 'utf8')))).toEqual(await value.get())
+  })
+
+  it('migrates existing version-1 settings to voice-first interface defaults', () => {
+    const current = createDefaultOmniSettings()
+    const legacy = { ...current } as Partial<OmniSettings>
+    delete legacy.setupCompleted
+    delete legacy.showTextInput
+
+    expect(validateOmniSettings(legacy)).toMatchObject({ setupCompleted: false, showTextInput: false })
   })
 
   it('does not persist invalid updates and keeps the operation queue usable after a rejection', async () => {

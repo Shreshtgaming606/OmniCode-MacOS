@@ -1,6 +1,6 @@
 # OmniCode Release Readiness
 
-Last updated: 2026-09-15
+Last updated: 2026-09-22
 
 ## Overall Status
 
@@ -24,6 +24,14 @@ and Apple Silicon 0.5.1
 distributions pass archive, disk-image, version, architecture, native-terminal,
 original-icon, and SHA-256 validation.
 
+The current production-rendered Omni surface also passes a disposable
+fresh-profile audit of its seven-step setup, central voice-first dashboard,
+real provider/model/execution/approval controls, default-off typed fallback,
+Settings persistence, 960×600 and 720×720 responsive layouts, Reduce Motion,
+and zero renderer errors. This improves UI/setup readiness but does not clear
+the separate signing, Speech-asset, provider-availability, local-wake, or Apple
+Silicon execution gates below.
+
 Public release is still blocked by Apple signing/notarization, matching-hardware
 Apple Silicon execution, and external service/account gates. In particular, the
 current 0.5.1 internal-test installers contain the publisher's Testing Desktop
@@ -33,7 +41,7 @@ approved test account. This Testing client is not a substitute for Google's
 production verification and is not available to arbitrary public users. A
 Gemini API key cannot authorize Google Workspace.
 
-The matrix result is **209 of 230 tracked behaviors passing (90.9%)**. Fifteen
+The matrix result is **217 of 238 tracked behaviors passing (91.2%)**. Fifteen
 are externally blocked, three are accurately not implemented or claimed, and
 three are partially exercised. No blocked, partial, or absent capability is
 counted as passing.
@@ -42,14 +50,14 @@ counted as passing.
 
 | Result | Count | Meaning |
 | --- | ---: | --- |
-| Tests passed | 209 | Observed behavior met the stated expectation |
+| Tests passed | 217 | Observed behavior met the stated expectation |
 | Tests failed | 0 | No currently tracked test has a known failing result |
 | Tests blocked | 15 | External credential, service, hardware, runtime, repository, safe test data, native platform bridge, or certificate required |
 | Tests not run / not implemented | 3 | Code Chat streaming/stop, rich-document attachment extraction, and layout persistence are absent and not presented as complete |
 | Tests partially run | 3 | Gmail mutations, Drive mutations, and physical network disconnection were not performed; their safe/controlled paths are covered |
 
-Automated regression result: **459 passed, 1 intentionally skipped, 0 failed**
-across 57 test files. The skipped test is native Keychain integration inside the
+Automated regression result: **571 passed, 1 intentionally skipped, 0 failed**
+across 67 test files (66 passing and one skipped). The skipped test is native Keychain integration inside the
 ordinary suite; that behavior was run separately with disposable credentials and
 passed. TypeScript checking and x64/arm64 production builds also pass. A final
 credential scan covered 238 repository files, 30 isolated-profile files, the

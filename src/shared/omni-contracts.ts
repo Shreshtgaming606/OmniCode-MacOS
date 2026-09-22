@@ -86,6 +86,8 @@ export interface OmniSpeechStartOptions {
 export interface OmniSettings {
   version: 1
   enabled: boolean
+  setupCompleted: boolean
+  showTextInput: boolean
   launchHelperAtLogin: boolean
   menuBarItem: boolean
   activation: {
@@ -266,6 +268,8 @@ export function createDefaultOmniSettings(): OmniSettings {
   return {
     version: 1,
     enabled: false,
+    setupCompleted: false,
+    showTextInput: false,
     launchHelperAtLogin: false,
     menuBarItem: false,
     activation: {

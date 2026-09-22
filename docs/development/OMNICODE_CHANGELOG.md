@@ -3,6 +3,34 @@
 This log records repairs and audit milestones made during the no-new-features
 stabilization phase.
 
+## Omni voice-first dashboard and setup redesign — 2026-09-22
+
+- Replaced the dense Omni card surface with a state-reactive central Core,
+  top provider/model/execution/approval controls, left identity/current task,
+  right redacted Activity timeline, and bottom push-to-talk dock.
+- Removed permanent Course of Action and Availability panels from the primary
+  dashboard, moved previous tasks into a secondary drawer, and made typed input
+  a default-off Settings → Omni preference.
+- Added a seven-step first-run setup backed by real permission snapshots,
+  push-to-talk/TTS services, provider model catalogs, Cursor readiness,
+  approval enforcement, activation settings, and atomic global persistence.
+- Added Settings → Omni sections for General, Voice, Activation, AI, Execution,
+  Approvals, Input, Permissions, Privacy, and Activity, including voice testing,
+  permission refresh, setup rerun, and the typed-input toggle.
+- Added backward-compatible version-1 settings migration for `setupCompleted`
+  and `showTextInput`; existing valid preferences are preserved.
+- Added friendly provider-error presentation with sanitized technical details,
+  disabled task submission when Omni itself is off, and fixed optional-composer
+  clipping plus an oversized empty dashboard row.
+- Added `scripts/audit-omni-ui.mjs`. A fresh-profile production audit advanced
+  all seven steps and passed dashboard hierarchy, settings persistence,
+  960×600 and 720×720 layouts, Reduce Motion, composer geometry, and zero
+  renderer errors. TypeScript and the complete 3,122-module production build
+  passed.
+- Isolated the dev-server process test from unrelated interactive-shell setup
+  and gave the real npm early-exit case an integration-appropriate timeout; its
+  five-test file passes independently.
+
 ## Omni native push-to-talk foundation — 2026-09-22
 
 - Added a fixed-protocol Swift speech helper using `AVAudioEngine` and

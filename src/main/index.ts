@@ -719,6 +719,8 @@ function omniSettingsUpdateFromRenderer(value: unknown, acknowledgeFullAccess: u
   const changes = value as OmniSettingsChanges
   const update: OmniSettingsUpdate = {}
   if (changes.enabled !== undefined) update.enabled = changes.enabled
+  if (changes.setupCompleted !== undefined) update.setupCompleted = changes.setupCompleted
+  if (changes.showTextInput !== undefined) update.showTextInput = changes.showTextInput
   if (changes.launchHelperAtLogin !== undefined) update.launchHelperAtLogin = changes.launchHelperAtLogin
   if (changes.menuBarItem !== undefined) update.menuBarItem = changes.menuBarItem
   if (changes.activation !== undefined) update.activation = changes.activation
@@ -1549,6 +1551,13 @@ function registerIpc(): void {
   handle('omni:permissions:open-settings', (_event, permissionId: OmniPermissionId) => openOmniPermissionSettings(permissionId))
   handle('omni:voice:availability', () => omniVoice.availability())
   handle('omni:voice:voices', () => omniVoice.voices())
+  handle('omni:voice:test', async () => {
+    const value = await omniSettings.get()
+    await omniVoice.speak("Hello. I'm Omni.", {
+      rate: value.voice.speakingRate,
+      ...(value.voice.voiceId ? { voiceId: value.voice.voiceId } : {})
+    })
+  })
   handle('omni:voice:stop', () => omniVoice.stop())
   handle('omni:voice:input-availability', () => omniVoice.inputAvailability())
   handle('omni:voice:start-input', (_event, options) => omniVoice.startInput(options))

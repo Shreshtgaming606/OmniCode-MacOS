@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { CheckCircle2, ExternalLink, FolderClosed, Globe2, KeyRound, LoaderCircle, Mail, Plug, RefreshCw, Shield, Trash2, Unplug, X } from 'lucide-react'
+import { AudioWaveform, CheckCircle2, ExternalLink, FolderClosed, Globe2, KeyRound, LoaderCircle, Mail, Mic, MousePointer2, Plug, RefreshCw, Shield, Trash2, Unplug, X, Zap } from 'lucide-react'
 import type { AIModel, AIProviderConnectionStatus, AIProviderId, ThemePreference, WorkspaceSettings } from '../../../shared/contracts'
 import type { AIModelDescriptor, CloudAIProviderId } from '../../../shared/model-contracts'
+import type { OmniPermissionId, OmniPermissionsSnapshot, OmniSettings } from '../../../shared/omni-contracts'
 import type { ConnectorDescriptor, WorkApprovalMode, WorkPermissionSettings } from '../../../shared/tool-contracts'
 import { googleAccountSummary } from '../lib/google-account-status'
 import { WORK_APPROVAL_MODES, WORK_APPROVAL_MODE_COPY } from '../lib/work-approval-mode'
@@ -12,6 +13,15 @@ const PROVIDERS: Array<{ id: CloudProvider; name: string; placeholder: string }>
   { id: 'openai', name: 'OpenAI', placeholder: 'sk-…' },
   { id: 'anthropic', name: 'Anthropic Claude', placeholder: 'sk-ant-…' },
   { id: 'google', name: 'Google Gemini', placeholder: 'API key' }
+]
+const OMNI_PROVIDERS: Array<{ id: AIProviderId; name: string }> = [
+  { id: 'ollama', name: 'Ollama · local' }, { id: 'openai', name: 'OpenAI' },
+  { id: 'anthropic', name: 'Claude' }, { id: 'google', name: 'Google Gemini' }
+]
+const OMNI_PERMISSIONS: Array<{ id: OmniPermissionId; name: string }> = [
+  { id: 'microphone', name: 'Microphone' }, { id: 'speech-recognition', name: 'Speech Recognition' },
+  { id: 'accessibility', name: 'Accessibility' }, { id: 'screen-recording', name: 'Screen Recording' },
+  { id: 'automation', name: 'Automation' }, { id: 'files-and-folders', name: 'Files & Folders' }
 ]
 
 function connectorStatusLabel(connector: ConnectorDescriptor): string {
@@ -86,6 +96,10 @@ export function SettingsPanel({
   })
   const [permissionBusy, setPermissionBusy] = useState(false)
   const [fullAccessTarget, setFullAccessTarget] = useState<{ scope: 'global' | 'connector'; connectorId?: string } | null>(null)
+  const [omniSettings, setOmniSettings] = useState<OmniSettings | null>(null)
+  const [omniPermissions, setOmniPermissions] = useState<OmniPermissionsSnapshot | null>(null)
+  const [omniVoices, setOmniVoices] = useState<Array<{ id: string; name: string; locale: string }>>([])
+  const [omniBusy, setOmniBusy] = useState(false)
   useEffect(() => {
     const dismiss = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape') return
@@ -163,6 +177,28 @@ export function SettingsPanel({
       void refreshCloudModels(autocompleteProvider)
     }
   }, [autocompleteProvider])
+  useEffect(() => {
+    let active = true
+    void Promise.all([
+      window.omnicode.omni.settings.get(),
+      window.omnicode.omni.permissions.status(),
+      window.omnicode.omni.voice.voices().catch(() => [])
+    ]).then(([nextSettings, nextPermissions, voices]) => {
+      if (!active) return
+      setOmniSettings(nextSettings)
+      setOmniPermissions(nextPermissions)
+      setOmniVoices(voices)
+    }).catch((cause) => {
+      if (!active) return
+      setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause))
+    })
+    const unsubscribe = window.omnicode.omni.settings.onChanged((next) => { if (active) setOmniSettings(next) })
+    return () => { active = false; unsubscribe() }
+  }, [])
+  useEffect(() => {
+    const provider = omniSettings?.model.provider
+    if (provider && provider !== 'ollama' && !cloudModels[provider]) void refreshCloudModels(provider)
+  }, [omniSettings?.model.provider])
   useEffect(() => {
     if (!workspacePath) return setWorkspaceJson('{}')
     void window.omnicode.settings.read(workspacePath).then((settings) => setWorkspaceJson(JSON.stringify(settings, null, 2))).catch((cause) => { setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause)) })
@@ -263,11 +299,21 @@ export function SettingsPanel({
     } finally { setPermissionBusy(false) }
   }
   const googleAccount = googleAccountSummary(connectors)
+  const updateOmni = async (changes: Parameters<typeof window.omnicode.omni.settings.update>[0], acknowledge = false): Promise<void> => {
+    if (omniBusy) return
+    setOmniBusy(true)
+    try { setOmniSettings(await window.omnicode.omni.settings.update(changes, acknowledge)) }
+    catch (cause) { setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause)) }
+    finally { setOmniBusy(false) }
+  }
+  const omniModelOptions = omniSettings?.model.provider === 'ollama'
+    ? localModels.map((model) => ({ id: model.id, name: model.name }))
+    : omniSettings ? (cloudModels[omniSettings.model.provider] ?? []).map((model) => ({ id: model.id, name: model.displayName })) : []
   return <><div className="settings-overlay" role="dialog" aria-modal="true" aria-label="Settings">
     <div className="settings-panel">
       <header><div><h1>Settings</h1><p>User settings · stored locally</p></div><button onClick={onClose} title="Close settings"><X /></button></header>
       <div className="settings-content">
-        <nav><a href="#appearance">Appearance</a><a href="#files">Files & Autosave</a><a href="#providers">AI Providers</a><a href="#autocomplete">AI Autocomplete</a><a href="#work-mode">Work Mode</a><a href="#connected-apps">Connected Apps</a><a href="#workspace">Workspace</a><a href="#permissions">Permissions & Privacy</a></nav>
+        <nav><a href="#appearance">Appearance</a><a href="#files">Files & Autosave</a><a href="#providers">AI Providers</a><a href="#autocomplete">AI Autocomplete</a><a href="#omni">Omni</a><a href="#work-mode">Work Mode</a><a href="#connected-apps">Connected Apps</a><a href="#workspace">Workspace</a><a href="#permissions">Permissions & Privacy</a></nav>
         <main>
           <section id="appearance"><h2>Appearance</h2><p>Choose how OmniCode follows macOS.</p>
             <div className="segmented">{(['system', 'dark', 'light'] as ThemePreference[]).map((item) => <button className={theme === item ? 'active' : ''} key={item} onClick={() => onTheme(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}</div>
@@ -305,6 +351,47 @@ export function SettingsPanel({
                 </select><button type="button" className="icon-button" title="Refresh available cloud models" aria-label={`Refresh ${autocompleteProvider} autocomplete models`} disabled={cloudModelsBusy === autocompleteProvider} onClick={() => void refreshCloudModels(autocompleteProvider, true)}>{cloudModelsBusy === autocompleteProvider ? <LoaderCircle className="spin" /> : <RefreshCw />}</button></span>}</label>
               {autocompleteProvider !== 'ollama' && cloudModelErrors[autocompleteProvider] && <p className="provider-error" role="alert">{cloudModelErrors[autocompleteProvider]}</p>}
             </div>
+          </section>
+          <section id="omni"><h2>Omni</h2><p>Configure the voice-first system assistant. These private settings are stored locally and use the existing provider and permission systems.</p>
+            {!omniSettings ? <div className="omni-settings-loading"><LoaderCircle className="spin" />Loading Omni settings…</div> : <div className="omni-settings-groups">
+              <div className="omni-settings-group"><h3><AudioWaveform />General</h3>
+                <label className="setting-toggle"><span><strong>Enable Omni</strong><small>Register the global activation shortcut and make Omni available.</small></span><input type="checkbox" disabled={omniBusy} checked={omniSettings.enabled} onChange={(event) => void updateOmni({ enabled: event.target.checked })} /></label>
+                <button type="button" className="omni-rerun-setup" disabled={omniBusy} onClick={() => void window.omnicode.omni.settings.update({ setupCompleted: false }).then(() => onClose())}><RefreshCw />Setup & Permissions</button>
+              </div>
+              <div className="omni-settings-group"><h3><Mic />Voice</h3>
+                <label className="setting-toggle"><span><strong>Spoken responses</strong><small>Let Omni read concise task responses aloud.</small></span><input type="checkbox" disabled={omniBusy} checked={omniSettings.voice.spokenResponses} onChange={(event) => void updateOmni({ voice: { spokenResponses: event.target.checked } })} /></label>
+                <div className="omni-settings-fields"><label><strong>macOS voice</strong><select disabled={omniBusy} value={omniSettings.voice.voiceId} onChange={(event) => void updateOmni({ voice: { voiceId: event.target.value } })}><option value="">System Default</option>{omniVoices.map((voice) => <option key={`${voice.id}-${voice.locale}`} value={voice.id}>{voice.name} · {voice.locale}</option>)}</select></label>
+                  <button type="button" disabled={omniBusy} onClick={() => void window.omnicode.omni.voice.test().catch((cause) => { setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause)) })}><AudioWaveform />Test Voice</button></div>
+              </div>
+              <div className="omni-settings-group"><h3><Zap />Activation</h3>
+                <div className="omni-settings-shortcut"><span><strong>Global shortcut</strong><small>Activate Omni from anywhere</small></span><kbd>⌘</kbd><kbd>⇧</kbd><kbd>Space</kbd></div>
+                <label className="setting-toggle"><span><strong>Enable “Hey Omni”</strong><small>Wake phrase processing stays on-device.</small></span><input type="checkbox" disabled={omniBusy} checked={omniSettings.activation.voiceActivation === 'wake-word-and-shortcut'} onChange={(event) => void updateOmni({ activation: { voiceActivation: event.target.checked ? 'wake-word-and-shortcut' : 'shortcut-only' } })} /></label>
+                <label className="setting-toggle"><span><strong>Start Omni with my Mac</strong><small>Keep global activation available after login.</small></span><input type="checkbox" disabled={omniBusy} checked={omniSettings.launchHelperAtLogin} onChange={(event) => void updateOmni({ launchHelperAtLogin: event.target.checked })} /></label>
+              </div>
+              <div className="omni-settings-group"><h3><KeyRound />AI</h3><div className="omni-settings-fields two-fields">
+                <label><strong>Provider</strong><select disabled={omniBusy} value={omniSettings.model.provider} onChange={(event) => {
+                  const provider = event.target.value as AIProviderId
+                  const options = provider === 'ollama' ? localModels.map((model) => model.id) : (cloudModels[provider as CloudProvider] ?? []).map((model) => model.id)
+                  void updateOmni({ model: { provider, modelId: options[0] ?? '' } })
+                }}>{OMNI_PROVIDERS.map((provider) => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</select></label>
+                <label><strong>Model</strong><select disabled={omniBusy || !omniModelOptions.length} value={omniSettings.model.modelId} onChange={(event) => void updateOmni({ model: { modelId: event.target.value } })}>{!omniModelOptions.length && <option value="">No available models</option>}{omniModelOptions.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}</select></label>
+              </div></div>
+              <div className="omni-settings-group"><h3><MousePointer2 />Execution</h3><div className="omni-settings-segments"><button type="button" className={omniSettings.executionMode === 'invisible' ? 'active' : ''} onClick={() => void updateOmni({ executionMode: 'invisible' })}><Zap />Invisible<small>Background when possible</small></button><button type="button" className={omniSettings.executionMode === 'cursor' ? 'active' : ''} onClick={() => void updateOmni({ executionMode: 'cursor' })}><MousePointer2 />Cursor<small>Visible Mac control</small></button></div></div>
+              <div className="omni-settings-group"><h3><Shield />Approvals</h3><label className="omni-settings-select"><strong>Action approval</strong><select disabled={omniBusy} value={omniSettings.approvalMode} onChange={(event) => {
+                const mode = event.target.value as WorkApprovalMode
+                if (mode === 'full') {
+                  if (!window.confirm('Full Access still protects critical, financial, account-security, and irreversible destructive actions. Enable it for Omni?')) return
+                  void updateOmni({ approvalMode: mode }, true)
+                } else void updateOmni({ approvalMode: mode })
+              }}><option value="ask">Ask for approval</option><option value="auto">Approve for me</option><option value="full">Full access</option></select><small>Critical and irreversible actions always require direct approval.</small></label></div>
+              <div className="omni-settings-group"><h3><AudioWaveform />Input</h3><label className="setting-toggle"><span><strong>Show text input</strong><small>Display a compact optional text field beneath the voice controls.</small></span><input type="checkbox" disabled={omniBusy} checked={omniSettings.showTextInput} onChange={(event) => void updateOmni({ showTextInput: event.target.checked })} /></label></div>
+              <div className="omni-settings-group"><h3><Shield />Permissions</h3><div className="omni-settings-permissions">{OMNI_PERMISSIONS.map((permission) => {
+                const state = omniPermissions?.permissions[permission.id] ?? 'not-determined'
+                return <div key={permission.id} data-state={state}><span>{state === 'granted' ? <CheckCircle2 /> : <Shield />}</span><strong>{permission.name}</strong><small>{state.replace('-', ' ')}</small>{state !== 'granted' && state !== 'unavailable' && <button type="button" onClick={() => void window.omnicode.omni.permissions.openSettings(permission.id)}>Open Settings</button>}</div>
+              })}</div><button type="button" className="omni-rerun-setup" onClick={() => void window.omnicode.omni.permissions.status().then(setOmniPermissions)}><RefreshCw />Refresh Permissions</button></div>
+              <div className="omni-settings-group"><h3><Shield />Privacy</h3><label className="setting-toggle"><span><strong>Screen observation</strong><small>Allow screen context only when a task explicitly needs it.</small></span><input type="checkbox" disabled={omniBusy} checked={omniSettings.privacy.screenObservationEnabled} onChange={(event) => void updateOmni({ privacy: { screenObservationEnabled: event.target.checked } })} /></label><p className="omni-settings-note">Wake phrase processing is locked to on-device only.</p></div>
+              <div className="omni-settings-group"><h3><RefreshCw />Activity</h3><label className="omni-settings-select"><strong>Keep activity for</strong><select disabled={omniBusy} value={omniSettings.privacy.activityRetentionDays} onChange={(event) => void updateOmni({ privacy: { activityRetentionDays: Number(event.target.value) } })}><option value={0}>Current session only</option><option value={7}>7 days</option><option value={30}>30 days</option><option value={60}>60 days</option><option value={90}>90 days</option></select><small>The main dashboard renders only the 40 most recent events.</small></label></div>
+            </div>}
           </section>
           <section id="work-mode"><h2>Work Mode</h2><p>Choose how OmniCode handles actions proposed by any Work model. This app-level setting is stored privately on this Mac and applies independently from Code Mode permissions.</p>
             <div className="work-settings-summary"><Shield /><span><strong>Tool permissions stay in the main process</strong><small>Cloud and local models use the same schema validation and backend permission policy. Instructions inside connected content cannot change it.</small></span></div>

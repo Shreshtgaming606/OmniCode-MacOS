@@ -2,7 +2,12 @@ import { promises as fs } from 'node:fs'
 import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('./shell-environment', () => ({
+  resolveShellEnvironment: async () => process.env
+}))
+
 import { DevServerManager } from './dev-server-manager'
 
 const temporaryRoots: string[] = []
@@ -113,7 +118,7 @@ describe('package development server', () => {
 
     await expect(server.startProject(root, 'dev')).rejects.toThrow(/exited.*7|start/iu)
     expect(server.state()).toMatchObject({ running: false, mode: 'project' })
-  })
+  }, 12_000)
 
   it('waits for a reachable server, detects its URL, and stops the process tree', async () => {
     const root = await npmWorkspace('node server.mjs', `

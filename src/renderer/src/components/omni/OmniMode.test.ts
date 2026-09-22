@@ -7,19 +7,18 @@ import {
   humanizeOmniError,
   humanizeOmniStatus,
   isTerminalOmniStatus,
+  presentOmniError,
   OmniMode
 } from './OmniMode'
 
 describe('OmniMode', () => {
-  it('renders an honest typed fallback while native capabilities are being checked', () => {
+  it('renders an honest controller-loading state before persisted setup is known', () => {
     const html = renderToStaticMarkup(createElement(OmniMode, { active: true }))
 
-    expect(html).toContain('Typed request')
-    expect(html).toContain('Voice input unavailable')
-    expect(html).toContain('Native cursor unavailable')
+    expect(html).toContain('Starting Omni')
     expect(html).toContain('Connecting to the Omni controller')
-    expect(html).not.toContain('On-device voice ready')
-    expect(html).not.toContain('Cursor ready')
+    expect(html).not.toContain('Course of action')
+    expect(html).not.toContain('Typed request')
   })
 
   it('classifies only finished task states as terminal', () => {
@@ -47,5 +46,13 @@ describe('OmniMode', () => {
     expect(humanizeOmniError(new Error('Authorization failed for Bearer secret-token-value')))
       .toBe('Authorization failed for Bearer [REDACTED]')
     expect(humanizeOmniError(new Error('x'.repeat(2_000)))).toHaveLength(1_000)
+  })
+
+  it('turns raw provider failures into calm actionable UI copy', () => {
+    expect(presentOmniError(new Error('AI provider returned 503: {"error":"high demand"}'))).toMatchObject({
+      title: 'AI provider unavailable',
+      message: 'The selected model is temporarily busy. Try again or choose another model.'
+    })
+    expect(presentOmniError(new Error('429 quota exceeded')).title).toBe('Provider limit reached')
   })
 })

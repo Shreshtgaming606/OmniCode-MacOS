@@ -181,8 +181,8 @@ if (serverResult.publicStatus !== 200 || serverResult.gitStatus !== 403 || serve
 }
 
 const originalOmniSettings = await evaluate(`return await window.omnicode.omni.settings.get()`)
-if (!originalOmniSettings.enabled) {
-  await evaluate(`return await window.omnicode.omni.settings.update({ enabled: true })`)
+if (!originalOmniSettings.enabled || !originalOmniSettings.setupCompleted) {
+  await evaluate(`return await window.omnicode.omni.settings.update({ enabled: true, setupCompleted: true })`)
 }
 const omniNative = await evaluate(`
   const [cursor, voice, voiceInput] = await Promise.all([
@@ -201,28 +201,32 @@ await evaluate(`
   return true
 `)
 await call('Page.reload', { ignoreCache: true })
-await waitFor(`document.querySelector('.omni-mode[data-active="true"]') && window.omnicode`)
-await waitFor(`!document.querySelector('.omni-mode[data-active="true"]')?.textContent?.includes('Connecting to the Omni controller')`, 30_000)
+await waitFor(`document.querySelector('.omni-dashboard[data-active="true"]') && window.omnicode`)
+await waitFor(`document.querySelector('.omni-dashboard[data-active="true"] .omni-core-copy')`, 30_000)
 const omniUI = await evaluate(`
-  const root = document.querySelector('.omni-mode[data-active="true"]')
+  const root = document.querySelector('.omni-dashboard[data-active="true"]')
   const cursorOption = root?.querySelector('select option[value="cursor"]')
+  const voiceButton = root?.querySelector('.omni-mic-button')
   return {
     visible: Boolean(root),
     text: root?.textContent ?? '',
     cursorDisabled: cursorOption instanceof HTMLOptionElement ? cursorOption.disabled : null,
-    voiceButtonText: [...(root?.querySelectorAll('.omni-execution-bar button') ?? [])]
-      .map((button) => button.textContent?.trim()).find((text) => /Speak request|Voice unavailable|Stop listening/.test(text ?? '')) ?? ''
+    voiceButtonDisabled: voiceButton instanceof HTMLButtonElement ? voiceButton.disabled : null,
+    voiceButtonLabel: voiceButton?.getAttribute('aria-label') ?? '',
+    hasCoursePanel: root?.textContent?.includes('Course of action') ?? false,
+    hasHistoryPanel: root?.textContent?.includes('Recent Omni tasks') ?? false,
+    hasPermanentTypedInput: Boolean(root?.querySelector('.omni-compact-composer'))
   }
 `)
 const cursorExpectedReady = omniNative.cursor.accessibility === 'granted' &&
   omniNative.cursor.emergencyStop === 'registered'
-if (!omniUI.visible || omniUI.cursorDisabled !== !cursorExpectedReady ||
-    !omniUI.text.includes(cursorExpectedReady ? 'Structured cursor ready' : 'Native cursor unavailable')) {
+if (!omniUI.visible || omniUI.cursorDisabled !== !cursorExpectedReady || omniUI.hasCoursePanel ||
+    omniUI.hasHistoryPanel || omniUI.hasPermanentTypedInput) {
   throw new Error(`Omni Cursor readiness UI is inaccurate: ${JSON.stringify({ omniNative, omniUI })}`)
 }
 const voiceInputExpectedReady = omniNative.voiceInput.available === true
-if (!omniUI.text.includes(voiceInputExpectedReady ? 'On-device voice ready' : 'Voice input unavailable') ||
-    !omniUI.voiceButtonText.includes(voiceInputExpectedReady ? 'Speak request' : 'Voice unavailable')) {
+if (!omniUI.text.includes(voiceInputExpectedReady ? 'Voice input ready' : 'Voice needs attention') ||
+    omniUI.voiceButtonDisabled !== !voiceInputExpectedReady || omniUI.voiceButtonLabel !== 'Start voice request') {
   throw new Error(`Omni voice-input readiness UI is inaccurate: ${JSON.stringify({ omniNative, omniUI })}`)
 }
 
@@ -231,9 +235,11 @@ if (screenshotPath) {
   await fs.writeFile(screenshotPath, Buffer.from(screenshot.data, 'base64'))
 }
 
-if (!originalOmniSettings.enabled) {
-  await evaluate(`return await window.omnicode.omni.settings.update({ enabled: false })`)
-}
+await evaluate(`return await window.omnicode.omni.settings.update({
+  enabled: ${JSON.stringify(originalOmniSettings.enabled)},
+  setupCompleted: ${JSON.stringify(originalOmniSettings.setupCompleted)},
+  showTextInput: ${JSON.stringify(originalOmniSettings.showTextInput)}
+})`)
 
 await evaluate(`location.href = 'https://example.com/'; return true`)
 await new Promise((resolve) => setTimeout(resolve, 750))

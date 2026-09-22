@@ -23,6 +23,8 @@ const SAFE_TEXT = /^[^\u0000-\u001f\u007f]*$/u
 
 export interface OmniSettingsUpdate {
   enabled?: boolean
+  setupCompleted?: boolean
+  showTextInput?: boolean
   launchHelperAtLogin?: boolean
   menuBarItem?: boolean
   activation?: Partial<OmniSettings['activation']>
@@ -58,6 +60,13 @@ export function validateOmniSettings(value: unknown): OmniSettings {
   if (typeof record.enabled !== 'boolean' || typeof record.launchHelperAtLogin !== 'boolean' ||
       typeof record.menuBarItem !== 'boolean' || typeof record.fullAccessWarningAcknowledged !== 'boolean') {
     throw new Error('Omni general settings are invalid.')
+  }
+  // These fields were added to the version-1 document after Omni shipped. Missing
+  // fields are migrated to conservative defaults instead of discarding valid user settings.
+  const setupCompleted = record.setupCompleted === undefined ? false : record.setupCompleted
+  const showTextInput = record.showTextInput === undefined ? false : record.showTextInput
+  if (typeof setupCompleted !== 'boolean' || typeof showTextInput !== 'boolean') {
+    throw new Error('Omni interface settings are invalid.')
   }
   if (!record.activation || typeof record.activation !== 'object' || Array.isArray(record.activation)) {
     throw new Error('Omni activation settings are invalid.')
@@ -101,6 +110,8 @@ export function validateOmniSettings(value: unknown): OmniSettings {
   return {
     version: 1,
     enabled: record.enabled,
+    setupCompleted,
+    showTextInput,
     launchHelperAtLogin: record.launchHelperAtLogin,
     menuBarItem: record.menuBarItem,
     activation: {
@@ -146,6 +157,8 @@ export class OmniSettingsManager {
     return this.#update((current) => ({
       ...current,
       ...(changes.enabled !== undefined ? { enabled: changes.enabled } : {}),
+      ...(changes.setupCompleted !== undefined ? { setupCompleted: changes.setupCompleted } : {}),
+      ...(changes.showTextInput !== undefined ? { showTextInput: changes.showTextInput } : {}),
       ...(changes.launchHelperAtLogin !== undefined ? { launchHelperAtLogin: changes.launchHelperAtLogin } : {}),
       ...(changes.menuBarItem !== undefined ? { menuBarItem: changes.menuBarItem } : {}),
       ...(changes.activation ? { activation: { ...current.activation, ...changes.activation } } : {}),

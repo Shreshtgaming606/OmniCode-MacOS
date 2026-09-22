@@ -2,9 +2,10 @@
 
 Last updated: 2026-09-21
 
-Status: **Text/overlay/TTS and structured native Cursor foundations are
-implemented and automated-verified; speech input, local wake, semantic screen
-observation, a helper-owned stop event tap, and a post-quit helper remain**
+Status: **The redesigned dashboard, seven-step first-run setup, text/overlay,
+push-to-talk, TTS, and structured native Cursor foundations are implemented and
+automated-verified; local wake, semantic screen observation, a helper-owned stop
+event tap, and a post-quit helper remain**
 
 ## Purpose
 
@@ -48,11 +49,13 @@ Omni is now a real third application mode in the working tree:
   its required scopes exist. The Omni Managed Browser uses a dedicated
   `persist:omnicode-omni-browser-v1` session rather than sharing Code or Work
   browser state.
-- `src/renderer/src/components/omni/OmniMode.tsx` presents model/settings,
-  typed-request fallback, public plans, redacted Activity, history, permissions,
-  Pause/Resume/Stop, Modify Plan, Skip Step, and execution-mode controls. Full
-  Access requires an explicit warning acknowledgement that is also enforced in
-  the main process.
+- `src/renderer/src/components/omni/OmniMode.tsx` presents the seven-step setup
+  and the compact voice-first dashboard. The main surface contains the Omni Core
+  state, provider/model/execution/approval command bar, current task, redacted
+  Activity, push-to-talk dock, and task controls. Previous tasks are secondary;
+  typed input is an opt-in fallback controlled by `showTextInput`. Full Access
+  requires an explicit warning acknowledgement that is also enforced in the
+  main process.
 - A separate sandboxed overlay is built from `src/renderer/omni-overlay.html`
   and `src/preload/omni-overlay.ts`. Its allowlisted IPC surface can start and
   control Omni tasks but cannot invoke filesystem, terminal, Git, connector,
@@ -75,7 +78,8 @@ surface.
 
 Current non-capabilities are equally important:
 
-- no microphone capture or speech-to-text provider;
+- push-to-talk exists, but the current Mac cannot complete recognition until a
+  compatible on-device macOS Speech asset is installed;
 - no local “Hey Omni” detector or wake helper;
 - no signed lightweight helper that can activate Omni after explicit app quit;
 - no native screen/AX-element observation or semantic element targeting;
@@ -94,7 +98,7 @@ control.
 Every Omni action follows this path:
 
 ```text
-typed request (implemented) or SpeechToTextProvider (not yet implemented)
+push-to-talk via the on-device SpeechToTextProvider, or the optional typed fallback
   -> main-process OmniController
   -> shared AIManager / selected model
   -> concise public plan or structured tool request
@@ -184,18 +188,25 @@ PermissionManager. Its detailed boundary is documented in
 `OMNI_CURSOR_MODE.md`. Cursor Mode is not implemented by passing raw automation
 scripts to a shell.
 
-### Full Omni UI and overlay
+### Full Omni UI, setup, and overlay
 
-Full Omni Mode is now a renderer surface that presents:
+Full Omni Mode is now a voice-first renderer surface that presents:
 
-- implemented Idle, Planning, Waiting for Approval, Working, Speaking, Paused,
-  Completed, Failed, and Stopped states; voice-input-only states remain reserved
-  and honestly unavailable;
-- typed request and assistant result;
-- current task, public plan, current/next step, and progress;
-- execution and approval modes;
-- Pause, Resume, Stop, and mode switching;
-- conversation history and redacted Activity.
+- a setup gate with Welcome, Permissions, Voice, AI, Execution, Activation, and
+  Ready steps backed by real settings, permission, catalog, and speech APIs;
+- implemented Idle, Listening, Transcribing, Planning, Waiting for Approval,
+  Working, Speaking, Paused, Completed, Failed, and Stopped projections;
+- one large central Omni Core, current task context, execution and approval
+  controls, concise redacted Activity, and Pause/Resume/Stop controls;
+- a microphone-first dock; typed input is hidden by default and can be enabled
+  under Settings → Omni;
+- previous tasks in a secondary drawer rather than permanent dashboard space;
+- responsive desktop/compact layouts and `prefers-reduced-motion` handling.
+
+The removed dashboard Course of Action and Availability panels did not remove
+backend plan, permission, or capability data. That data remains in the trusted
+controller/settings layers and secondary task records; it is simply no longer
+given permanent space in the primary voice surface.
 
 The global overlay is a separate capability-limited window, not a second full
 renderer with the complete preload API. It presents task status, public plan,
@@ -233,8 +244,9 @@ Paused -> Working | Using Cursor | Failed/stopped
 Completed/Failed -> Speaking -> Idle
 ```
 
-Listening and Transcribing remain reserved until speech input exists. Using
-Cursor is entered only while a real `computer.*` action runs; selecting Cursor
+Listening and Transcribing are driven by a real main-process speech session and
+text-only renderer events; unsupported permission or on-device-asset states fail
+honestly before capture. Using Cursor is entered only while a real `computer.*` action runs; selecting Cursor
 Mode alone does not fake that status. Completed/Failed/Stopped task records
 remain terminal history; TTS is an interruptible completion side effect rather
 than evidence that a task resumed.
@@ -275,6 +287,11 @@ provider/model identifier only. Retention is applied at startup, after settings
 changes, and when tasks reach terminal state; clearing history retains an
 active task.
 
+`setupCompleted` and `showTextInput` are private global preferences. Missing
+fields in older version-1 settings files migrate to safe `false` defaults
+without discarding the user's other Omni preferences. Completing setup persists
+the gate; Settings → Omni can deliberately rerun it.
+
 ## Implementation phases and gates
 
 ### Phase 0 — contracts and regression harness — implemented
@@ -285,16 +302,17 @@ active task.
   catalog.
 - Code and Work regression coverage remains in the shared suite.
 
-Evidence: the current complete serial run passed 66 files with 564 tests and
+Evidence: the current complete serial run passed 66 files with 571 tests and
 one intentionally skipped native-Keychain file/test. TypeScript, the 3,122-
 module production renderer, main/preload bundles, x86_64 Swift helper, and x64
 directory package build pass. The packaged smoke verifies the embedded helper,
 Cursor readiness, core workspace/PTTY/server/navigation paths, and zero renderer
 errors.
 
-### Phase 1 — Omni UI and text-only Invisible Mode — implemented foundation
+### Phase 1 — Omni UI and Invisible Mode — implemented foundation
 
-- The third selector entry and purpose-built Omni surface are present.
+- The third selector entry, seven-step setup, and purpose-built voice-first Omni
+  surface are present.
 - Model selection, planning, Code tools, and connected-app tools are reused.
 - Main-owned pause/resume/stop and Activity are implemented.
 
@@ -324,18 +342,22 @@ packaged login plus Finder/Safari/Chrome, another-Space, minimized/closed-main-
 window, focus, and shortcut-conflict tests. Post-quit activation still requires
 the helper work below.
 
-### Phase 3 — voice and local wake phrase — TTS only
+### Phase 3 — voice and local wake phrase — push-to-talk and TTS implemented
 
 - Real macOS speech output, voice enumeration, stop, and task-completion speech
   are implemented through a fixed `/usr/bin/say` provider.
-- Speech-to-text and wake-provider contracts exist, but no microphone provider,
-  local wake engine, or capturing helper is shipped.
+- A fixed-protocol Swift helper implements explicit push-to-talk with
+  `AVAudioEngine` and `SFSpeechRecognizer`, on-device-only recognition, bounded
+  text events, cancellation, and no raw-audio persistence. No local wake engine
+  is shipped.
 
-TTS evidence: provider lifecycle/redaction/cancellation tests, a real host voice
-listing, and a built-app availability/voice-list query pass. Remaining gate:
-real microphone, partial/final transcript, input interruption, audible packaged
-TTS settings/task flow, offline wake, false-activation soak, and zero pre-wake
-network traffic.
+Evidence: provider/helper lifecycle, protocol, redaction, cancellation, status,
+and UI tests pass; the packaged helper carries the required usage descriptions
+and audio entitlement; a fresh-profile production UI audit accurately reported
+the current unavailable on-device `en-US` asset without fake readiness.
+Remaining gate: install that macOS asset and run real grant/deny/partial/final
+microphone tests, audible packaged TTS settings/task flow, offline wake,
+false-activation soak, and zero pre-wake network traffic.
 
 ### Phase 4 — structured Cursor Mode — foundation implemented
 
@@ -381,7 +403,8 @@ secure-field blocking, and real Apple Silicon runtime verification.
 - The CGEvent foundation exists, but no semantic AX/ScreenCaptureKit observation
   path, helper-owned emergency-stop event tap, or signed production helper exists yet.
 - No bundled, licensed, measured local “Hey Omni” wake model exists yet.
-- No native speech-to-text provider or microphone-capture lifecycle exists yet.
+- The current Mac lacks the on-device Speech asset required by the implemented
+  push-to-talk provider, so live transcript accuracy remains externally blocked.
 - No lightweight signed helper can activate Omni after an explicit application
   quit; the implemented shortcut/overlay require the Electron process to be
   resident or started by the packaged login/background path.

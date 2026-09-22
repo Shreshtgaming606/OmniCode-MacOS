@@ -5,6 +5,34 @@ Last updated: 2026-09-22
 Resolved issues remain in this file with a resolution so audit history is not
 lost. Secrets, tokens, and authorization headers must never be included here.
 
+## OMI-052 — Omni's primary UI was dense and setup was not first-run complete — Resolved
+
+- Severity: High for usability and honest onboarding
+- Reproduction: Open the previous Omni surface and compare the permanent plan,
+  availability, history, composer, settings cards, and task controls with the
+  requested voice-first operating flow; reset Omni preferences and look for a
+  complete permission/voice/model/execution activation setup.
+- Expected: First launch walks through seven real setup steps, then presents a
+  focused Core, microphone dock, current task, operating controls, and concise
+  Activity. Typed input is optional and the compact layouts remain usable.
+- Actual: The previous renderer exposed too many permanent cards and had no
+  persisted Omni-specific seven-step setup gate.
+- Suspected cause: The original Phase 1 surface prioritized broad controller
+  observability over the final voice-first information hierarchy.
+- Relevant files: `src/renderer/src/components/omni/OmniMode.tsx`,
+  `src/renderer/src/components/omni/OmniMode.css`,
+  `src/renderer/src/components/SettingsPanel.tsx`,
+  `src/main/services/omni-settings-manager.ts`,
+  `scripts/audit-omni-ui.mjs`.
+- Current status: ✅ Resolved — the seven-step setup, private persistence,
+  Settings → Omni controls, central Core, compact Activity timeline, real
+  selectors, microphone dock, secondary history, and default-off typed fallback
+  are implemented. A fresh production-profile audit passed all setup steps,
+  960×600 and 720×720 layouts, Reduce Motion, preference persistence, optional
+  input geometry, and zero renderer errors. The unrelated host Speech-asset and
+  provider-availability blocks remain recorded separately rather than shown as
+  UI success.
+
 ## OMI-049 — Omni Phase 1 scaffolding was not verified — Resolved
 
 - Severity: High for release readiness at discovery
@@ -26,7 +54,7 @@ lost. Secrets, tokens, and authorization headers must never be included here.
 - Current status: ✅ Resolved — the controller, settings/task stores, router,
   shared permission path, third-mode UI, restricted overlay, background launch,
   TTS, native-Cursor foundation, and tool-result safety boundaries are wired.
-  The current complete serial run passed 66 files with 569 tests and one
+  The current complete serial run passed 66 files with 571 tests and one
   intentionally skipped native-Keychain file/test; typecheck, the production
   build, native helper, x64 package, and packaged readiness smoke pass. A built-app live smoke rendered all three modes, verified the
   overlay boundary/global shortcut/TTS query, and confirmed missing-model

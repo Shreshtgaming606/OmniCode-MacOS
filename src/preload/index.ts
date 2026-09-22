@@ -203,6 +203,7 @@ const api: OmniCodeAPI = {
     voice: {
       availability: () => ipcRenderer.invoke('omni:voice:availability'),
       voices: () => ipcRenderer.invoke('omni:voice:voices'),
+      test: () => ipcRenderer.invoke('omni:voice:test'),
       stop: () => ipcRenderer.invoke('omni:voice:stop'),
       inputAvailability: () => ipcRenderer.invoke('omni:voice:input-availability'),
       startInput: (options) => ipcRenderer.invoke('omni:voice:start-input', options),

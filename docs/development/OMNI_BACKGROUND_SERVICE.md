@@ -307,7 +307,7 @@ Shortcut conflict/replacement behavior, collapsed/expanded focus transitions,
 helper ownership/protocol, and screen-lock behavior do not yet have complete
 automated coverage.
 
-The current complete serial run passed 66 files with 564 tests and one
+The current complete serial run passed 66 files with 571 tests and one
 intentionally skipped native-Keychain file/test. A built-app live smoke verified that the
 overlay exposes only `window.omniOverlay`, reopened via real `⌘⇧Space` while
 another application was foreground, and preserved the main-process boundary.
