@@ -3,6 +3,25 @@
 This log records repairs and audit milestones made during the no-new-features
 stabilization phase.
 
+## OmniCode 0.6.0 dual-architecture installers — 2026-09-22
+
+- Bumped the release version to 0.6.0 for the voice-first Omni dashboard and
+  first-run setup release so it remains distinct from the earlier 0.5.1 build.
+- Produced fresh x64 and arm64 DMG/ZIP artifacts. Each target received a clean
+  production bundle, architecture-specific Electron runtime, rebuilt
+  `node-pty`, and architecture-specific Cursor and Speech helpers.
+- Verified both DMG filesystem checksums, mounted both images, confirmed the
+  Applications link, embedded 0.6.0 version, app/helper Mach-O architecture,
+  icon presence, ZIP integrity, and SHA-256 hashes.
+- Ran the x64 packaged release smoke on the current Intel Sonoma Mac. Workspace
+  IPC, real zsh PTY, static-server public/secret boundaries, Omni Cursor and
+  Speech readiness, voice-first UI, external-navigation denial, and zero
+  renderer errors passed. Arm64 runtime execution remains a matching-hardware
+  test gate; its image and contents were verified without relabeling x64 code.
+- The installers are internal unsigned builds because this machine has no Apple
+  Developer ID Application certificate. Signing, notarization, and stapling
+  remain release gates.
+
 ## Omni voice-first dashboard and setup redesign — 2026-09-22
 
 - Replaced the dense Omni card surface with a state-reactive central Core,

@@ -86,6 +86,15 @@ surface alone is not evidence that its backing operation works.
   validated Reduce Motion and persistence, and recorded zero renderer errors.
   TypeScript and the complete 3,122-module production build pass.
 
+- Current distribution: OmniCode 0.6.0 x64 and arm64 DMG/ZIP artifacts were
+  rebuilt after the voice-first UI work. Both disk images pass `hdiutil verify`
+  and mounted-content/version/architecture checks; both ZIPs pass integrity
+  testing. The x64 packaged app passed the release smoke with a real PTY,
+  localhost security boundary, Omni native readiness, navigation denial, and
+  zero renderer errors. Arm64 execution still requires Apple Silicon hardware.
+  Both builds are unsigned and unnotarized because no Developer ID certificate
+  is installed.
+
 ## Omni implementation status
 
 The five Omni records (`OMNI_ARCHITECTURE.md`,

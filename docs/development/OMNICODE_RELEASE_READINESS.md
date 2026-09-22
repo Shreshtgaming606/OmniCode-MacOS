@@ -6,7 +6,9 @@ Last updated: 2026-09-22
 
 **NOT READY for a signed public release.**
 
-OmniCode 0.5.1 is a verified unsigned release candidate for Intel macOS Sonoma.
+OmniCode 0.6.0 is the current verified unsigned release candidate for Intel
+macOS Sonoma, with a separately built and structurally verified Apple Silicon
+installer that still requires matching-hardware runtime execution.
 The separate Work Mode, Code Mode regression surface, real terminal, filesystem,
 Git, local server, provider adapters, Google OAuth boundary, Gmail/Drive tools,
 opaque cross-service transfers, persisted connector result cards, and the new
@@ -22,7 +24,11 @@ persistent Glasses timeline, and diff-action audits; the 0.4.0 Work action
 audit and earlier lifecycle soak remain valid for unchanged systems. Both Intel
 and Apple Silicon 0.5.1
 distributions pass archive, disk-image, version, architecture, native-terminal,
-original-icon, and SHA-256 validation.
+original-icon, and SHA-256 validation. The new 0.6.0 x64 and arm64 DMG/ZIP
+artifacts likewise pass image/archive integrity, embedded-version, icon,
+application/helper/native-terminal architecture, and checksum verification.
+The x64 0.6.0 package also passed the core release smoke with zero renderer
+errors.
 
 The current production-rendered Omni surface also passes a disposable
 fresh-profile audit of its seven-step setup, central voice-first dashboard,
