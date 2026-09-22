@@ -26,7 +26,7 @@ lost. Secrets, tokens, and authorization headers must never be included here.
 - Current status: ✅ Resolved — the controller, settings/task stores, router,
   shared permission path, third-mode UI, restricted overlay, background launch,
   TTS, native-Cursor foundation, and tool-result safety boundaries are wired.
-  The current complete serial run passed 66 files with 562 tests and one
+  The current complete serial run passed 66 files with 564 tests and one
   intentionally skipped native-Keychain file/test; typecheck, the production
   build, native helper, x64 package, and packaged readiness smoke pass. A built-app live smoke rendered all three modes, verified the
   overlay boundary/global shortcut/TTS query, and confirmed missing-model
@@ -209,9 +209,14 @@ lost. Secrets, tokens, and authorization headers must never be included here.
 - Severity: High for public distribution; Low for local testing
 - Reproduction: Inspect build identities or distribute the DMG to another Mac.
 - Expected: Public release is signed, notarized, and stapled.
-- Actual: Final Intel and Apple Silicon 0.3.0 installers build and pass archive
-  validation, but no valid Developer ID Application identity is installed, so
-  they are unsigned and unnotarized.
+- Actual: Versioned 0.5.1 Intel and Apple Silicon artifacts build and pass
+  archive validation, but no valid Developer ID Application identity is
+  installed, so they are unsigned and unnotarized. After each fresh unsigned
+  x64 directory-package rebuild, the first invocation of the replaced nested
+  Cursor helper exceeded both the 10-second audit timeout and the production
+  service's 15-second timeout during macOS provenance processing; the immediate
+  retry and complete packaged control audit passed. Ad-hoc signing verifies the
+  local helper bytes but does not provide a stable Developer ID identity.
 - Suspected cause: Apple developer credentials are an external requirement.
 - Relevant files: `package.json` build configuration and release artifacts.
 - Current status: 🔵 BLOCKED — APPLE DEVELOPER ID REQUIRED.
@@ -219,6 +224,9 @@ lost. Secrets, tokens, and authorization headers must never be included here.
   IPC accepts valid bounded content and rejects invalid content, but Electron's
   macOS notification contract states unsigned development builds are not
   delivered. The current-host banner audit therefore observed no notification.
+  The cold nested-helper delay also remains a signing-sensitive release gate;
+  functional warm-helper results do not replace signed/notarized cold-launch
+  testing.
 
 ## OMI-007 — Critical renderer workflows lack end-to-end coverage — Resolved
 
@@ -918,11 +926,12 @@ lost. Secrets, tokens, and authorization headers must never be included here.
 - Actual: OmniCode now has a fixed Swift helper and task-owned tools for bounded
   pointer observation/move/click/scroll/text/key input and fixed-app focus. The
   helper and Accessibility gate work, both architectures compile, focused
-  secure/password roles are rejected, and a packaged disposable-TextEdit audit
-  passes move/restore, click/double-click, scroll, focus, exact Unicode
-  type/save, and keyboard input. Semantic AX/screen element discovery, a live
-  secure/system-dialog matrix, a helper-owned stop event tap, signed packaged
-  TCC identity, and broad application E2E are still absent.
+  secure/password roles and input to OmniCode/unallowlisted apps are rejected,
+  and a packaged disposable TextEdit/Safari audit passes move/restore,
+  click/double-click, scroll, focus, exact Unicode type/save, keyboard input,
+  unallowlisted-app denial, and web password-field denial. Semantic AX/screen
+  element discovery, a system-dialog matrix, a helper-owned stop event tap,
+  signed packaged TCC identity, and broad application E2E are still absent.
 - Suspected cause: The initial safe foundation deliberately excludes broad
   screen capture and semantic AX control until their privacy, targeting,
   emergency-stop, and packaged-permission boundaries are implemented.
@@ -939,6 +948,6 @@ lost. Secrets, tokens, and authorization headers must never be included here.
   cancellation, takeover pause, emergency stop, and safe TextEdit input are
   implemented and regression/live-tested. Unrestricted AppleScript,
   screenshots, and shell automation remain blocked. General release still
-  requires semantic AX/screen targeting, secure/system-dialog adversarial
-  coverage, helper-owned stop defense, signed/notarized nested code, and
-  matching Intel and Apple Silicon runtime tests.
+  requires semantic AX/screen targeting, system-authorization/dialog
+  adversarial coverage, helper-owned stop defense, signed/notarized nested code,
+  and matching Intel and Apple Silicon runtime tests.

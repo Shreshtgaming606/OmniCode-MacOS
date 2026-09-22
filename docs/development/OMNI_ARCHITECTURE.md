@@ -285,7 +285,7 @@ active task.
   catalog.
 - Code and Work regression coverage remains in the shared suite.
 
-Evidence: the current complete serial run passed 66 files with 562 tests and
+Evidence: the current complete serial run passed 66 files with 564 tests and
 one intentionally skipped native-Keychain file/test. TypeScript, the 3,122-
 module production renderer, main/preload bundles, x86_64 Swift helper, and x64
 directory package build pass. The packaged smoke verifies the embedded helper,

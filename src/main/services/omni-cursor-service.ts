@@ -46,6 +46,12 @@ const NAMED_KEYS = new Set([
 ])
 const MODIFIERS = new Set<OmniCursorModifier>(['command', 'control', 'option', 'shift', 'function'])
 const MODIFIER_ORDER: OmniCursorModifier[] = ['command', 'control', 'option', 'shift', 'function']
+const OMNICODE_BUNDLE_IDENTIFIER = 'com.omnicode.editor'
+const INTERACTIVE_BUNDLE_IDENTIFIERS = new Set(
+  Object.values(APPLICATIONS)
+    .map((application) => application.bundleIdentifier)
+    .filter((bundleIdentifier) => bundleIdentifier !== OMNICODE_BUNDLE_IDENTIFIER)
+)
 
 export type OmniCursorNativeCommand =
   | { command: 'observe' }
@@ -450,6 +456,7 @@ export class OmniCursorService {
     const deltaX = request.deltaX === undefined ? 0 : assertInteger(request.deltaX, 'Horizontal scroll distance', -OMNI_CURSOR_LIMITS.scrollDelta, OMNI_CURSOR_LIMITS.scrollDelta)
     const deltaY = assertInteger(request.deltaY, 'Vertical scroll distance', -OMNI_CURSOR_LIMITS.scrollDelta, OMNI_CURSOR_LIMITS.scrollDelta)
     if (deltaX === 0 && deltaY === 0) throw new Error('Choose a non-zero scroll distance.')
+    await this.#assertInteractiveTarget(signal)
     return parseActionResult(await this.#adapter.execute({ command: 'scroll', deltaX, deltaY }, signal))
   }
 
@@ -457,6 +464,7 @@ export class OmniCursorService {
     this.#assertAuthorized(signal)
     if (typeof text !== 'string' || !text || text.includes('\0')) throw new Error('Enter valid text for Cursor Mode to type.')
     if (Array.from(text).length > OMNI_CURSOR_LIMITS.textCharacters) throw new Error('Cursor Mode can type at most 8,192 characters in one action.')
+    await this.#assertInteractiveTarget(signal)
     return parseActionResult(await this.#adapter.execute({ command: 'type-text', text }, signal))
   }
 
@@ -466,6 +474,7 @@ export class OmniCursorService {
     const key = validKey(request.key)
     const modifiers = validModifiers(request.modifiers)
     const repeat = request.repeat === undefined ? 1 : assertInteger(request.repeat, 'Key repeat count', 1, OMNI_CURSOR_LIMITS.keyRepeats)
+    await this.#assertInteractiveTarget(signal)
     return parseActionResult(await this.#adapter.execute({ command: 'press-key', key, modifiers, repeat }, signal))
   }
 
@@ -496,7 +505,19 @@ export class OmniCursorService {
     if (!isRecord(request)) throw new Error('Choose a valid cursor click.')
     const button = request.button ?? 'left'
     if (button !== 'left' && button !== 'right') throw new Error('Cursor Mode supports only left and right clicks.')
+    await this.#assertInteractiveTarget(signal)
     return parseActionResult(await this.#adapter.execute({ command: 'click', button, count }, signal))
+  }
+
+  async #assertInteractiveTarget(signal?: AbortSignal): Promise<void> {
+    const observation = await this.observe(signal)
+    const bundleIdentifier = observation.frontmostApplication?.bundleIdentifier
+    if (!bundleIdentifier || !INTERACTIVE_BUNDLE_IDENTIFIERS.has(bundleIdentifier)) {
+      throw new OmniCursorNativeError(
+        'invalid-request',
+        'Omni Cursor Mode will not send input to OmniCode or an application outside its allowlist.'
+      )
+    }
   }
 }
 

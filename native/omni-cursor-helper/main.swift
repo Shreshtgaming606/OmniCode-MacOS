@@ -28,6 +28,7 @@ private let allowedBundleIdentifiers: Set<String> = [
     "com.apple.Preview",
     "com.apple.TextEdit"
 ]
+private let omniCodeBundleIdentifier = "com.omnicode.editor"
 
 private let keyCodes: [String: CGKeyCode] = [
     "a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5,
@@ -186,6 +187,17 @@ private func eventSource() throws -> CGEventSource {
     return source
 }
 
+private func requireAllowedInteractiveApplication() throws {
+    guard let bundleIdentifier = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+          allowedBundleIdentifiers.contains(bundleIdentifier),
+          bundleIdentifier != omniCodeBundleIdentifier else {
+        throw HelperFailure(
+            "invalid-request",
+            "Omni Cursor Mode will not send input to OmniCode or an application outside its allowlist."
+        )
+    }
+}
+
 private func markAndPost(_ event: CGEvent) {
     event.setIntegerValueField(.eventSourceUserData, value: eventMarker)
     event.post(tap: .cghidEventTap)
@@ -323,11 +335,17 @@ private func focusedUIElement() throws -> AXUIElement {
     }
     let application = AXUIElementCreateApplication(frontmost.processIdentifier)
     var focusedValue: CFTypeRef?
-    guard AXUIElementCopyAttributeValue(application, kAXFocusedUIElementAttribute as CFString, &focusedValue) == .success,
-          let focusedValue else {
-        throw HelperFailure("execution-failed", "No focused user-interface element is available for text input.")
+    if AXUIElementCopyAttributeValue(application, kAXFocusedUIElementAttribute as CFString, &focusedValue) == .success,
+       let focusedValue {
+        return focusedValue as! AXUIElement
     }
-    return focusedValue as! AXUIElement
+    let system = AXUIElementCreateSystemWide()
+    focusedValue = nil
+    if AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focusedValue) == .success,
+       let focusedValue {
+        return focusedValue as! AXUIElement
+    }
+    throw HelperFailure("execution-failed", "No focused user-interface element is available for text input.")
 }
 
 private func stringAttribute(_ element: AXUIElement, _ attribute: CFString) -> String? {
@@ -454,6 +472,7 @@ private func execute(_ request: [String: Any]) throws -> Any {
             throw HelperFailure("invalid-request", "The pointer button is not supported.")
         }
         let count = try boundedInteger(request["count"], named: "click count", minimum: 1, maximum: 2)
+        try requireAllowedInteractiveApplication()
         try click(buttonName: button, count: count)
     case "scroll":
         try strictKeys(request, operationKeys: ["deltaX", "deltaY"])
@@ -462,12 +481,14 @@ private func execute(_ request: [String: Any]) throws -> Any {
         guard deltaX != 0 || deltaY != 0 else {
             throw HelperFailure("invalid-request", "The scroll distance must not be zero.")
         }
+        try requireAllowedInteractiveApplication()
         try scroll(deltaX: deltaX, deltaY: deltaY)
     case "type-text":
         try strictKeys(request, operationKeys: ["text"])
         guard let text = request["text"] as? String, !text.isEmpty, !text.contains("\0"), text.count <= maximumTextCharacters else {
             throw HelperFailure("invalid-request", "The text input is empty, invalid, or too large.")
         }
+        try requireAllowedInteractiveApplication()
         try typeText(text)
     case "press-key":
         try strictKeys(request, operationKeys: ["key", "modifiers", "repeat"])
@@ -476,6 +497,8 @@ private func execute(_ request: [String: Any]) throws -> Any {
             throw HelperFailure("invalid-request", "The keyboard action is not allowlisted.")
         }
         let repeatCount = try boundedInteger(request["repeat"], named: "key repeat count", minimum: 1, maximum: maximumKeyRepeats)
+        let isEmergencyStop = key == "escape" && Set(modifiers) == Set(["command", "shift"]) && repeatCount == 1
+        if !isEmergencyStop { try requireAllowedInteractiveApplication() }
         try pressKey(key, modifiers: modifiers, repeatCount: repeatCount)
     case "focus-application":
         try strictKeys(request, operationKeys: ["bundleIdentifier"])

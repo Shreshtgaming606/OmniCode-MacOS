@@ -55,12 +55,41 @@ describe('OmniCursorService', () => {
     await service.focusApplication('finder')
 
     expect(native.execute).toHaveBeenNthCalledWith(1, { command: 'move', x: 40, y: 60, durationMs: 250 }, undefined)
-    expect(native.execute).toHaveBeenNthCalledWith(2, {
+    expect(native.execute).toHaveBeenNthCalledWith(2, { command: 'observe' }, undefined)
+    expect(native.execute).toHaveBeenNthCalledWith(3, {
       command: 'press-key', key: 'k', modifiers: ['command', 'shift'], repeat: 2
     }, undefined)
-    expect(native.execute).toHaveBeenNthCalledWith(3, {
+    expect(native.execute).toHaveBeenNthCalledWith(4, {
       command: 'focus-application', bundleIdentifier: 'com.apple.finder'
     }, undefined)
+  })
+
+  it('fails closed before input when OmniCode or an unallowlisted app is frontmost', async () => {
+    for (const bundleIdentifier of ['com.omnicode.editor', 'com.apple.systempreferences']) {
+      const native = adapter(async () => ({
+        ...observation(),
+        frontmostApplication: { name: 'Blocked', bundleIdentifier, processIdentifier: 123 }
+      }))
+      const service = new OmniCursorService({ platform: 'darwin', accessibilityTrusted: () => true, adapter: native })
+
+      await expect(service.click()).rejects.toMatchObject({ code: 'invalid-request' })
+      await expect(service.typeText('safe text')).rejects.toMatchObject({ code: 'invalid-request' })
+      await expect(service.pressKey({ key: 'a' })).rejects.toMatchObject({ code: 'invalid-request' })
+      await expect(service.scroll({ deltaY: 10 })).rejects.toMatchObject({ code: 'invalid-request' })
+      expect(native.execute).toHaveBeenCalledTimes(4)
+      expect(native.execute).toHaveBeenCalledWith({ command: 'observe' }, undefined)
+    }
+  })
+
+  it('preflights an allowlisted external app before native input', async () => {
+    const native = adapter(async (command) => command.command === 'observe'
+      ? { ...observation(), frontmostApplication: { name: 'TextEdit', bundleIdentifier: 'com.apple.TextEdit', processIdentifier: 123 } }
+      : { observation: observation(40, 60) })
+    const service = new OmniCursorService({ platform: 'darwin', accessibilityTrusted: () => true, adapter: native })
+
+    await expect(service.typeText('safe text')).resolves.toEqual({ observation: observation(40, 60) })
+    expect(native.execute).toHaveBeenNthCalledWith(1, { command: 'observe' }, undefined)
+    expect(native.execute).toHaveBeenNthCalledWith(2, { command: 'type-text', text: 'safe text' }, undefined)
   })
 
   it('rejects coordinates, keys, text, applications, and malformed native responses outside the contract', async () => {

@@ -20,11 +20,23 @@ stabilization phase.
 - Added non-sensitive frontmost-window geometry to the verified observation
   contract so bounded coordinate clicks can be targeted without screenshots,
   OCR, window titles, document contents, or arbitrary selectors.
-- The complete serial suite now passes 66 files/562 tests with one intentional
+- Enforced the interactive-application allowlist in both the TypeScript service
+  and native helper. Input now fails closed when OmniCode itself, a system
+  dialog, or any other unallowlisted app is frontmost, even if UI checks are
+  bypassed. The live audit verifies this negative path before posting input.
+- Extended the audit with a temporary local Safari password field and verified
+  the native helper rejects the secure AX role without inserting a character.
+- The native build now applies a verifiable ad-hoc signature for local artifact
+  integrity. A real Developer ID signature is still required for stable public
+  TCC/Gatekeeper behavior and notarization.
+- The complete serial suite now passes 66 files/564 tests with one intentional
   native-Keychain skip. TypeScript, the 3,122-module production build, x86_64
-  helper, x64 directory package, packaged core smoke, and packaged TextEdit
-  Cursor audit all pass. The package remains unsigned because no Developer ID
-  identity is installed.
+  helper, x64 directory package, packaged core smoke, and packaged TextEdit/
+  Safari Cursor audit all pass. The package remains unsigned because no Developer ID
+  identity is installed; the freshly replaced nested helper exceeded both the
+  audit's 10-second and production's 15-second cold first-invocation timeouts
+  before immediate successful retries, which remains recorded as a signing/
+  provenance release blocker.
 
 ## Omni text-first assistant foundation — 2026-09-21
 
@@ -86,7 +98,7 @@ stabilization phase.
 - Refreshed Omni cloud model selection to use authenticated provider catalogs
   for OpenAI, Anthropic, and Gemini while retaining inspected local Ollama
   models.
-- The current complete serial suite passes 66 files with 562 tests and one
+- The current complete serial suite passes 66 files with 564 tests and one
   intentionally skipped native-Keychain file/test. TypeScript, the 3,122-module
   production build, x86_64 native helper, and x64 directory package pass. A built-app live smoke rendered Code/Work/Omni, verified the
   restricted overlay boundary, reopened it with real `⌘⇧Space` while another

@@ -265,7 +265,7 @@ redaction, embedded-command removal, provider failures, AbortSignal
 cancellation, explicit Stop, concurrent speech supersession, and disposal.
 `/usr/bin/say -v ?` was also invoked on the host to verify the real installed
 voice format used by the parser. The current complete serial run passed 66
-files with 562 tests and one intentionally skipped native-Keychain file/test. A
+files with 564 tests and one intentionally skipped native-Keychain file/test. A
 built-app live smoke queried the real TTS availability and installed macOS voice
 list through the production preload/main-process route.
 

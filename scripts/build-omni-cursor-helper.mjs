@@ -43,4 +43,23 @@ if (result.status !== 0) {
 }
 
 await chmod(output, 0o755)
-console.log(`Built Omni cursor helper for ${targetArchitecture}.`)
+const signing = spawnSync('/usr/bin/codesign', [
+  '--force',
+  '--sign', '-',
+  '--timestamp=none',
+  output
+], {
+  cwd: projectRoot,
+  encoding: 'utf8',
+  stdio: ['ignore', 'pipe', 'pipe'],
+  timeout: 60_000,
+  windowsHide: true
+})
+
+if (signing.error) throw signing.error
+if (signing.status !== 0) {
+  const diagnostic = String(signing.stderr || signing.stdout || 'codesign failed.').trim().slice(0, 8_000)
+  throw new Error(`Could not ad-hoc sign the Omni cursor helper for ${targetArchitecture}:\n${diagnostic}`)
+}
+
+console.log(`Built and ad-hoc signed Omni cursor helper for ${targetArchitecture}.`)

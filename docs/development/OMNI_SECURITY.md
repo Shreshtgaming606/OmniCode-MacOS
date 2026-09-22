@@ -67,7 +67,7 @@ The audited repository provides these reusable and Omni-specific boundaries:
 
 These protections remain mandatory. Automated Omni controller/router/store,
 permission, browser, voice, and renderer tests exercise the implemented
-boundaries. The current serial run passed 66 files with 562 tests and one
+boundaries. The current serial run passed 66 files with 564 tests and one
 intentional native-Keychain skip. A built-app smoke verified the overlay has
 no `window.omnicode` and exposes only the intended `window.omniOverlay`
 settings/tasks/activation groups; packaged adversarial testing remains part of
@@ -261,11 +261,14 @@ The current foundation uses bounded coordinate-based CGEvents and allowlisted
 application focus; it does not capture pixels or AX trees. Text insertion
 inspects only the focused element's role/subrole, rejects secure/password
 fields, and uses the selected-text AX attribute where supported without reading
-field contents or using the clipboard. General semantic AX actions and live
-secure/system-dialog adversarial coverage are still required before
-screen-aware automation can be considered complete. Future ScreenCaptureKit
-use remains limited to the necessary window/region and active task. No
-continuous idle screenshots or unrestricted remote-desktop surface is allowed.
+field contents or using the clipboard. Service and native layers both deny
+input when OmniCode or an app outside the fixed allowlist is frontmost. A live
+temporary Safari password field and an unallowlisted foreground app are
+verified as blocked. General semantic AX actions and system-authorization/
+dialog adversarial coverage are still required before screen-aware automation
+can be considered complete. Future ScreenCaptureKit use remains limited to the
+necessary window/region and active task. No continuous idle screenshots or
+unrestricted remote-desktop surface is allowed.
 
 ## Audio and screen privacy
 
@@ -413,7 +416,7 @@ coverage but still require packaged release testing:
 - model-visible tool-result sanitizer and browser public/loopback isolation.
 
 After the approval-display, agent-terminal, model-result, browser-isolation,
-and native-Cursor hardening, the complete serial run passes 66 files/562 tests
+and native-Cursor hardening, the complete serial run passes 66 files/564 tests
 with one intentionally skipped native-Keychain file/test. TypeScript checking
 also passes. The production/native-helper build and x64 directory package pass;
 the packaged smoke verifies the helper is available, Accessibility is granted,

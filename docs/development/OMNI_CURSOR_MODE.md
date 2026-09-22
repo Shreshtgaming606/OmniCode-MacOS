@@ -148,8 +148,10 @@ canvas-backed non-secure controls retain a bounded CGEvent fallback. Direct
 approval and the independent secret-pattern block still apply. Cursor Mode must
 not be used for passwords, passcodes, API keys, payment data, recovery phrases,
 authorization codes, Keychain, system authorization, or OmniCode approval UI.
-Broader semantic targeting and a live secure/system-dialog adversarial matrix
-remain required.
+The TypeScript service and native helper also refuse click/scroll/type/key input
+when OmniCode itself or any application outside the fixed allowlist is
+frontmost. Broader semantic targeting and a system-authorization/dialog
+adversarial matrix remain required.
 
 ## Permissions and packaging
 
@@ -180,16 +182,26 @@ restores pointer movement, focuses the allowlisted app, performs single/double
 clicks, writes a unique Unicode marker, saves it with the real keyboard
 shortcut, verifies exact bytes from disk, exercises scroll, closes the document,
 restores focus/pointer where possible, and removes the temporary directory. The
-same audit passes against the rebuilt packaged helper. The packaged core smoke
-also reports Accessibility/helper/emergency-stop readiness and zero renderer
-errors.
+audit also starts from an unallowlisted foreground app to verify input refusal,
+then opens a disposable local Safari password field and verifies native secure-
+role refusal without inserting a character. The same audit passes against the
+rebuilt packaged helper. The packaged core smoke also reports
+Accessibility/helper/emergency-stop readiness and zero renderer errors.
+
+The native build applies an ad-hoc signature for local artifact integrity, but
+the freshly rebuilt nested helper exceeded both the audit's 10-second timeout
+and the production service's 15-second timeout on cold first invocation, then
+passed immediately and consistently. This is recorded under the existing
+Developer ID/signing blocker; warm functional success and an ad-hoc signature
+are not treated as evidence of stable public TCC or Gatekeeper behavior.
 
 ## Remaining release gates
 
 - Helper-owned emergency event tap and low-level event-queue cancellation as
   defense in depth; the main-process global `⌘⇧Esc` path is implemented.
-- Semantic AX/screen observation and targeting plus live secure/system-dialog
-  adversarial testing (focused secure/password typing is already rejected).
+- Semantic AX/screen observation and targeting plus system-authorization/dialog
+  adversarial testing (a Safari password field and unallowlisted foreground app
+  are live-verified as blocked).
 - Signed/notarized packaged helper with stable Accessibility permission.
 - Permission grant, denial, revocation, restart, lock, and crash tests.
 - Multiple displays/Spaces, Reduce Motion, and real Apple Silicon runtime tests.
