@@ -26,7 +26,7 @@ lost. Secrets, tokens, and authorization headers must never be included here.
 - Current status: ✅ Resolved — the controller, settings/task stores, router,
   shared permission path, third-mode UI, restricted overlay, background launch,
   TTS, native-Cursor foundation, and tool-result safety boundaries are wired.
-  The current complete serial run passed 66 files with 564 tests and one
+  The current complete serial run passed 66 files with 569 tests and one
   intentionally skipped native-Keychain file/test; typecheck, the production
   build, native helper, x64 package, and packaged readiness smoke pass. A built-app live smoke rendered all three modes, verified the
   overlay boundary/global shortcut/TTS query, and confirmed missing-model
@@ -172,6 +172,12 @@ lost. Secrets, tokens, and authorization headers must never be included here.
   Flash-Lite replacement then completed the command-only plan, native approval,
   workspace PTY execution, and cleanup after three additional transient
   failures. No user credential was overwritten or printed.
+  A new isolated packaged Omni Invisible-mode audit also reached Google twice
+  but both attempts received the provider's real HTTP 503 high-demand response
+  before the requested `runtime.detect` call. Omni ended Failed, executed no
+  action, and made no success claim. This successful-workflow gate is currently
+  **BLOCKED — EXTERNAL PROVIDER AVAILABILITY REQUIRED**; the repeatable audit is
+  retained for the next bounded retry.
 
 ## OMI-003 — Local inference is unverified on the current host
 

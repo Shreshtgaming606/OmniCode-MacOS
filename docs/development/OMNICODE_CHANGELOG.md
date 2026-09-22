@@ -25,6 +25,12 @@ stabilization phase.
   “not connected”; the unsigned first-helper timeout remains recorded honestly.
 - Re-ran the complete serial regression suite: 66 files and 569 tests passed,
   one native-Keychain file/test remained intentionally skipped, and zero failed.
+- Added a repeatable isolated-profile packaged audit for a configured-model
+  Invisible-mode task. It requires exactly one successful `runtime.detect`
+  action, rejects unexpected tools, and verifies final controller state. Two
+  live Google attempts reached the provider but received honest HTTP 503
+  high-demand failures before any tool call; Omni failed cleanly with no false
+  result or side effect, so the success gate remains externally blocked.
 
 ## Omni Cursor live-input repair — 2026-09-22
 
