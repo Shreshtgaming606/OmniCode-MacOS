@@ -4,7 +4,7 @@ Last updated: 2026-09-21
 
 Status: **Text/overlay/TTS and structured native Cursor foundations are
 implemented and automated-verified; speech input, local wake, semantic screen
-observation, an emergency-stop chord, and a post-quit helper remain**
+observation, a helper-owned stop event tap, and a post-quit helper remain**
 
 ## Purpose
 
@@ -79,7 +79,7 @@ Current non-capabilities are equally important:
 - no local “Hey Omni” detector or wake helper;
 - no signed lightweight helper that can activate Omni after explicit app quit;
 - no native screen/AX-element observation or semantic element targeting;
-- no always-available native emergency-stop chord/event tap;
+- no helper-owned emergency-stop event tap independent of Electron main;
 - no signed/notarized production identity for the bundled Cursor helper.
 
 A structured Swift CGEvent helper now provides bounded pointer/keyboard actions,
@@ -285,8 +285,8 @@ active task.
   catalog.
 - Code and Work regression coverage remains in the shared suite.
 
-Evidence: the current complete serial run passed 66 files with 559 tests and
-one intentionally skipped native-Keychain file/test. TypeScript, the 3,121-
+Evidence: the current complete serial run passed 66 files with 561 tests and
+one intentionally skipped native-Keychain file/test. TypeScript, the 3,122-
 module production renderer, main/preload bundles, x86_64 Swift helper, and x64
 directory package build pass. The packaged smoke verifies the embedded helper,
 Cursor readiness, core workspace/PTTY/server/navigation paths, and zero renderer
@@ -346,7 +346,7 @@ network traffic.
   on the current host.
 
 Remaining gate: safe-app live pointer/keyboard actions, semantic AX targeting,
-native emergency stop, permission denial/revocation, signed package identity,
+  helper-owned stop defense, permission denial/revocation, signed package identity,
 secure-field blocking, and real Apple Silicon runtime verification.
 
 ### Phase 5 — production packaging and feature freeze
@@ -379,7 +379,7 @@ secure-field blocking, and real Apple Silicon runtime verification.
 - Apple Silicon execution testing on matching hardware remains separately
   required even though arm64 artifacts can be produced.
 - The CGEvent foundation exists, but no semantic AX/ScreenCaptureKit observation
-  path, native emergency-stop event tap, or signed production helper exists yet.
+  path, helper-owned emergency-stop event tap, or signed production helper exists yet.
 - No bundled, licensed, measured local “Hey Omni” wake model exists yet.
 - No native speech-to-text provider or microphone-capture lifecycle exists yet.
 - No lightweight signed helper can activate Omni after an explicit application

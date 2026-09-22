@@ -3,8 +3,9 @@
 Last updated: 2026-09-21
 
 Status: **Structured native pointer/keyboard foundation implemented and
-automated-verified; read-only native observation live-verified; semantic screen
-observation, emergency-stop chord, and live destructive input tests remain**
+automated-verified; read-only native observation and the process-level
+emergency-stop chord are live-verified; semantic screen observation and live
+general input tests remain**
 
 ## Current repository reality
 
@@ -117,9 +118,18 @@ explicit controller operation and restores only that task's session.
 
 Normal Pause, Stop, plan changes, skips, and mode changes invalidate the
 controller generation and abort pending tool work. Task cleanup stops the
-cursor session. A separate always-available native emergency-stop chord/event
-tap is not yet implemented; this remains a release blocker for general live
-cursor automation.
+cursor session. While Omni is enabled, the Electron main process—not either
+renderer—owns a fixed `⌘⇧Esc` global shortcut. Cursor readiness requires that
+registration to succeed. The shortcut stops every active Cursor task, aborts
+the provider/native action, cleans its session, and opens the restricted overlay
+with the stopped result. The packaged audit started a real Google-backed Cursor
+task, posted the actual chord through the bundled helper, and observed the task
+reach `stopped` with “Stopped by the user.”
+
+A lower-level helper-owned event tap would add protection if Electron's main
+process itself hangs. That defense-in-depth path is not yet implemented and
+remains a release-hardening item, but the current stop no longer depends on a
+working renderer.
 
 ## Privacy and sensitive operations
 
@@ -140,8 +150,8 @@ those UI categories can be considered safely observable.
 - Accessibility is required and checked before Cursor Mode can start.
 - Screen Recording is not requested because this implementation captures no
   pixels.
-- Input Monitoring is not requested by the polling foundation. A future native
-  global event tap may require it.
+- Input Monitoring is not requested by the polling/globalShortcut foundation.
+  A future helper-owned event tap may require it.
 - Automation/Apple Events is not used.
 - The production package must sign the helper and main app consistently,
   notarize/staple the result, and verify stable TCC attribution.
@@ -166,7 +176,8 @@ the helper and the renderer reports structured Cursor readiness.
 ## Remaining release gates
 
 - Live safe-app move/click/scroll/type/key/focus testing with visible approval.
-- Native emergency-stop chord and low-level event-queue cancellation.
+- Helper-owned emergency event tap and low-level event-queue cancellation as
+  defense in depth; the main-process global `⌘⇧Esc` path is implemented.
 - Semantic AX observation/targeting and secure/system-dialog blocking.
 - Signed/notarized packaged helper with stable Accessibility permission.
 - Permission grant, denial, revocation, restart, lock, and crash tests.

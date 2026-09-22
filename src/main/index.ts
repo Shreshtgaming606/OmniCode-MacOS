@@ -65,6 +65,7 @@ import { OmniComputerToolService } from './services/omni-computer-tool-service'
 import { createOmniLoginItemSettings, shouldStartOmniInBackground } from './services/omni-background-launch'
 import type { GitCloneProgress, OmniSettingsChanges } from '../shared/contracts'
 import type { OmniExecutionMode, OmniPermissionId, OmniPermissionsSnapshot, OmniSettings, OmniStartRequest } from '../shared/omni-contracts'
+import { OMNI_CURSOR_EMERGENCY_STOP_SHORTCUT } from '../shared/omni-cursor-contracts'
 import type {
   ToolAuthorizationDecision,
   WorkActionHistoryEntry,
@@ -77,6 +78,7 @@ let mainWindow: BrowserWindow | null = null
 let omniOverlayWindow: BrowserWindow | null = null
 let omniTray: Tray | null = null
 let registeredOmniShortcut: string | null = null
+let registeredOmniEmergencyStop = false
 let pendingOmniActivation = false
 let omniOverlayActivationSource: OmniStartRequest['activationSource'] = 'overlay'
 let omniController: OmniController
@@ -891,6 +893,25 @@ async function applyOmniRuntimeSettings(value: OmniSettings): Promise<void> {
     globalShortcut.unregister(registeredOmniShortcut)
     registeredOmniShortcut = null
   }
+  if (registeredOmniEmergencyStop) {
+    globalShortcut.unregister(OMNI_CURSOR_EMERGENCY_STOP_SHORTCUT)
+    registeredOmniEmergencyStop = false
+  }
+  if (value.enabled) {
+    try {
+      registeredOmniEmergencyStop = globalShortcut.register(OMNI_CURSOR_EMERGENCY_STOP_SHORTCUT, () => {
+        void omniController.emergencyStopCursorTasks()
+          .then((stopped) => stopped > 0 ? showOmniOverlay('global-shortcut') : undefined)
+          .catch((error) => diagnostics.failure('omni:cursor:emergency-stop', error))
+      })
+      if (!registeredOmniEmergencyStop) {
+        await diagnostics.failure('omni:cursor:emergency-stop', new Error('The Omni Cursor emergency-stop shortcut is unavailable.')).catch(() => undefined)
+      }
+    } catch (error) {
+      registeredOmniEmergencyStop = false
+      await diagnostics.failure('omni:cursor:emergency-stop', error).catch(() => undefined)
+    }
+  }
   if (value.enabled && value.activation.shortcut) {
     try {
       if (globalShortcut.register(value.activation.shortcut, () => { void showOmniOverlay('global-shortcut') })) {
@@ -988,6 +1009,9 @@ async function showOmniOverlay(source: OmniStartRequest['activationSource']): Pr
 }
 
 async function requireOmniCursorReady(): Promise<void> {
+  if (!registeredOmniEmergencyStop) {
+    throw new Error('Omni Cursor Mode is unavailable because its emergency-stop shortcut could not be registered.')
+  }
   const status = await omniCursor.permissions()
   if (status.nativeHelper !== 'available') {
     throw new Error('Omni Cursor Mode is unavailable because its signed native helper is missing. Reinstall OmniCode or rebuild the app.')
@@ -1524,7 +1548,11 @@ function registerIpc(): void {
   handle('omni:voice:availability', () => omniVoice.availability())
   handle('omni:voice:voices', () => omniVoice.voices())
   handle('omni:voice:stop', () => omniVoice.stop())
-  handle('omni:cursor:status', () => omniCursor.permissions())
+  handle('omni:cursor:status', async () => ({
+    ...await omniCursor.permissions(),
+    emergencyStop: registeredOmniEmergencyStop ? 'registered' as const : 'unavailable' as const,
+    emergencyStopShortcut: OMNI_CURSOR_EMERGENCY_STOP_SHORTCUT
+  }))
 
   handle('omni:overlay:settings', () => omniSettings.get())
   handle('omni:overlay:start', (_event, input: string) => startOmniTask(input, omniOverlayActivationSource))
@@ -1681,6 +1709,7 @@ app.on('will-quit', (event) => {
   event.preventDefault()
   finalCleanupStarted = true
   if (registeredOmniShortcut) globalShortcut.unregister(registeredOmniShortcut)
+  if (registeredOmniEmergencyStop) globalShortcut.unregister(OMNI_CURSOR_EMERGENCY_STOP_SHORTCUT)
   omniTray?.destroy()
   omniTray = null
   ai.shutdown()

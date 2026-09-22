@@ -63,8 +63,8 @@ stabilization phase.
 - Refreshed Omni cloud model selection to use authenticated provider catalogs
   for OpenAI, Anthropic, and Gemini while retaining inspected local Ollama
   models.
-- The current complete serial suite passes 66 files with 559 tests and one
-  intentionally skipped native-Keychain file/test. TypeScript, the 3,121-module
+- The current complete serial suite passes 66 files with 561 tests and one
+  intentionally skipped native-Keychain file/test. TypeScript, the 3,122-module
   production build, x86_64 native helper, and x64 directory package pass. A built-app live smoke rendered Code/Work/Omni, verified the
   restricted overlay boundary, reopened it with real `⌘⇧Space` while another
   app was foreground, queried real TTS availability/voices, and confirmed a
@@ -75,6 +75,13 @@ stabilization phase.
   native PTY, localhost secret boundaries, navigation blocking, and zero
   renderer errors. This removed noisy false failures from the old fresh-profile
   harness without weakening the workspace authorization boundary.
+- Added a renderer-independent Cursor emergency stop owned by Electron's main
+  process. Cursor readiness now requires successful registration of fixed
+  `⌘⇧Esc`; activation settings cannot replace that chord. A packaged live audit
+  started a real Google-backed Cursor task, sent the actual chord through the
+  bundled helper, and verified provider/action abort, session cleanup, and the
+  exact stopped result. The UI exposes the chord wherever Cursor readiness is
+  shown.
 - After approval-display, agent-terminal, model-result, browser-isolation, and
   native-Cursor hardening, the complete serial suite and focused TypeScript
   checking pass.

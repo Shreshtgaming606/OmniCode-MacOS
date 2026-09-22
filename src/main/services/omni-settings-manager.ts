@@ -12,6 +12,7 @@ import {
   OMNI_LIMITS
 } from '../../shared/omni-contracts'
 import type { AIProviderId } from '../../shared/contracts'
+import { OMNI_CURSOR_EMERGENCY_STOP_SHORTCUT } from '../../shared/omni-cursor-contracts'
 import type { WorkApprovalMode } from '../../shared/tool-contracts'
 
 const PROVIDERS = new Set<AIProviderId>(['ollama', 'openai', 'anthropic', 'google'])
@@ -63,6 +64,9 @@ export function validateOmniSettings(value: unknown): OmniSettings {
   }
   const activation = record.activation as Record<string, unknown>
   const shortcut = validateBoundedText(activation.shortcut, 'global shortcut', OMNI_LIMITS.shortcutCharacters)
+  if (shortcut === OMNI_CURSOR_EMERGENCY_STOP_SHORTCUT || shortcut === 'Command+Shift+Escape') {
+    throw new Error('Omni activation cannot replace the Cursor emergency-stop shortcut.')
+  }
   if (typeof activation.voiceActivation !== 'string' || !VOICE_ACTIVATION_MODES.has(activation.voiceActivation as OmniVoiceActivation)) {
     throw new Error('Omni voice activation setting is invalid.')
   }

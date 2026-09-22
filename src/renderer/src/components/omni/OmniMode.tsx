@@ -38,7 +38,11 @@ import type {
   OmniVoiceAvailability,
 } from '../../../../shared/omni-contracts'
 import type { WorkApprovalMode } from '../../../../shared/tool-contracts'
-import type { OmniCursorPermissionStatus } from '../../../../shared/omni-cursor-contracts'
+import {
+  OMNI_CURSOR_EMERGENCY_STOP_LABEL,
+  OMNI_CURSOR_EMERGENCY_STOP_SHORTCUT,
+  type OmniCursorRuntimeStatus
+} from '../../../../shared/omni-cursor-contracts'
 import './OmniMode.css'
 
 const TERMINAL_STATUSES = new Set<OmniStatus>(['completed', 'failed', 'stopped'])
@@ -111,8 +115,9 @@ export function OmniMode({ active }: { active: boolean }) {
   const [permissions, setPermissions] = useState<OmniPermissionsSnapshot | null>(null)
   const [models, setModels] = useState<AIModel[]>([])
   const [voiceOutput, setVoiceOutput] = useState<OmniVoiceAvailability>({ available: false, reason: 'Checking macOS speech output…' })
-  const [cursorStatus, setCursorStatus] = useState<OmniCursorPermissionStatus>({
-    accessibility: 'unavailable', nativeHelper: 'unavailable', checkedAt: 0
+  const [cursorStatus, setCursorStatus] = useState<OmniCursorRuntimeStatus>({
+    accessibility: 'unavailable', nativeHelper: 'unavailable', emergencyStop: 'unavailable',
+    emergencyStopShortcut: OMNI_CURSOR_EMERGENCY_STOP_SHORTCUT, checkedAt: 0
   })
   const [installedVoices, setInstalledVoices] = useState<OmniInstalledVoice[]>([])
   const [requestText, setRequestText] = useState('')
@@ -142,7 +147,10 @@ export function OmniMode({ active }: { active: boolean }) {
         window.omnicode.omni.voice.availability().catch(() => ({ available: false, reason: 'macOS speech output is unavailable.' })),
         window.omnicode.omni.voice.voices().catch(() => [] as OmniInstalledVoice[]),
         window.omnicode.omni.cursor.status().catch(() => ({
-          accessibility: 'unavailable' as const, nativeHelper: 'unavailable' as const, checkedAt: Date.now()
+          accessibility: 'unavailable' as const, nativeHelper: 'unavailable' as const,
+          emergencyStop: 'unavailable' as const,
+          emergencyStopShortcut: OMNI_CURSOR_EMERGENCY_STOP_SHORTCUT as typeof OMNI_CURSOR_EMERGENCY_STOP_SHORTCUT,
+          checkedAt: Date.now()
         })),
       ])
       setSettings(nextSettings)
@@ -177,6 +185,7 @@ export function OmniMode({ active }: { active: boolean }) {
       setModelDraft(next.model.modelId)
       setControllerAvailable(true)
       void fetchOmniModels(next.model.provider).then(setModels).catch(() => setModels([]))
+      void window.omnicode.omni.cursor.status().then(setCursorStatus).catch(() => undefined)
     })
     const unsubscribeTask = window.omnicode.omni.tasks.onTaskChanged((changed) => {
       setHistory((current) => {
@@ -335,7 +344,8 @@ export function OmniMode({ active }: { active: boolean }) {
   }, [models, settings])
   const currentStatus = task?.status ?? 'idle'
   const taskRunning = Boolean(task && !isTerminalOmniStatus(task.status))
-  const cursorReady = cursorStatus.accessibility === 'granted' && cursorStatus.nativeHelper === 'available'
+  const cursorReady = cursorStatus.accessibility === 'granted' && cursorStatus.nativeHelper === 'available' &&
+    cursorStatus.emergencyStop === 'registered'
   const latestEvents = task?.events.slice(-30).reverse() ?? []
 
   return <section className="omni-mode" data-active={active} aria-label="Omni mode">
@@ -431,7 +441,7 @@ export function OmniMode({ active }: { active: boolean }) {
           <div className="omni-orb-badges" aria-label="Omni availability summary">
             <span><Mic aria-hidden="true" />Voice input unavailable</span>
             <span><AudioWaveform aria-hidden="true" />{voiceOutput.available ? 'Spoken output ready' : 'Spoken output unavailable'}</span>
-            <span><MousePointer2 aria-hidden="true" />{cursorReady ? 'Structured cursor ready' : 'Native cursor unavailable'}</span>
+            <span><MousePointer2 aria-hidden="true" />{cursorReady ? `Structured cursor ready · Stop ${OMNI_CURSOR_EMERGENCY_STOP_LABEL}` : 'Native cursor unavailable'}</span>
           </div>
         </section>
 
@@ -534,7 +544,9 @@ export function OmniMode({ active }: { active: boolean }) {
             <Availability label="Spoken output" state={voiceOutput.available ? 'granted' : 'unavailable'}>
               {voiceOutput.available ? 'macOS speech synthesis is available' : voiceOutput.reason ?? 'macOS speech synthesis is unavailable'}
             </Availability>
-            <Availability label="Native cursor control" state="unavailable">Native accessibility bridge not connected</Availability>
+            <Availability label="Native cursor control" state={cursorReady ? 'granted' : 'unavailable'}>
+              {cursorReady ? `Structured helper ready · emergency stop ${OMNI_CURSOR_EMERGENCY_STOP_LABEL}` : 'Helper, Accessibility, and emergency stop must all be available'}
+            </Availability>
             {PERMISSIONS.map(({ id, label }) => <Availability key={id} label={label} state={permissions?.permissions[id] ?? 'not-determined'}>
               <button type="button" onClick={() => void run(() => window.omnicode.omni.permissions.openSettings(id))}>Open settings</button>
             </Availability>)}

@@ -351,4 +351,29 @@ describe('OmniController', () => {
     expect(resumeTask).toHaveBeenCalledWith(started.id)
     await controller.stop(started.id)
   })
+
+  it('stops every active Cursor task through the renderer-independent emergency path', async () => {
+    const taskStore = await store()
+    const cleanupTask = vi.fn(async () => undefined)
+    const agent = {
+      chat: vi.fn(async (_request, _tools, _execute, options) => {
+        await new Promise<void>((_resolve, reject) => {
+          if (options.signal?.aborted) reject(options.signal.reason)
+          else options.signal?.addEventListener('abort', () => reject(options.signal?.reason), { once: true })
+        })
+        return { content: '', toolActivities: [], toolCallCount: 0 }
+      })
+    } as unknown as WorkAgentManager
+    const controller = new OmniController({
+      store: taskStore, agent, createRouter: async () => router(), confirm: vi.fn(async () => true), cleanupTask
+    })
+
+    const started = await controller.start(request({ executionMode: 'cursor' }))
+    expect(controller.hasActiveCursorTask()).toBe(true)
+    await expect(controller.emergencyStopCursorTasks()).resolves.toBe(1)
+    expect((await controller.get(started.id)).status).toBe('stopped')
+    expect(controller.hasActiveCursorTask()).toBe(false)
+    expect(cleanupTask).toHaveBeenCalledWith(started.id)
+    await expect(controller.emergencyStopCursorTasks()).resolves.toBe(0)
+  })
 })

@@ -48,7 +48,7 @@ import type {
   OmniTaskSummary,
   OmniVoiceAvailability
 } from './omni-contracts'
-import type { OmniCursorPermissionStatus } from './omni-cursor-contracts'
+import type { OmniCursorRuntimeStatus } from './omni-cursor-contracts'
 
 export type ThemePreference = 'system' | 'dark' | 'light'
 
@@ -588,7 +588,7 @@ export interface OmniAPI {
     stop(): Promise<boolean>
   }
   cursor: {
-    status(): Promise<OmniCursorPermissionStatus>
+    status(): Promise<OmniCursorRuntimeStatus>
   }
 }
 

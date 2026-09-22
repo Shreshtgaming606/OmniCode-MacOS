@@ -76,6 +76,14 @@ export interface OmniCursorPermissionStatus {
   checkedAt: number
 }
 
+export const OMNI_CURSOR_EMERGENCY_STOP_SHORTCUT = 'CommandOrControl+Shift+Escape'
+export const OMNI_CURSOR_EMERGENCY_STOP_LABEL = '⌘⇧Esc'
+
+export interface OmniCursorRuntimeStatus extends OmniCursorPermissionStatus {
+  emergencyStop: 'registered' | 'unavailable'
+  emergencyStopShortcut: typeof OMNI_CURSOR_EMERGENCY_STOP_SHORTCUT
+}
+
 export interface OmniCursorMoveRequest extends OmniCursorPoint {
   /** 0 is immediate; positive values provide bounded, visible movement. */
   durationMs?: number

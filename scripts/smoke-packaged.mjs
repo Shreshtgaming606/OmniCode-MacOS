@@ -14,7 +14,10 @@ async function targetsWhenReady() {
   while (Date.now() < deadline) {
     try {
       const response = await fetch(`http://127.0.0.1:${port}/json`)
-      if (response.ok) return await response.json()
+      if (response.ok) {
+        const targets = await response.json()
+        if (targets.some((item) => item.type === 'page' && item.webSocketDebuggerUrl)) return targets
+      }
     } catch {
       // The packaged app may still be starting.
     }
@@ -177,6 +180,10 @@ if (serverResult.publicStatus !== 200 || serverResult.gitStatus !== 403 || serve
   throw new Error(`Static-server boundary smoke test failed: ${JSON.stringify(serverResult)}`)
 }
 
+const originalOmniSettings = await evaluate(`return await window.omnicode.omni.settings.get()`)
+if (!originalOmniSettings.enabled) {
+  await evaluate(`return await window.omnicode.omni.settings.update({ enabled: true })`)
+}
 const omniNative = await evaluate(`
   const [cursor, voice] = await Promise.all([
     window.omnicode.omni.cursor.status(),
@@ -204,7 +211,8 @@ const omniUI = await evaluate(`
     cursorDisabled: cursorOption instanceof HTMLOptionElement ? cursorOption.disabled : null
   }
 `)
-const cursorExpectedReady = omniNative.cursor.accessibility === 'granted'
+const cursorExpectedReady = omniNative.cursor.accessibility === 'granted' &&
+  omniNative.cursor.emergencyStop === 'registered'
 if (!omniUI.visible || omniUI.cursorDisabled !== !cursorExpectedReady ||
     !omniUI.text.includes(cursorExpectedReady ? 'Structured cursor ready' : 'Native cursor unavailable')) {
   throw new Error(`Omni Cursor readiness UI is inaccurate: ${JSON.stringify({ omniNative, omniUI })}`)
@@ -213,6 +221,10 @@ if (!omniUI.visible || omniUI.cursorDisabled !== !cursorExpectedReady ||
 if (screenshotPath) {
   const screenshot = await call('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false })
   await fs.writeFile(screenshotPath, Buffer.from(screenshot.data, 'base64'))
+}
+
+if (!originalOmniSettings.enabled) {
+  await evaluate(`return await window.omnicode.omni.settings.update({ enabled: false })`)
 }
 
 await evaluate(`location.href = 'https://example.com/'; return true`)

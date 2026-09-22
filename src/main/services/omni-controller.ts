@@ -357,6 +357,18 @@ export class OmniController {
   clearHistory(): Promise<void> { return this.options.store.clearHistory() }
   hasActiveTask(): boolean { return this.#active.size > 0 || this.#starting }
 
+  hasActiveCursorTask(): boolean {
+    return [...this.#active.values()].some((task) => task.executionMode === 'cursor')
+  }
+
+  async emergencyStopCursorTasks(): Promise<number> {
+    const taskIds = [...this.#active.entries()]
+      .filter(([, task]) => task.executionMode === 'cursor')
+      .map(([taskId]) => taskId)
+    await Promise.allSettled(taskIds.map((taskId) => this.stop(taskId)))
+    return taskIds.length
+  }
+
   async stopAll(): Promise<void> {
     await Promise.allSettled([...this.#active.keys()].map((taskId) => this.stop(taskId)))
   }

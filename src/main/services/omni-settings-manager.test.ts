@@ -73,6 +73,7 @@ describe('Omni settings defaults and validation', () => {
     ['empty shortcut', { activation: { shortcut: '   ' } }],
     ['control characters in shortcut', { activation: { shortcut: 'Command+\nSpace' } }],
     ['oversized shortcut', { activation: { shortcut: 'x'.repeat(OMNI_LIMITS.shortcutCharacters + 1) } }],
+    ['emergency stop shortcut collision', { activation: { shortcut: 'CommandOrControl+Shift+Escape' } }],
     ['unknown voice activation', { activation: { voiceActivation: 'always-listening' } }],
     ['unsafe speaking rate', { voice: { speakingRate: 2.01 } }],
     ['non-finite speaking rate', { voice: { speakingRate: Number.NaN } }],
