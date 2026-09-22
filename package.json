@@ -12,6 +12,7 @@
     "dev": "electron-vite dev",
     "build": "npm run typecheck && electron-vite build && npm run build:native",
     "build:native": "node scripts/build-omni-cursor-helper.mjs",
+    "audit:omni-cursor-live": "node scripts/audit-omni-cursor-live.mjs",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --configLoader runner",

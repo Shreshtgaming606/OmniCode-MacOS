@@ -13,6 +13,7 @@ function observation(x = 10, y = 20): OmniCursorObservation {
   return {
     cursor: { x, y },
     frontmostApplication: { name: 'Finder', bundleIdentifier: 'com.apple.finder', processIdentifier: 123 },
+    frontmostWindow: { x: 100, y: 80, width: 900, height: 700 },
     observedAt: 1_000
   }
 }
@@ -71,6 +72,16 @@ describe('OmniCursorService', () => {
     await expect(service.typeText('x'.repeat(8_193))).rejects.toThrow(/8,192/i)
     await expect(service.focusApplication('calculator' as 'finder')).rejects.toThrow(/allowlisted/i)
     await expect(service.click()).rejects.toThrow(/cursor helper|coordinate|observation/i)
+  })
+
+  it('rejects invalid native window geometry', async () => {
+    const native = adapter(async () => ({
+      ...observation(),
+      frontmostWindow: { x: 0, y: 0, width: 0, height: 500 }
+    }))
+    const service = new OmniCursorService({ platform: 'darwin', accessibilityTrusted: () => true, adapter: native })
+
+    await expect(service.observe()).rejects.toThrow(/window geometry/i)
   })
 
   it('pauses a session when the user moves the pointer between actions', async () => {

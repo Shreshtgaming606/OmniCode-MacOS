@@ -285,7 +285,7 @@ active task.
   catalog.
 - Code and Work regression coverage remains in the shared suite.
 
-Evidence: the current complete serial run passed 66 files with 561 tests and
+Evidence: the current complete serial run passed 66 files with 562 tests and
 one intentionally skipped native-Keychain file/test. TypeScript, the 3,122-
 module production renderer, main/preload bundles, x86_64 Swift helper, and x64
 directory package build pass. The packaged smoke verifies the embedded helper,
@@ -393,4 +393,4 @@ Until those items are implemented and verified, documentation and UI must not
 claim global post-quit wake, voice input, semantic screen understanding, or
 fully autonomous arbitrary computer control works. Real speech output,
 resident-process overlay activation, structured Cursor commands, and live
-read-only observation may be described only within their recorded limits.
+safe-app input may be described only within their recorded limits.

@@ -7,9 +7,9 @@ import { ToolRegistry } from './tool-registry'
 function setup() {
   const session = {
     state: 'active',
-    observe: vi.fn(async () => ({ cursor: { x: 1, y: 2 }, frontmostApplication: null, observedAt: 1 })),
-    move: vi.fn(async () => ({ observation: { cursor: { x: 3, y: 4 }, frontmostApplication: null, observedAt: 2 } })),
-    click: vi.fn(async () => ({ observation: { cursor: { x: 3, y: 4 }, frontmostApplication: null, observedAt: 3 } })),
+    observe: vi.fn(async () => ({ cursor: { x: 1, y: 2 }, frontmostApplication: null, frontmostWindow: null, observedAt: 1 })),
+    move: vi.fn(async () => ({ observation: { cursor: { x: 3, y: 4 }, frontmostApplication: null, frontmostWindow: null, observedAt: 2 } })),
+    click: vi.fn(async () => ({ observation: { cursor: { x: 3, y: 4 }, frontmostApplication: null, frontmostWindow: null, observedAt: 3 } })),
     doubleClick: vi.fn(), scroll: vi.fn(), typeText: vi.fn(), pressKey: vi.fn(), focusApplication: vi.fn(),
     resume: vi.fn(async () => undefined), dispose: vi.fn()
   }

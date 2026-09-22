@@ -126,6 +126,29 @@ private func pointObject(_ point: CGPoint) -> [String: Any] {
     ["x": point.x, "y": point.y]
 }
 
+private func frontmostWindowFrame(processIdentifier: pid_t) -> Any {
+    let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+    guard let windows = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
+        return NSNull()
+    }
+    for window in windows {
+        guard let owner = window[kCGWindowOwnerPID as String] as? NSNumber,
+              owner.int32Value == processIdentifier,
+              let layer = window[kCGWindowLayer as String] as? NSNumber,
+              layer.intValue == 0,
+              let bounds = window[kCGWindowBounds as String] as? NSDictionary,
+              let frame = CGRect(dictionaryRepresentation: bounds),
+              frame.width > 0, frame.height > 0 else { continue }
+        return [
+            "x": frame.origin.x,
+            "y": frame.origin.y,
+            "width": frame.width,
+            "height": frame.height
+        ] as [String: Any]
+    }
+    return NSNull()
+}
+
 private func observation() throws -> [String: Any] {
     let cursor = try cursorLocation()
     let frontmost = NSWorkspace.shared.frontmostApplication
@@ -142,6 +165,7 @@ private func observation() throws -> [String: Any] {
     return [
         "cursor": pointObject(cursor),
         "frontmostApplication": application,
+        "frontmostWindow": frontmost.map { frontmostWindowFrame(processIdentifier: $0.processIdentifier) } ?? NSNull(),
         "observedAt": Date().timeIntervalSince1970 * 1_000
     ]
 }
@@ -179,18 +203,36 @@ private func postMouseMove(source: CGEventSource, point: CGPoint) throws {
     markAndPost(event)
 }
 
+private func distanceFromPoint(_ point: CGPoint, toSegmentFrom start: CGPoint, through end: CGPoint) -> Double {
+    let deltaX = end.x - start.x
+    let deltaY = end.y - start.y
+    let squaredLength = deltaX * deltaX + deltaY * deltaY
+    if squaredLength == 0 { return hypot(point.x - start.x, point.y - start.y) }
+    let projection = max(0, min(1, ((point.x - start.x) * deltaX + (point.y - start.y) * deltaY) / squaredLength))
+    let nearest = CGPoint(x: start.x + projection * deltaX, y: start.y + projection * deltaY)
+    return hypot(point.x - nearest.x, point.y - nearest.y)
+}
+
 private func moveCursor(to destination: CGPoint, durationMs: Int) throws {
     guard pointIsOnActiveDisplay(destination) else {
         throw HelperFailure("invalid-request", "The requested pointer location is outside all active displays.")
     }
     let source = try eventSource()
     let start = try cursorLocation()
-    let steps = durationMs == 0 ? 1 : max(1, min(60, Int(ceil(Double(durationMs) / 16.0))))
+    let movementDistance = hypot(destination.x - start.x, destination.y - start.y)
+    let timeSteps = Int(ceil(Double(durationMs) / 16.0))
+    // Keep adjacent native events close enough that delayed cursor-state
+    // updates are not mistaken for human takeover on long, fast moves.
+    let spatialSteps = Int(ceil(movementDistance / 6.0))
+    let steps = durationMs == 0 ? 1 : max(1, min(240, max(timeSteps, spatialSteps)))
     var lastPosted = start
     for index in 1...steps {
         if index > 1 {
             let current = try cursorLocation()
-            if hypot(current.x - lastPosted.x, current.y - lastPosted.y) > takeoverTolerance {
+            // macOS can report cursor state several posted events behind on a
+            // fast move. Remaining on the intended path is therefore safe;
+            // moving off that path is treated as immediate human takeover.
+            if distanceFromPoint(current, toSegmentFrom: start, through: destination) > takeoverTolerance {
                 throw HelperFailure(
                     "user-takeover",
                     "Cursor control paused because the pointer was moved by the user.",
@@ -207,6 +249,22 @@ private func moveCursor(to destination: CGPoint, durationMs: Int) throws {
         lastPosted = point
         if index < steps { usleep(useconds_t(max(1, durationMs / steps) * 1_000)) }
     }
+    // CGEvent posting is asynchronous. Keep the short-lived helper alive until
+    // macOS reaches the final point so the subsequent click cannot land on an
+    // earlier point in the path.
+    for _ in 0..<50 {
+        usleep(5_000)
+        let current = try cursorLocation()
+        if hypot(current.x - destination.x, current.y - destination.y) <= 2.0 { return }
+        if distanceFromPoint(current, toSegmentFrom: start, through: destination) > takeoverTolerance {
+            throw HelperFailure(
+                "user-takeover",
+                "Cursor control paused because the pointer was moved by the user.",
+                details: ["previousCursor": pointObject(lastPosted), "currentCursor": pointObject(current)]
+            )
+        }
+    }
+    throw HelperFailure("execution-failed", "macOS did not move the pointer to the requested location in time.")
 }
 
 private func click(buttonName: String, count: Int) throws {
@@ -259,7 +317,26 @@ private func unicodeChunks(_ text: String, maximumUTF16Units: Int = 20) -> [[UIn
     return chunks
 }
 
-private func typeText(_ text: String) throws {
+private func focusedUIElement() throws -> AXUIElement {
+    guard let frontmost = NSWorkspace.shared.frontmostApplication else {
+        throw HelperFailure("execution-failed", "No frontmost application is available for text input.")
+    }
+    let application = AXUIElementCreateApplication(frontmost.processIdentifier)
+    var focusedValue: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(application, kAXFocusedUIElementAttribute as CFString, &focusedValue) == .success,
+          let focusedValue else {
+        throw HelperFailure("execution-failed", "No focused user-interface element is available for text input.")
+    }
+    return focusedValue as! AXUIElement
+}
+
+private func stringAttribute(_ element: AXUIElement, _ attribute: CFString) -> String? {
+    var value: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success else { return nil }
+    return value as? String
+}
+
+private func typeTextWithEvents(_ text: String) throws {
     let source = try eventSource()
     for units in unicodeChunks(text) {
         guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
@@ -272,8 +349,34 @@ private func typeText(_ text: String) throws {
         }
         markAndPost(down)
         markAndPost(up)
-        usleep(2_000)
+        // The helper is intentionally short lived. Give WindowServer enough
+        // time to consume each Unicode pair before its event source exits.
+        usleep(20_000)
     }
+}
+
+private func typeText(_ text: String) throws {
+    let focused = try focusedUIElement()
+    let role = stringAttribute(focused, kAXRoleAttribute as CFString)
+    let subrole = stringAttribute(focused, kAXSubroleAttribute as CFString)
+    guard role != "AXSecureTextField", subrole != "AXSecureTextField" else {
+        throw HelperFailure("invalid-request", "Omni Cursor Mode refuses to type into a secure or password field.")
+    }
+
+    var selectedTextIsSettable = DarwinBoolean(false)
+    if AXUIElementIsAttributeSettable(focused, kAXSelectedTextAttribute as CFString, &selectedTextIsSettable) == .success,
+       selectedTextIsSettable.boolValue {
+        let result = AXUIElementSetAttributeValue(focused, kAXSelectedTextAttribute as CFString, text as CFTypeRef)
+        guard result == .success else {
+            throw HelperFailure("execution-failed", "macOS rejected text input for the focused control.")
+        }
+        usleep(20_000)
+        return
+    }
+
+    // Some canvas-backed editors expose focus and secure-field metadata but do
+    // not expose a settable selected-text attribute.
+    try typeTextWithEvents(text)
 }
 
 private func flags(for modifiers: [String]) throws -> CGEventFlags {
@@ -312,6 +415,7 @@ private func pressKey(_ key: String, modifiers: [String], repeatCount: Int) thro
         markAndPost(up)
         usleep(10_000)
     }
+    usleep(40_000)
 }
 
 private func focusApplication(bundleIdentifier: String) throws {

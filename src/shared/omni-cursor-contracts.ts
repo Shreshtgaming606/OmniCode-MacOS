@@ -64,9 +64,16 @@ export interface OmniCursorFrontmostApplication {
   processIdentifier: number
 }
 
+/** Non-sensitive geometry for the frontmost application's foremost on-screen window. */
+export interface OmniCursorWindowFrame extends OmniCursorPoint {
+  width: number
+  height: number
+}
+
 export interface OmniCursorObservation {
   cursor: OmniCursorPoint
   frontmostApplication: OmniCursorFrontmostApplication | null
+  frontmostWindow: OmniCursorWindowFrame | null
   observedAt: number
 }
 

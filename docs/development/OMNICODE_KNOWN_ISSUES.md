@@ -26,7 +26,7 @@ lost. Secrets, tokens, and authorization headers must never be included here.
 - Current status: ✅ Resolved — the controller, settings/task stores, router,
   shared permission path, third-mode UI, restricted overlay, background launch,
   TTS, native-Cursor foundation, and tool-result safety boundaries are wired.
-  The current complete serial run passed 66 files with 561 tests and one
+  The current complete serial run passed 66 files with 562 tests and one
   intentionally skipped native-Keychain file/test; typecheck, the production
   build, native helper, x64 package, and packaged readiness smoke pass. A built-app live smoke rendered all three modes, verified the
   overlay boundary/global shortcut/TTS query, and confirmed missing-model
@@ -917,10 +917,12 @@ lost. Secrets, tokens, and authorization headers must never be included here.
   only the approved application/session.
 - Actual: OmniCode now has a fixed Swift helper and task-owned tools for bounded
   pointer observation/move/click/scroll/text/key input and fixed-app focus. The
-  helper and Accessibility gate work, both architectures compile, and live
-  read-only observation passes. Semantic AX/screen element discovery, secure-
-  field classification, a helper-owned stop event tap, signed
-  packaged TCC identity, and live input E2E are still absent.
+  helper and Accessibility gate work, both architectures compile, focused
+  secure/password roles are rejected, and a packaged disposable-TextEdit audit
+  passes move/restore, click/double-click, scroll, focus, exact Unicode
+  type/save, and keyboard input. Semantic AX/screen element discovery, a live
+  secure/system-dialog matrix, a helper-owned stop event tap, signed packaged
+  TCC identity, and broad application E2E are still absent.
 - Suspected cause: The initial safe foundation deliberately excludes broad
   screen capture and semantic AX control until their privacy, targeting,
   emergency-stop, and packaged-permission boundaries are implemented.
@@ -932,10 +934,11 @@ lost. Secrets, tokens, and authorization headers must never be included here.
   `native/omni-cursor-helper/main.swift`,
   `docs/development/OMNI_CURSOR_MODE.md`,
   `docs/development/OMNI_SECURITY.md`.
-- Current status: 🟡 Partially resolved — the narrow CGEvent foundation,
-  authorization, secret scan, task/session cancellation, and takeover pause are
-  implemented and regression-tested. Unrestricted AppleScript, screenshots,
-  and shell automation remain blocked. General release still requires semantic
-  AX/screen targeting, secure-field blocks, helper-owned stop defense, live safe-
-  app input verification, signed/notarized nested code, and matching Intel and
-  Apple Silicon runtime tests.
+- Current status: 🟡 Partially resolved — the narrow native foundation,
+  authorization, secret scan, focused secure-field refusal, task/session
+  cancellation, takeover pause, emergency stop, and safe TextEdit input are
+  implemented and regression/live-tested. Unrestricted AppleScript,
+  screenshots, and shell automation remain blocked. General release still
+  requires semantic AX/screen targeting, secure/system-dialog adversarial
+  coverage, helper-owned stop defense, signed/notarized nested code, and
+  matching Intel and Apple Silicon runtime tests.

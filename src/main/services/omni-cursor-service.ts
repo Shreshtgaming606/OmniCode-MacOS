@@ -304,6 +304,19 @@ function parsePoint(value: unknown): OmniCursorPoint {
   }
 }
 
+function parseWindowFrame(value: unknown): OmniCursorObservation['frontmostWindow'] {
+  if (value === null || value === undefined) return null
+  if (!isRecord(value)) throw new OmniCursorNativeError('invalid-response', 'The cursor helper returned invalid window geometry.')
+  const width = assertFiniteNumber(value.width, 'Frontmost window width', OMNI_CURSOR_LIMITS.coordinateMagnitude)
+  const height = assertFiniteNumber(value.height, 'Frontmost window height', OMNI_CURSOR_LIMITS.coordinateMagnitude)
+  if (width <= 0 || height <= 0) throw new OmniCursorNativeError('invalid-response', 'The cursor helper returned invalid window geometry.')
+  return {
+    ...parsePoint(value),
+    width,
+    height
+  }
+}
+
 function parseObservation(value: unknown): OmniCursorObservation {
   if (!isRecord(value)) throw new OmniCursorNativeError('invalid-response', 'The cursor helper omitted its observation.')
   const observedAt = assertFiniteNumber(value.observedAt, 'Observation timestamp')
@@ -322,7 +335,12 @@ function parseObservation(value: unknown): OmniCursorObservation {
     }
     frontmostApplication = { name, bundleIdentifier, processIdentifier: application.processIdentifier as number }
   }
-  return { cursor: parsePoint(value.cursor), frontmostApplication, observedAt }
+  return {
+    cursor: parsePoint(value.cursor),
+    frontmostApplication,
+    frontmostWindow: parseWindowFrame(value.frontmostWindow),
+    observedAt
+  }
 }
 
 function parseActionResult(value: unknown): OmniCursorActionResult {

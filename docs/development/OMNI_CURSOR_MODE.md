@@ -1,11 +1,11 @@
 # Omni Cursor Mode Architecture
 
-Last updated: 2026-09-21
+Last updated: 2026-09-22
 
 Status: **Structured native pointer/keyboard foundation implemented and
-automated-verified; read-only native observation and the process-level
-emergency-stop chord are live-verified; semantic screen observation and live
-general input tests remain**
+automated-verified; packaged safe-app pointer, click, scroll, Unicode typing,
+keyboard, focus, and the process-level emergency-stop chord are live-verified;
+semantic screen/element targeting and broader adversarial tests remain**
 
 ## Current repository reality
 
@@ -21,8 +21,9 @@ shell automation shortcut:
 - `src/main/services/omni-computer-tool-service.ts` registers only structured
   `computer.*` tools and binds every session to an active Omni task.
 - `native/omni-cursor-helper/main.swift` uses AppKit/ApplicationServices to
-  observe the pointer/frontmost application, move, click, double-click, scroll,
-  type bounded Unicode, press allowlisted keys, and focus a fixed application
+  observe the pointer/frontmost application plus non-sensitive window geometry,
+  move, click, double-click, scroll, type bounded Unicode into the focused
+  non-secure control, press allowlisted keys, and focus a fixed application
   allowlist.
 - `scripts/build-omni-cursor-helper.mjs` builds the helper for the requested
   package architecture. `package.json` packages it beneath
@@ -79,7 +80,7 @@ restricted overlay has no Cursor API.
 
 | Tool | Native command | Boundary |
 | --- | --- | --- |
-| `computer.observe` | `observe` | Pointer and bounded frontmost-app metadata only |
+| `computer.observe` | `observe` | Pointer, bounded frontmost-app metadata, and frontmost-window geometry only |
 | `computer.move` | `move` | Active-display coordinates, max 1 second |
 | `computer.click` | `click` | Left/right, one click, always confirm |
 | `computer.double-click` | `click` | Left/right, exactly two clicks, always confirm |
@@ -88,10 +89,11 @@ restricted overlay has no Cursor API.
 | `computer.press-key` | `press-key` | Named/ASCII allowlist, bounded modifiers/repeats, always confirm |
 | `computer.focus-app` | `focus-application` | Fixed application-ID allowlist; app must already run |
 
-Not implemented: AX element discovery/actions, screenshots, OCR,
+Not implemented: general AX element discovery/actions, screenshots, OCR,
 ScreenCaptureKit, arbitrary application identifiers, arbitrary URLs,
-application launch, password-field inspection, or a generic wait/script
-command. These are intentionally not simulated by the current foundation.
+application launch, or a generic wait/script command. Focused secure/password
+roles are detected and rejected before typing; this is not represented as
+general semantic screen understanding.
 
 ## Helper process and validation
 
@@ -133,17 +135,21 @@ working renderer.
 
 ## Privacy and sensitive operations
 
-The current `observe` result contains pointer coordinates plus bounded
-frontmost application name, bundle ID, and PID. It does not capture a screen,
-AX tree, field value, page, document, or clipboard. Activity and model-facing
-tool results pass through the existing redaction/sanitization boundary.
+The current `observe` result contains pointer coordinates, bounded frontmost
+application name/bundle ID/PID, and non-sensitive frontmost-window geometry. It
+does not capture a screen, AX tree, field value, page, document, or clipboard.
+Activity and model-facing tool results pass through the existing
+redaction/sanitization boundary.
 
-Because semantic secure-field detection does not exist yet, current typing is
-limited by direct approval and a secret-pattern block. Cursor Mode must not be
-used for passwords, passcodes, API keys, payment data, recovery phrases,
+Before inserting text, the helper resolves only the currently focused AX
+element and rejects secure/password roles. Supported controls receive text via
+their selected-text Accessibility attribute, which avoids clipboard exposure;
+canvas-backed non-secure controls retain a bounded CGEvent fallback. Direct
+approval and the independent secret-pattern block still apply. Cursor Mode must
+not be used for passwords, passcodes, API keys, payment data, recovery phrases,
 authorization codes, Keychain, system authorization, or OmniCode approval UI.
-Native semantic field targeting and secure-field blocking are required before
-those UI categories can be considered safely observable.
+Broader semantic targeting and a live secure/system-dialog adversarial matrix
+remain required.
 
 ## Permissions and packaging
 
@@ -168,22 +174,27 @@ lifecycle, movement takeover, polling takeover, resume/cleanup, tool
 registration, cursor-only routing, always-confirm descriptors, secret-text
 rejection, and controller pause-on-takeover.
 
-Both native architecture targets compile. A live read-only helper invocation
-on the current macOS host returned a valid pointer/frontmost-application
-observation with Accessibility granted. The full TypeScript build recognizes
-the helper and the renderer reports structured Cursor readiness.
+Both native architecture targets compile. On the current Intel macOS host, a
+repeatable live audit opens only a disposable TextEdit document, verifies and
+restores pointer movement, focuses the allowlisted app, performs single/double
+clicks, writes a unique Unicode marker, saves it with the real keyboard
+shortcut, verifies exact bytes from disk, exercises scroll, closes the document,
+restores focus/pointer where possible, and removes the temporary directory. The
+same audit passes against the rebuilt packaged helper. The packaged core smoke
+also reports Accessibility/helper/emergency-stop readiness and zero renderer
+errors.
 
 ## Remaining release gates
 
-- Live safe-app move/click/scroll/type/key/focus testing with visible approval.
 - Helper-owned emergency event tap and low-level event-queue cancellation as
   defense in depth; the main-process global `⌘⇧Esc` path is implemented.
-- Semantic AX observation/targeting and secure/system-dialog blocking.
+- Semantic AX/screen observation and targeting plus live secure/system-dialog
+  adversarial testing (focused secure/password typing is already rejected).
 - Signed/notarized packaged helper with stable Accessibility permission.
 - Permission grant, denial, revocation, restart, lock, and crash tests.
 - Multiple displays/Spaces, Reduce Motion, and real Apple Silicon runtime tests.
 - No-secret scans over packaged Cursor Activity, diagnostics, and model context.
 
-Until those gates pass, documentation may claim a structured Cursor Mode
-foundation and real read-only observation, but not fully autonomous arbitrary
+Until those gates pass, documentation may claim structured Cursor Mode and the
+specific live-tested safe-app input path, but not fully autonomous arbitrary
 macOS control or release readiness.

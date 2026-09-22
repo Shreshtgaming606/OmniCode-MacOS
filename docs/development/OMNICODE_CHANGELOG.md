@@ -3,6 +3,29 @@
 This log records repairs and audit milestones made during the no-new-features
 stabilization phase.
 
+## Omni Cursor live-input repair — 2026-09-22
+
+- Added a repeatable native Cursor audit that uses a private disposable
+  TextEdit document, restores the pointer/application where possible, removes
+  its temporary directory, and verifies move, single/double click, scroll,
+  fixed-app focus, exact Unicode text on disk, and the real save shortcut.
+- Fixed long moves falsely reporting human takeover when macOS cursor state
+  lagged posted events. Native detection now rejects movement off the intended
+  path and waits for the final coordinate before a following click can run.
+- Fixed native `type-text` reporting success even when short-lived Unicode
+  CGEvents were dropped. The helper now inserts through the focused control's
+  settable selected-text AX attribute without reading its value or using the
+  clipboard, rejects secure/password roles, and retains a bounded event fallback
+  only for non-secure canvas-backed editors.
+- Added non-sensitive frontmost-window geometry to the verified observation
+  contract so bounded coordinate clicks can be targeted without screenshots,
+  OCR, window titles, document contents, or arbitrary selectors.
+- The complete serial suite now passes 66 files/562 tests with one intentional
+  native-Keychain skip. TypeScript, the 3,122-module production build, x86_64
+  helper, x64 directory package, packaged core smoke, and packaged TextEdit
+  Cursor audit all pass. The package remains unsigned because no Developer ID
+  identity is installed.
+
 ## Omni text-first assistant foundation — 2026-09-21
 
 - Added Omni as the third persistent Code / Work / Omni mode, with validated
@@ -51,7 +74,7 @@ stabilization phase.
   readiness, eight mode-gated `computer.*` tools, active-display and input
   bounds, direct approval for click/type/key actions, secret-text refusal,
   cancellation/timeout, pointer takeover pausing, and cleanup. Both x86_64 and
-  arm64 helper targets compile; live read-only native observation passed.
+  arm64 helper targets compile; live native observation passed.
 - Separated public and localhost Managed Browser sessions, destroyed stale page
   state on scope changes, bound loopback sessions to one exact origin, and
   removed public DNS caching at the security decision boundary.
@@ -63,7 +86,7 @@ stabilization phase.
 - Refreshed Omni cloud model selection to use authenticated provider catalogs
   for OpenAI, Anthropic, and Gemini while retaining inspected local Ollama
   models.
-- The current complete serial suite passes 66 files with 561 tests and one
+- The current complete serial suite passes 66 files with 562 tests and one
   intentionally skipped native-Keychain file/test. TypeScript, the 3,122-module
   production build, x86_64 native helper, and x64 directory package pass. A built-app live smoke rendered Code/Work/Omni, verified the
   restricted overlay boundary, reopened it with real `⌘⇧Space` while another
