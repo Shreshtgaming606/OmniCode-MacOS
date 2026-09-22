@@ -30,6 +30,10 @@ stabilization phase.
 - Isolated the dev-server process test from unrelated interactive-shell setup
   and gave the real npm early-exit case an integration-appropriate timeout; its
   five-test file passes independently.
+- Made the verified single-worker/no-file-parallelism configuration the default
+  `npm test` path so macOS process, Git, filesystem, and localhost integration
+  tests do not create load-only timeout failures. The default command now passes
+  66 files/571 tests with one intentional native-Keychain skip.
 
 ## Omni native push-to-talk foundation — 2026-09-22
 
