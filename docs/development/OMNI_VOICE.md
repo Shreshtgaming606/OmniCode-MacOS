@@ -282,6 +282,9 @@ microphone/Speech permissions, and accurately reported the missing `en-US`
 on-device asset. A real recognize request failed with `on-device-unavailable`
 before prompting, proving there is no silent cloud fallback. Real microphone
 capture and transcript accuracy remain blocked by the missing host asset.
+The speech and Cursor helpers also cross-compile and ad-hoc signature-verify as
+arm64; the development outputs were restored to x86_64 afterward. Matching-
+hardware arm64 execution is still untested.
 
 ### Packaged real-world
 

@@ -100,7 +100,9 @@ lost. Secrets, tokens, and authorization headers must never be included here.
   cold identity remains blocked on Developer ID signing/notarization rather than
   being hidden by a fake availability result.
   Wake activation remains blocked until a licensed local engine/model and
-  signed both-architecture helper are implemented and verified.
+  signed helper is implemented and verified. Both current helpers now
+  cross-compile and signature-verify as arm64, but execution still requires
+  matching Apple Silicon hardware.
 
 ## OMI-048 — Code Agent lacked a structured visible course of action — Resolved
 

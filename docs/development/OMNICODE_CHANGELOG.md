@@ -31,6 +31,10 @@ stabilization phase.
   live Google attempts reached the provider but received honest HTTP 503
   high-demand failures before any tool call; Omni failed cleanly with no false
   result or side effect, so the success gate remains externally blocked.
+- Cross-compiled and ad-hoc signature-verified both native helpers as arm64,
+  then rebuilt/restored both development outputs as x86_64. This closes the
+  source/build compatibility check without claiming unperformed Apple Silicon
+  execution.
 
 ## Omni Cursor live-input repair — 2026-09-22
 
