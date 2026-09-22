@@ -53,6 +53,36 @@ export interface OmniInstalledVoice {
   locale: string
 }
 
+export interface OmniSpeechInputAvailability {
+  available: boolean
+  providerId: string
+  reason?: string
+  microphonePermission: OmniPermissionState
+  speechRecognitionPermission: OmniPermissionState
+  onDevice: boolean
+  streaming: boolean
+  locale: string
+  supportedLocales: string[]
+}
+
+export interface OmniSpeechInputEvent {
+  sessionId: string
+  type: 'listening' | 'partial' | 'final' | 'cancelled' | 'error'
+  transcript?: string
+  error?: string
+}
+
+export interface OmniSpeechRecognitionResult {
+  transcript: string
+  cancelled: boolean
+}
+
+export interface OmniSpeechStartOptions {
+  locale?: string
+  /** Omni's current privacy contract requires local recognition. */
+  requireOnDevice?: true
+}
+
 export interface OmniSettings {
   version: 1
   enabled: boolean

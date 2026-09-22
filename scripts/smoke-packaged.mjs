@@ -185,11 +185,12 @@ if (!originalOmniSettings.enabled) {
   await evaluate(`return await window.omnicode.omni.settings.update({ enabled: true })`)
 }
 const omniNative = await evaluate(`
-  const [cursor, voice] = await Promise.all([
+  const [cursor, voice, voiceInput] = await Promise.all([
     window.omnicode.omni.cursor.status(),
-    window.omnicode.omni.voice.availability()
+    window.omnicode.omni.voice.availability(),
+    window.omnicode.omni.voice.inputAvailability()
   ])
-  return { cursor, voice }
+  return { cursor, voice, voiceInput }
 `)
 if (omniNative.cursor.nativeHelper !== 'available') {
   throw new Error(`The packaged Omni cursor helper is unavailable: ${JSON.stringify(omniNative.cursor)}`)
@@ -208,7 +209,9 @@ const omniUI = await evaluate(`
   return {
     visible: Boolean(root),
     text: root?.textContent ?? '',
-    cursorDisabled: cursorOption instanceof HTMLOptionElement ? cursorOption.disabled : null
+    cursorDisabled: cursorOption instanceof HTMLOptionElement ? cursorOption.disabled : null,
+    voiceButtonText: [...(root?.querySelectorAll('.omni-execution-bar button') ?? [])]
+      .map((button) => button.textContent?.trim()).find((text) => /Speak request|Voice unavailable|Stop listening/.test(text ?? '')) ?? ''
   }
 `)
 const cursorExpectedReady = omniNative.cursor.accessibility === 'granted' &&
@@ -216,6 +219,11 @@ const cursorExpectedReady = omniNative.cursor.accessibility === 'granted' &&
 if (!omniUI.visible || omniUI.cursorDisabled !== !cursorExpectedReady ||
     !omniUI.text.includes(cursorExpectedReady ? 'Structured cursor ready' : 'Native cursor unavailable')) {
   throw new Error(`Omni Cursor readiness UI is inaccurate: ${JSON.stringify({ omniNative, omniUI })}`)
+}
+const voiceInputExpectedReady = omniNative.voiceInput.available === true
+if (!omniUI.text.includes(voiceInputExpectedReady ? 'On-device voice ready' : 'Voice input unavailable') ||
+    !omniUI.voiceButtonText.includes(voiceInputExpectedReady ? 'Speak request' : 'Voice unavailable')) {
+  throw new Error(`Omni voice-input readiness UI is inaccurate: ${JSON.stringify({ omniNative, omniUI })}`)
 }
 
 if (screenshotPath) {
@@ -249,6 +257,7 @@ console.log(JSON.stringify({
   omni: {
     cursor: omniNative.cursor,
     voiceAvailable: omniNative.voice.available,
+    voiceInput: omniNative.voiceInput,
     uiVisible: omniUI.visible,
     cursorOptionDisabled: omniUI.cursorDisabled
   },

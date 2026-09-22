@@ -1,6 +1,6 @@
 # OmniCode Known Issues
 
-Last updated: 2026-09-21
+Last updated: 2026-09-22
 
 Resolved issues remain in this file with a resolution so audit history is not
 lost. Secrets, tokens, and authorization headers must never be included here.
@@ -65,7 +65,7 @@ lost. Secrets, tokens, and authorization headers must never be included here.
   execution tests. Packaged login/Space/closed-window/conflict testing also
   remains.
 
-## OMI-051 — Omni voice input and local wake activation are unavailable
+## OMI-051 — Omni voice input is host-blocked and local wake activation is unavailable
 
 - Severity: High for the promised voice-first interaction
 - Reproduction: Attempt to start listening, view a real partial/final
@@ -73,24 +73,34 @@ lost. Secrets, tokens, and authorization headers must never be included here.
 - Expected: Native permission-aware STT/TTS works on demand; optional wake
   detection runs locally in the lightweight helper with no pre-wake network
   traffic and bounded measured resource use.
-- Actual: OmniCode now has real bounded macOS TTS using fixed `/usr/bin/say`,
-  installed voice discovery, safe rate/voice/text handling, Stop, cancellation,
-  and concurrency control. The serial baseline and built-app availability/voice-
-  list route passed. It still has no microphone capture, speech-recognition
-  provider, partial/final transcript, wake engine/model, or required signed
-  capturing helper/entitlements. Renderer media remains deny-by-default.
-- Suspected cause: Voice requires a native audio bridge and packaging work; a
-  wake feature also requires selecting, licensing, bundling, and measuring a
-  compatible local engine/model rather than adding a cosmetic setting.
+- Actual: OmniCode now has real bounded macOS TTS and a fixed-protocol Swift
+  push-to-talk helper using `AVAudioEngine` and Apple Speech. The provider,
+  typed IPC, bounded partial/final events, Stop/Cancel, permission mapping,
+  push-to-talk UI, package usage descriptions, and audio-input entitlement are
+  implemented. Renderer media remains deny-by-default and raw audio is never
+  returned or persisted. The current Mac reports both permissions not-determined
+  and `en-US` on-device recognition unavailable because its required Speech
+  assets are missing, so a real transcript cannot yet be produced. There is no
+  wake engine/model.
+- Suspected cause: The remaining push-to-talk block is the host's missing
+  on-device Apple Speech asset plus packaged permission approval. Wake still
+  requires selecting, licensing, bundling, and measuring a compatible local
+  engine/model rather than adding a cosmetic setting.
 - Relevant files: `src/main/index.ts`, `package.json`,
   `docs/development/OMNI_VOICE.md`,
   `docs/development/OMNI_BACKGROUND_SERVICE.md`,
   `docs/development/OMNI_SECURITY.md`.
-- Current status: 🟡 Partially resolved — speech output is implemented and
-  automated/live-query verified. Push-to-talk STT is not implemented. Wake
-  activation remains blocked until a licensed local engine/model and signed
-  both-architecture helper are implemented and verified; no Listening or Wake
-  Enabled success state may be shown in the meantime.
+- Current status: 🟡 Partially resolved — speech output and the push-to-talk STT
+  stack are implemented; 25 focused tests and a real helper status/start probe
+  pass, including fail-before-permission behavior when on-device recognition is
+  unavailable. Real capture remains **BLOCKED — HOST CONFIGURATION REQUIRED**
+  until an on-device speech asset is installed and permission can be approved.
+  The unsigned x64 package also reproduced the known first nested-helper timeout;
+  an immediate warm retry returned exact status and passed the UI smoke. Stable
+  cold identity remains blocked on Developer ID signing/notarization rather than
+  being hidden by a fake availability result.
+  Wake activation remains blocked until a licensed local engine/model and
+  signed both-architecture helper are implemented and verified.
 
 ## OMI-048 — Code Agent lacked a structured visible course of action — Resolved
 

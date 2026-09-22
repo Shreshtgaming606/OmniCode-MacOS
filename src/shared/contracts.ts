@@ -42,6 +42,10 @@ import type {
   OmniInstalledVoice,
   OmniPermissionId,
   OmniPermissionsSnapshot,
+  OmniSpeechInputAvailability,
+  OmniSpeechInputEvent,
+  OmniSpeechRecognitionResult,
+  OmniSpeechStartOptions,
   OmniSettings,
   OmniStartRequest,
   OmniTask,
@@ -586,6 +590,11 @@ export interface OmniAPI {
     availability(): Promise<OmniVoiceAvailability>
     voices(): Promise<OmniInstalledVoice[]>
     stop(): Promise<boolean>
+    inputAvailability(): Promise<OmniSpeechInputAvailability>
+    startInput(options?: OmniSpeechStartOptions): Promise<{ sessionId: string }>
+    stopInput(sessionId: string): Promise<OmniSpeechRecognitionResult>
+    cancelInput(sessionId: string): Promise<boolean>
+    onInputEvent(callback: (event: OmniSpeechInputEvent) => void): () => void
   }
   cursor: {
     status(): Promise<OmniCursorRuntimeStatus>

@@ -5,8 +5,12 @@ import { describe, expect, it, vi } from 'vitest'
 
 import {
   MacOSSayTextToSpeechProvider,
+  MacOSSpeechToTextProvider,
   NodeVoiceProcessRunner,
   OmniVoiceService,
+  resolveOmniSpeechHelperPath,
+  type SpeechRecognitionSession,
+  type SpeechToTextProvider,
   type VoiceProcessHandle,
   type VoiceProcessResult,
   type VoiceProcessRunner
@@ -260,6 +264,109 @@ describe('NodeVoiceProcessRunner', () => {
   })
 })
 
+function fakeSpeechChild(
+  onRequest: (request: Record<string, unknown>, child: ChildProcessWithoutNullStreams) => void
+): ChildProcessWithoutNullStreams {
+  const child = new EventEmitter() as EventEmitter & Partial<ChildProcessWithoutNullStreams>
+  const stdin = new PassThrough()
+  child.stdin = stdin
+  child.stdout = new PassThrough()
+  child.stderr = new PassThrough()
+  child.kill = vi.fn(() => true)
+  let input = ''
+  stdin.on('data', (chunk) => {
+    input += Buffer.from(chunk).toString('utf8')
+    const lines = input.split(/\r?\n/gu)
+    input = lines.pop() ?? ''
+    for (const line of lines) {
+      if (line) onRequest(JSON.parse(line) as Record<string, unknown>, child as ChildProcessWithoutNullStreams)
+    }
+  })
+  return child as ChildProcessWithoutNullStreams
+}
+
+describe('MacOSSpeechToTextProvider', () => {
+  it('resolves development and packaged helper paths without renderer input access', () => {
+    expect(resolveOmniSpeechHelperPath({ packaged: false, resourcesPath: '/resources', appPath: '/project' }))
+      .toBe('/project/out/native/omnicode-speech-helper')
+    expect(resolveOmniSpeechHelperPath({ packaged: true, resourcesPath: '/resources', appPath: '/project' }))
+      .toBe('/resources/omni-native/omnicode-speech-helper')
+  })
+
+  it('reports an honest unavailable state away from macOS without starting the helper', async () => {
+    const spawnProcess = vi.fn()
+    const provider = new MacOSSpeechToTextProvider({
+      platform: 'linux', helperPath: '/tmp/omnicode-speech-helper', spawnProcess,
+      accessFile: vi.fn(async () => undefined)
+    })
+
+    await expect(provider.status()).resolves.toMatchObject({
+      available: false,
+      reason: 'Omni voice input currently requires macOS.',
+      microphonePermission: 'unavailable',
+      speechRecognitionPermission: 'unavailable'
+    })
+    expect(spawnProcess).not.toHaveBeenCalled()
+  })
+
+  it('parses bounded native capability and permission status', async () => {
+    const spawnProcess = vi.fn(() => fakeSpeechChild((request, child) => {
+      ;(child.stdout as PassThrough).write(`${JSON.stringify({
+        version: 1,
+        id: request.id,
+        event: 'status',
+        microphonePermission: 'not-determined',
+        speechRecognitionPermission: 'granted',
+        recognizerAvailable: true,
+        onDevice: true,
+        streaming: true,
+        locale: 'en-US',
+        supportedLocales: ['en-US', 'fr-FR']
+      })}\n`)
+      queueMicrotask(() => child.emit('close', 0, null))
+    }))
+    const provider = new MacOSSpeechToTextProvider({
+      platform: 'darwin', helperPath: '/tmp/omnicode-speech-helper', spawnProcess,
+      accessFile: vi.fn(async () => undefined)
+    })
+
+    await expect(provider.status('en_US')).resolves.toEqual({
+      available: true,
+      providerId: 'macos-speech',
+      microphonePermission: 'not-determined',
+      speechRecognitionPermission: 'granted',
+      onDevice: true,
+      streaming: true,
+      locale: 'en-US',
+      supportedLocales: ['en-US', 'fr-FR']
+    })
+  })
+
+  it('streams transcript text and finalizes only after an explicit stop response', async () => {
+    const partials: string[] = []
+    const spawnProcess = vi.fn(() => fakeSpeechChild((request, child) => {
+      if (request.command === 'recognize') {
+        ;(child.stdout as PassThrough).write(`${JSON.stringify({ version: 1, id: request.id, event: 'ready', locale: 'en-US', onDevice: true })}\n`)
+        ;(child.stdout as PassThrough).write(`${JSON.stringify({ version: 1, id: request.id, event: 'partial', transcript: 'Hello Omni' })}\n`)
+      } else if (request.command === 'stop') {
+        ;(child.stdout as PassThrough).write(`${JSON.stringify({ version: 1, id: request.id, event: 'final', transcript: 'Hello OmniCode', cancelled: false })}\n`)
+        queueMicrotask(() => child.emit('close', 0, null))
+      }
+    }))
+    const provider = new MacOSSpeechToTextProvider({
+      platform: 'darwin', helperPath: '/tmp/omnicode-speech-helper', spawnProcess,
+      accessFile: vi.fn(async () => undefined)
+    })
+
+    const session = await provider.start({ requireOnDevice: true, onPartial: (text) => partials.push(text) })
+    expect(partials).toEqual(['Hello Omni'])
+    await expect(session.stop()).resolves.toEqual({ transcript: 'Hello OmniCode', cancelled: false })
+    expect(spawnProcess).toHaveBeenCalledWith('/tmp/omnicode-speech-helper', [], {
+      shell: false, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true
+    })
+  })
+})
+
 describe('OmniVoiceService', () => {
   it('delegates through the provider-neutral text-to-speech contract', async () => {
     const provider = {
@@ -279,5 +386,50 @@ describe('OmniVoiceService', () => {
     await service.dispose()
     expect(provider.speak).toHaveBeenCalledWith('Hello', { rate: 1.25 })
     expect(provider.dispose).toHaveBeenCalledOnce()
+  })
+
+  it('emits provider-neutral listening, partial, and final input events', async () => {
+    let partial: ((text: string) => void) | undefined
+    let resolveCompletion!: (result: { transcript: string; cancelled: boolean }) => void
+    const completion = new Promise<{ transcript: string; cancelled: boolean }>((resolve) => { resolveCompletion = resolve })
+    const session: SpeechRecognitionSession = {
+      id: 'voice-session',
+      completion,
+      stop: vi.fn(() => completion),
+      cancel: vi.fn(async () => undefined)
+    }
+    const speechToText: SpeechToTextProvider = {
+      id: 'test-stt',
+      availability: vi.fn(async () => ({ available: true })),
+      capabilities: vi.fn(async () => ({ onDevice: true, streaming: true, supportedLocales: ['en-US'] })),
+      start: vi.fn(async (options) => {
+        partial = options.onPartial
+        return session
+      })
+    }
+    const textToSpeech = {
+      id: 'test-tts',
+      availability: vi.fn(async () => ({ available: true })),
+      voices: vi.fn(async () => []),
+      speak: vi.fn(async () => ({ providerId: 'test-tts', status: 'completed' as const })),
+      stop: vi.fn(async () => false),
+      dispose: vi.fn(async () => undefined)
+    }
+    const service = new OmniVoiceService(textToSpeech, speechToText)
+    const events: Array<{ type: string; transcript?: string }> = []
+    service.onInputEvent((event) => events.push(event))
+
+    await expect(service.startInput()).resolves.toEqual({ sessionId: 'voice-session' })
+    expect(textToSpeech.stop).toHaveBeenCalledOnce()
+    partial?.('partial words')
+    resolveCompletion({ transcript: 'final words', cancelled: false })
+    await completion
+    await new Promise<void>((resolve) => queueMicrotask(() => resolve()))
+
+    expect(events).toEqual([
+      { sessionId: 'voice-session', type: 'listening' },
+      { sessionId: 'voice-session', type: 'partial', transcript: 'partial words' },
+      { sessionId: 'voice-session', type: 'final', transcript: 'final words' }
+    ])
   })
 })

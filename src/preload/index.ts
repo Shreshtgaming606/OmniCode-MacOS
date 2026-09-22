@@ -203,7 +203,12 @@ const api: OmniCodeAPI = {
     voice: {
       availability: () => ipcRenderer.invoke('omni:voice:availability'),
       voices: () => ipcRenderer.invoke('omni:voice:voices'),
-      stop: () => ipcRenderer.invoke('omni:voice:stop')
+      stop: () => ipcRenderer.invoke('omni:voice:stop'),
+      inputAvailability: () => ipcRenderer.invoke('omni:voice:input-availability'),
+      startInput: (options) => ipcRenderer.invoke('omni:voice:start-input', options),
+      stopInput: (sessionId) => ipcRenderer.invoke('omni:voice:stop-input', sessionId),
+      cancelInput: (sessionId) => ipcRenderer.invoke('omni:voice:cancel-input', sessionId),
+      onInputEvent: (callback) => subscribe('omni:voice-input-event', callback)
     },
     cursor: {
       status: () => ipcRenderer.invoke('omni:cursor:status')

@@ -32,6 +32,7 @@ import type {
   OmniPermissionId,
   OmniPermissionsSnapshot,
   OmniSettings,
+  OmniSpeechInputAvailability,
   OmniStatus,
   OmniTask,
   OmniTaskSummary,
@@ -115,6 +116,18 @@ export function OmniMode({ active }: { active: boolean }) {
   const [permissions, setPermissions] = useState<OmniPermissionsSnapshot | null>(null)
   const [models, setModels] = useState<AIModel[]>([])
   const [voiceOutput, setVoiceOutput] = useState<OmniVoiceAvailability>({ available: false, reason: 'Checking macOS speech output…' })
+  const [voiceInput, setVoiceInput] = useState<OmniSpeechInputAvailability>({
+    available: false,
+    providerId: 'macos-speech',
+    reason: 'Checking on-device speech recognition…',
+    microphonePermission: 'unavailable',
+    speechRecognitionPermission: 'unavailable',
+    onDevice: false,
+    streaming: false,
+    locale: 'en-US',
+    supportedLocales: []
+  })
+  const [voiceSessionId, setVoiceSessionId] = useState<string | null>(null)
   const [cursorStatus, setCursorStatus] = useState<OmniCursorRuntimeStatus>({
     accessibility: 'unavailable', nativeHelper: 'unavailable', emergencyStop: 'unavailable',
     emergencyStopShortcut: OMNI_CURSOR_EMERGENCY_STOP_SHORTCUT, checkedAt: 0
@@ -140,11 +153,16 @@ export function OmniMode({ active }: { active: boolean }) {
     setLoading(true)
     setError(null)
     try {
-      const [nextSettings, tasks, nextPermissions, nextVoiceOutput, nextVoices, nextCursorStatus] = await Promise.all([
+      const [nextSettings, tasks, nextPermissions, nextVoiceOutput, nextVoiceInput, nextVoices, nextCursorStatus] = await Promise.all([
         window.omnicode.omni.settings.get(),
         window.omnicode.omni.tasks.list(),
         window.omnicode.omni.permissions.status(),
         window.omnicode.omni.voice.availability().catch(() => ({ available: false, reason: 'macOS speech output is unavailable.' })),
+        window.omnicode.omni.voice.inputAvailability().catch(() => ({
+          available: false, providerId: 'macos-speech', reason: 'On-device speech recognition is unavailable.',
+          microphonePermission: 'unavailable' as const, speechRecognitionPermission: 'unavailable' as const,
+          onDevice: false, streaming: false, locale: 'en-US', supportedLocales: []
+        })),
         window.omnicode.omni.voice.voices().catch(() => [] as OmniInstalledVoice[]),
         window.omnicode.omni.cursor.status().catch(() => ({
           accessibility: 'unavailable' as const, nativeHelper: 'unavailable' as const,
@@ -159,6 +177,7 @@ export function OmniMode({ active }: { active: boolean }) {
       setPermissions(nextPermissions)
       setModels(await fetchOmniModels(nextSettings.model.provider).catch(() => []))
       setVoiceOutput(nextVoiceOutput)
+      setVoiceInput(nextVoiceInput)
       setInstalledVoices(nextVoices)
       setCursorStatus(nextCursorStatus)
       setControllerAvailable(true)
@@ -208,13 +227,44 @@ export function OmniMode({ active }: { active: boolean }) {
         return { ...current, events }
       })
     })
+    const unsubscribeVoiceInput = window.omnicode.omni.voice.onInputEvent((event) => {
+      if (event.type === 'listening') {
+        setVoiceSessionId(event.sessionId)
+        return
+      }
+      if (event.type === 'partial' && event.transcript !== undefined) {
+        setRequestText(event.transcript)
+        return
+      }
+      if (event.type === 'final') {
+        if (event.transcript !== undefined) setRequestText(event.transcript)
+        setVoiceSessionId((current) => current === event.sessionId ? null : current)
+        return
+      }
+      if (event.type === 'cancelled') {
+        setVoiceSessionId((current) => current === event.sessionId ? null : current)
+        return
+      }
+      if (event.type === 'error') {
+        setVoiceSessionId((current) => current === event.sessionId ? null : current)
+        setError(event.error ?? 'Voice recognition failed.')
+      }
+    })
 
     return () => {
       unsubscribeSettings()
       unsubscribeTask()
       unsubscribeEvent()
+      unsubscribeVoiceInput()
     }
   }, [load, refreshTask])
+
+  useEffect(() => {
+    if (active || !voiceSessionId) return
+    const sessionId = voiceSessionId
+    setVoiceSessionId(null)
+    void window.omnicode.omni.voice.cancelInput(sessionId).catch(() => undefined)
+  }, [active, voiceSessionId])
 
   const run = useCallback(async <T,>(operation: () => Promise<T>): Promise<T | undefined> => {
     setBusy(true)
@@ -260,7 +310,7 @@ export function OmniMode({ active }: { active: boolean }) {
   }, [run, task, updateSettings])
 
   const startTask = useCallback(async () => {
-    if (!settings || !settings.enabled) return
+    if (!settings || !settings.enabled || voiceSessionId) return
     const input = requestText.trim()
     if (!input) return
     const requestedModel = modelDraft.trim()
@@ -288,7 +338,18 @@ export function OmniMode({ active }: { active: boolean }) {
     setHistory((current) => [started, ...current.filter((candidate) => candidate.id !== started.id)])
     setLastSubmittedText(input)
     setRequestText('')
-  }, [modelDraft, requestText, run, settings, updateSettings])
+  }, [modelDraft, requestText, run, settings, updateSettings, voiceSessionId])
+
+  const toggleVoiceInput = useCallback(async () => {
+    if (voiceSessionId) {
+      const result = await run(() => window.omnicode.omni.voice.stopInput(voiceSessionId))
+      if (result?.transcript) setRequestText(result.transcript)
+      setVoiceSessionId(null)
+      return
+    }
+    const started = await run(() => window.omnicode.omni.voice.startInput({ locale: voiceInput.locale, requireOnDevice: true }))
+    if (started) setVoiceSessionId(started.sessionId)
+  }, [run, voiceInput.locale, voiceSessionId])
 
   const controlTask = useCallback(async (action: 'pause' | 'resume' | 'stop') => {
     if (!task) return
@@ -384,7 +445,7 @@ export function OmniMode({ active }: { active: boolean }) {
       {loading ? <LoaderCircle className="omni-spin" aria-hidden="true" /> : <ShieldCheck aria-hidden="true" />}
       <span>{loading
         ? <><strong>Connecting to the Omni controller.</strong> Loading settings and task history…</>
-        : <><strong>{controllerAvailable ? 'Omni controller available.' : 'Omni controller unavailable.'}</strong> Typed requests and macOS spoken responses work now; voice input is not connected yet{cursorReady ? ', and structured Cursor Mode is ready.' : ', while Cursor Mode still needs its helper and Accessibility permission.'}</>}
+        : <><strong>{controllerAvailable ? 'Omni controller available.' : 'Omni controller unavailable.'}</strong> Typed requests and macOS spoken responses work now; {voiceInput.available ? 'on-device voice input is ready' : `voice input is unavailable (${voiceInput.reason ?? 'native speech recognition is unavailable'})`}{cursorReady ? ', and structured Cursor Mode is ready.' : ', while Cursor Mode still needs its helper and Accessibility permission.'}</>}
       </span>
     </div>}
 
@@ -439,7 +500,9 @@ export function OmniMode({ active }: { active: boolean }) {
             <p>{task ? task.title : settings?.enabled ? 'Ready for a typed request' : 'Enable Omni to start'}</p>
           </div>
           <div className="omni-orb-badges" aria-label="Omni availability summary">
-            <span><Mic aria-hidden="true" />Voice input unavailable</span>
+            <span title={voiceInput.reason}><Mic aria-hidden="true" />{
+              voiceSessionId ? 'Listening on device' : voiceInput.available ? 'On-device voice ready' : 'Voice input unavailable'
+            }</span>
             <span><AudioWaveform aria-hidden="true" />{voiceOutput.available ? 'Spoken output ready' : 'Spoken output unavailable'}</span>
             <span><MousePointer2 aria-hidden="true" />{cursorReady ? `Structured cursor ready · Stop ${OMNI_CURSOR_EMERGENCY_STOP_LABEL}` : 'Native cursor unavailable'}</span>
           </div>
@@ -459,7 +522,10 @@ export function OmniMode({ active }: { active: boolean }) {
         </section>
 
         <section className="omni-composer" aria-label="Start an Omni task">
-          <label htmlFor="omni-request">Typed request <span>Voice transcription is not available yet</span></label>
+          <label htmlFor="omni-request">{voiceSessionId ? 'Voice request' : 'Typed request'} <span>{
+            voiceSessionId ? 'Listening locally — click Stop listening when finished' :
+              voiceInput.available ? 'On-device speech recognition ready' : (voiceInput.reason ?? 'Voice transcription unavailable')
+          }</span></label>
           <div>
             <textarea id="omni-request" value={requestText} onChange={(event) => setRequestText(event.target.value)}
               onKeyDown={(event) => {
@@ -469,9 +535,9 @@ export function OmniMode({ active }: { active: boolean }) {
                 }
               }}
               rows={2} maxLength={16_384} placeholder="Ask Omni to work across your connected tools…"
-              disabled={!settings?.enabled || taskRunning || busy} />
+              disabled={!settings?.enabled || taskRunning || busy || Boolean(voiceSessionId)} />
             <button type="button" className="omni-send" onClick={() => void startTask()}
-              disabled={!settings?.enabled || taskRunning || busy || !requestText.trim() || !modelDraft.trim()}
+              disabled={!settings?.enabled || taskRunning || busy || Boolean(voiceSessionId) || !requestText.trim() || !modelDraft.trim()}
               aria-label="Start typed Omni task"><Send /></button>
           </div>
           {!settings?.enabled && <small>Omni is off. Enable it in the header before starting a task.</small>}
@@ -479,7 +545,12 @@ export function OmniMode({ active }: { active: boolean }) {
         </section>
 
         <div className="omni-execution-bar" aria-label="Omni execution controls">
-          <button type="button" disabled title="Speech-to-text is not connected"><Mic />Voice unavailable</button>
+          <button type="button" className={voiceSessionId ? 'omni-listening' : ''}
+            disabled={!settings?.enabled || taskRunning || busy || (!voiceInput.available && !voiceSessionId)}
+            title={voiceInput.reason}
+            onClick={() => void toggleVoiceInput()}>
+            {voiceSessionId ? <Square /> : <Mic />}{voiceSessionId ? 'Stop listening' : voiceInput.available ? 'Speak request' : 'Voice unavailable'}
+          </button>
           {task?.status === 'paused'
             ? <button type="button" disabled={busy} onClick={() => void controlTask('resume')}><Play />Resume</button>
             : <button type="button" disabled={!task || !PAUSABLE_STATUSES.has(task.status) || busy} onClick={() => void controlTask('pause')}><Pause />Pause</button>}
@@ -540,7 +611,9 @@ export function OmniMode({ active }: { active: boolean }) {
             <Availability label="Omni controller" state={controllerAvailable ? 'granted' : 'unavailable'}>
               {controllerAvailable ? 'Connected to the main-process controller' : 'Backend connection unavailable'}
             </Availability>
-            <Availability label="Voice input" state="unavailable">Speech-to-text bridge not connected</Availability>
+            <Availability label="Voice input" state={voiceInput.available ? 'granted' : 'unavailable'}>
+              {voiceInput.available ? `On-device ${voiceInput.locale} speech recognition is ready` : voiceInput.reason ?? 'On-device speech recognition is unavailable'}
+            </Availability>
             <Availability label="Spoken output" state={voiceOutput.available ? 'granted' : 'unavailable'}>
               {voiceOutput.available ? 'macOS speech synthesis is available' : voiceOutput.reason ?? 'macOS speech synthesis is unavailable'}
             </Availability>

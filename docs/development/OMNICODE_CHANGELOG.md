@@ -3,6 +3,29 @@
 This log records repairs and audit milestones made during the no-new-features
 stabilization phase.
 
+## Omni native push-to-talk foundation — 2026-09-22
+
+- Added a fixed-protocol Swift speech helper using `AVAudioEngine` and
+  `SFSpeechRecognizer`; it requires on-device recognition, bounds session time
+  and transcript size, streams text-only partial/final events, and never writes
+  or returns raw audio. Parent-process EOF also cancels capture immediately.
+- Added provider-neutral main-process speech recognition, strict helper/event
+  validation, time/output bounds, Stop/Cancel/application-shutdown cleanup,
+  permission state mapping, typed IPC/preload events, and a real push-to-talk UI.
+- Kept renderer media denied and added only the package usage descriptions plus
+  helper audio-input entitlement required by the native boundary.
+- Added focused status, streaming, lifecycle, path, and UI tests. The host helper
+  probe accurately found not-determined permissions and a missing `en-US`
+  on-device Speech asset; recognition now fails before requesting permissions
+  in that state instead of silently using a network recognizer.
+- Verified the exact x64 app bundle contains both privacy usage descriptions and
+  an x86_64 entitlement-signed helper. Its warm packaged status/readiness UI,
+  workspace, PTY, server boundary, navigation boundary, and renderer-error smoke
+  passed. Removed stale UI copy that still called the implemented bridge
+  “not connected”; the unsigned first-helper timeout remains recorded honestly.
+- Re-ran the complete serial regression suite: 66 files and 569 tests passed,
+  one native-Keychain file/test remained intentionally skipped, and zero failed.
+
 ## Omni Cursor live-input repair — 2026-09-22
 
 - Added a repeatable native Cursor audit that uses a private disposable

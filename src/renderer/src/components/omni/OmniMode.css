@@ -391,6 +391,11 @@
 }
 .omni-execution-bar button svg { width: 15px; height: 15px; }
 .omni-execution-bar button:disabled { cursor: not-allowed; opacity: .62; }
+.omni-execution-bar button.omni-listening {
+  border-color: color-mix(in srgb, var(--danger) 48%, var(--border));
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, var(--bg-input));
+}
 
 .omni-model-settings {
   padding: 8px 10px;

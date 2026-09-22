@@ -114,6 +114,7 @@ const codeAgentActivity = new CodeAgentActivityManager(path.join(app.getPath('us
 const omniSettings = new OmniSettingsManager(path.join(app.getPath('userData'), 'omni-settings.json'))
 const omniTasks = new OmniTaskStore(path.join(app.getPath('userData'), 'omni-tasks.json'))
 const omniVoice = new OmniVoiceService()
+omniVoice.onInputEvent((event) => broadcastOmni('omni:voice-input-event', event))
 const permissionManager = new PermissionManager()
 const omniCursor = new OmniCursorService()
 const omniComputerTools = new ToolRegistry(permissionManager)
@@ -755,16 +756,17 @@ function mediaPermissionState(kind: 'microphone' | 'screen'): OmniPermissionsSna
   }
 }
 
-function omniPermissionsSnapshot(): OmniPermissionsSnapshot {
+async function omniPermissionsSnapshot(): Promise<OmniPermissionsSnapshot> {
   let accessibility: OmniPermissionsSnapshot['permissions'][OmniPermissionId] = 'unavailable'
   if (process.platform === 'darwin') {
     try { accessibility = systemPreferences.isTrustedAccessibilityClient(false) ? 'granted' : 'not-determined' } catch { accessibility = 'unavailable' }
   }
+  const speech = await omniVoice.inputAvailability().catch(() => null)
   return {
     checkedAt: Date.now(),
     permissions: {
-      microphone: mediaPermissionState('microphone'),
-      'speech-recognition': 'unavailable',
+      microphone: speech?.microphonePermission ?? mediaPermissionState('microphone'),
+      'speech-recognition': speech?.speechRecognitionPermission ?? 'unavailable',
       accessibility,
       'screen-recording': mediaPermissionState('screen'),
       automation: process.platform === 'darwin' ? 'not-determined' : 'unavailable',
@@ -1548,6 +1550,10 @@ function registerIpc(): void {
   handle('omni:voice:availability', () => omniVoice.availability())
   handle('omni:voice:voices', () => omniVoice.voices())
   handle('omni:voice:stop', () => omniVoice.stop())
+  handle('omni:voice:input-availability', () => omniVoice.inputAvailability())
+  handle('omni:voice:start-input', (_event, options) => omniVoice.startInput(options))
+  handle('omni:voice:stop-input', (_event, sessionId: string) => omniVoice.stopInput(sessionId))
+  handle('omni:voice:cancel-input', (_event, sessionId: string) => omniVoice.cancelInput(sessionId))
   handle('omni:cursor:status', async () => ({
     ...await omniCursor.permissions(),
     emergencyStop: registeredOmniEmergencyStop ? 'registered' as const : 'unavailable' as const,

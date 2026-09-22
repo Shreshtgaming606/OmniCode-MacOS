@@ -1,9 +1,10 @@
 # Omni Voice Architecture
 
-Last updated: 2026-09-21
+Last updated: 2026-09-22
 
-Status: **Real macOS speech output is implemented and automated-verified;
-microphone input, speech-to-text, and local wake activation are unavailable**
+Status: **Real macOS speech output and the native push-to-talk stack are
+implemented; live recognition is host-blocked by a missing on-device Speech
+asset, and local wake activation is unavailable**
 
 ## Current repository reality
 
@@ -26,16 +27,20 @@ result can be spoken; stopping a task also stops speech. The full Omni UI shows
 real output availability and installed voice choices rather than claiming input
 support.
 
-There is still no microphone capture, concrete `SpeechToTextProvider`, partial
-or final transcription, audio-input device setting, or “Hey Omni” detector.
-STT and wake-word interfaces exist only as contracts and are not presented as
-available providers.
+`MacOSSpeechToTextProvider` now launches the fixed
+`omnicode-speech-helper` executable. The helper uses `AVAudioEngine` and
+`SFSpeechRecognizer`, requires on-device recognition, emits bounded text-only
+partial/final events, caps sessions at 60 seconds, and supports Stop/Cancel.
+The main process owns the session and exposes only typed status/control/events;
+the push-to-talk UI cannot show Listening until native capture reports ready.
+There is still no audio-input device selector or “Hey Omni” detector.
 
 The main Electron session continues to reject renderer media permission
 requests. The renderer has no `getUserMedia`, `MediaRecorder`, or Web Speech
-implementation, and the package has no microphone/speech-recognition entitlement
-for a capturing helper. Therefore no UI may present voice **input** or wake
-activation as available.
+implementation. The helper is ad-hoc signed during local builds with the
+audio-input entitlement, while the app package includes both microphone and
+Speech Recognition usage descriptions. Developer ID signing/notarization and
+stable public TCC identity remain external release requirements.
 
 The model catalog deliberately filters audio/transcription/TTS model products
 from ordinary chat selectors in `src/main/services/model-catalog-manager.ts`.
@@ -102,9 +107,9 @@ The controller, not the speech provider, decides what the transcript means and
 whether a task may run. Transcription text is untrusted user input and follows
 the same validation limits as typed requests.
 
-## Initial speech-to-text provider
+## Initial speech-to-text provider — implemented
 
-The preferred initial implementation is a small Swift service using
+The initial implementation is a small Swift service using
 `AVAudioEngine` and `SFSpeechRecognizer`:
 
 - request microphone and Speech Recognition permissions only when the user
@@ -249,8 +254,8 @@ The global main-process settings store currently validates:
 - activation mode;
 - local-only wake-processing policy metadata.
 
-Voice input device, recognition provider/locale, and a usable wake enablement
-setting await the corresponding concrete providers.
+Voice input device selection and a usable wake enablement setting await their
+corresponding concrete providers. The current push-to-talk locale is `en-US`.
 
 The helper receives only the settings it needs. It never receives provider API
 keys or OAuth tokens.
@@ -265,13 +270,18 @@ redaction, embedded-command removal, provider failures, AbortSignal
 cancellation, explicit Stop, concurrent speech supersession, and disposal.
 `/usr/bin/say -v ?` was also invoked on the host to verify the real installed
 voice format used by the parser. The current complete serial run passed 66
-files with 564 tests and one intentionally skipped native-Keychain file/test. A
+files with 569 tests and one intentionally skipped native-Keychain file/test. A
 built-app live smoke queried the real TTS availability and installed macOS voice
 list through the production preload/main-process route.
 
-Permission-state mapping, partial/final transcript ordering, capture cleanup,
-STT interruption, and helper/wake behavior remain untestable because those
-providers do not exist yet.
+Focused tests now cover helper-path resolution, non-macOS unavailability,
+permission/capability parsing, strict text event streaming, Stop/final ordering,
+service listening/partial/final events, and the typed UI fallback. A real native
+probe compiled and ad-hoc signed the x86_64 helper, returned not-determined
+microphone/Speech permissions, and accurately reported the missing `en-US`
+on-device asset. A real recognize request failed with `on-device-unavailable`
+before prompting, proving there is no silent cloud fallback. Real microphone
+capture and transcript accuracy remain blocked by the missing host asset.
 
 ### Packaged real-world
 
@@ -290,14 +300,18 @@ providers do not exist yet.
 
 ## Current blockers
 
-- No native microphone/speech-to-text bridge exists.
+- The current Mac lacks the `en-US` on-device Apple Speech asset, so the native
+  provider correctly remains unavailable until the asset is installed.
+- The first invocation of a nested helper in the unsigned x64 package can time
+  out during macOS provenance evaluation; an immediate retry passed. Stable
+  cold behavior remains part of the Developer ID signing/notarization gate.
 - No local wake-word engine/model has been selected, licensed, bundled, or
   measured.
 - Developer ID signing/notarization is unavailable on the current build host;
   stable public TCC/helper verification therefore remains blocked.
 - Apple Silicon native execution still requires matching hardware testing.
 
-Voice input and wake activation remain marked unavailable until their real tests
-pass. macOS speech output may be described as available within the current
-fixed-executable provider limits; a packaged audible settings/task workflow is
-still required for release completion.
+Push-to-talk remains marked partially working until its real microphone tests
+pass; wake activation remains unavailable. macOS speech output may be described
+as available within the current fixed-executable provider limits; a packaged
+audible settings/task workflow is still required for release completion.

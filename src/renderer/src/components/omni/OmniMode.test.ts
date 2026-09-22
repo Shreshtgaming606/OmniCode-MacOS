@@ -11,14 +11,14 @@ import {
 } from './OmniMode'
 
 describe('OmniMode', () => {
-  it('renders an honest typed fallback without claiming unfinished native capabilities', () => {
+  it('renders an honest typed fallback while native capabilities are being checked', () => {
     const html = renderToStaticMarkup(createElement(OmniMode, { active: true }))
 
     expect(html).toContain('Typed request')
     expect(html).toContain('Voice input unavailable')
     expect(html).toContain('Native cursor unavailable')
     expect(html).toContain('Connecting to the Omni controller')
-    expect(html).not.toContain('Voice ready')
+    expect(html).not.toContain('On-device voice ready')
     expect(html).not.toContain('Cursor ready')
   })
 
