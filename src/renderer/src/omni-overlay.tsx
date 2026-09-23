@@ -1,9 +1,16 @@
-import { StrictMode, useCallback, useEffect, useMemo, useState } from 'react'
+import { StrictMode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { AudioWaveform, ExternalLink, LoaderCircle, Pause, Play, Send, Square, X } from 'lucide-react'
+import { Check, ExternalLink, Mic, RotateCcw, Square, X } from 'lucide-react'
 
 import type { OmniOverlayAPI } from '../../shared/contracts'
-import type { OmniEvent, OmniSettings, OmniTask, OmniTaskSummary } from '../../shared/omni-contracts'
+import type {
+  OmniEvent,
+  OmniPermissionId,
+  OmniSettings,
+  OmniSpeechOutputEvent,
+  OmniTask,
+  OmniTaskSummary
+} from '../../shared/omni-contracts'
 import './omni-overlay.css'
 
 declare global {
@@ -11,139 +18,255 @@ declare global {
 }
 
 const TERMINAL = new Set(['completed', 'failed', 'stopped'])
+type OverlayPhase = 'idle' | 'listening' | 'transcribing' | 'thinking' | 'working' | 'speaking' | 'completed' | 'failed' | 'permission'
 
-function statusCopy(status: OmniTaskSummary['status']): string {
-  return ({
-    idle: 'Idle', listening: 'Listening', transcribing: 'Transcribing', planning: 'Planning',
-    'waiting-for-approval': 'Waiting for approval', working: 'Working', 'using-cursor': 'Using cursor',
-    speaking: 'Speaking', paused: 'Paused', completed: 'Complete', failed: 'Failed', stopped: 'Stopped'
-  })[status]
+function taskPhase(status: OmniTaskSummary['status']): OverlayPhase {
+  if (status === 'completed') return 'completed'
+  if (status === 'failed' || status === 'stopped') return 'failed'
+  if (status === 'planning') return 'thinking'
+  if (status === 'speaking') return 'speaking'
+  if (status === 'listening') return 'listening'
+  if (status === 'transcribing') return 'transcribing'
+  return 'working'
 }
 
-function Overlay() {
+function phaseLabel(phase: OverlayPhase): string {
+  return ({
+    idle: 'Ready', listening: 'Listening…', transcribing: 'Understanding…', thinking: 'Understanding…',
+    working: 'Working…', speaking: 'Speaking…', completed: 'Done', failed: 'Omni needs attention',
+    permission: 'Permission needed'
+  })[phase]
+}
+
+function eventSummary(event: OmniEvent): string {
+  if (event.status === 'failed') return event.summary || 'That action did not finish.'
+  return ({
+    browser: 'Working in the browser…', application: 'Opening an application…', terminal: 'Running a command…',
+    file: 'Working with files…', git: 'Updating the repository…', cursor: 'Controlling the Mac…',
+    approval: 'Waiting for your approval…', plan: 'Preparing the next step…', result: event.summary || 'Finishing up…'
+  } as Partial<Record<OmniEvent['kind'], string>>)[event.kind] ?? 'Working on your request…'
+}
+
+function shortText(value: string, maximum = 180): string {
+  const compact = value.replace(/\s+/gu, ' ').trim()
+  return compact.length <= maximum ? compact : `${compact.slice(0, maximum - 1)}…`
+}
+
+export function Overlay() {
   const [settings, setSettings] = useState<OmniSettings | null>(null)
-  const [tasks, setTasks] = useState<OmniTaskSummary[]>([])
   const [activeTask, setActiveTask] = useState<OmniTask | null>(null)
-  const [input, setInput] = useState('')
-  const [busy, setBusy] = useState(false)
+  const [phase, setPhase] = useState<OverlayPhase>('idle')
+  const [transcript, setTranscript] = useState('')
+  const [summary, setSummary] = useState('Say what you need. Omni will handle the rest.')
+  const [amplitude, setAmplitude] = useState(0.08)
   const [error, setError] = useState('')
+  const [permissionNeeded, setPermissionNeeded] = useState<OmniPermissionId | null>(null)
+  const [permissionBusy, setPermissionBusy] = useState(false)
+  const sessionRef = useRef<string | null>(null)
+  const taskRef = useRef<OmniTask | null>(null)
+  const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const clearDismiss = useCallback(() => {
+    if (dismissTimer.current) clearTimeout(dismissTimer.current)
+    dismissTimer.current = null
+  }, [])
+
+  const hideLater = useCallback((delay = 4_000) => {
+    clearDismiss()
+    dismissTimer.current = setTimeout(() => { void window.omniOverlay.activation.hide() }, delay)
+  }, [clearDismiss])
 
   const refreshTask = useCallback(async (taskId: string) => {
     const task = await window.omniOverlay.tasks.get(taskId)
+    taskRef.current = task
     setActiveTask(task)
+    setPhase(taskPhase(task.status))
+    if (task.resultSummary) setSummary(shortText(task.resultSummary))
+    else if (task.error) setError(shortText(task.error))
+    return task
   }, [])
 
-  const refresh = useCallback(async () => {
-    const [nextSettings, nextTasks] = await Promise.all([
-      window.omniOverlay.settings.get(),
-      window.omniOverlay.tasks.list()
-    ])
+  const startTask = useCallback(async (input: string) => {
+    const request = input.trim()
+    if (!request) {
+      setPhase('idle')
+      setSummary('I didn’t catch that. Press the shortcut to try again.')
+      hideLater()
+      return
+    }
+    setPhase('transcribing')
+    setSummary('Understanding your request…')
+    setError('')
+    try {
+      const task = await window.omniOverlay.tasks.start(request)
+      taskRef.current = task
+      setActiveTask(task)
+      setPhase('thinking')
+      setSummary('Preparing a safe course of action…')
+    } catch (cause) {
+      setPhase('failed')
+      setError(shortText(cause instanceof Error ? cause.message : String(cause)))
+    }
+  }, [hideLater])
+
+  const beginListening = useCallback(async () => {
+    clearDismiss()
+    setError('')
+    setTranscript('')
+    setPermissionNeeded(null)
+    setAmplitude(0.08)
+    try {
+      const permissions = await window.omniOverlay.permissions.status()
+      if (permissions.permissions.microphone !== 'granted') {
+        setPermissionNeeded('microphone'); setPhase('permission'); setSummary('Omni needs microphone access to hear your request.'); return
+      }
+      if (permissions.permissions['speech-recognition'] !== 'granted') {
+        setPermissionNeeded('speech-recognition'); setPhase('permission'); setSummary('Omni needs Speech Recognition access to understand your request.'); return
+      }
+      const availability = await window.omniOverlay.voice.inputAvailability()
+      if (!availability.available) {
+        setPhase('failed')
+        setError(shortText(availability.reason ?? 'Voice input is unavailable on this Mac.'))
+        return
+      }
+      const started = await window.omniOverlay.voice.startInput({ locale: availability.locale, requireOnDevice: true })
+      sessionRef.current = started.sessionId
+      setPhase('listening')
+      setSummary('I’m listening.')
+    } catch (cause) {
+      setPhase('failed')
+      setError(shortText(cause instanceof Error ? cause.message : String(cause)))
+    }
+  }, [clearDismiss])
+
+  const activate = useCallback(async () => {
+    clearDismiss()
+    setError('')
+    const nextSettings = await window.omniOverlay.settings.get()
     setSettings(nextSettings)
-    setTasks(nextTasks)
-    const current = nextTasks.find((task) => !TERMINAL.has(task.status)) ?? nextTasks[0]
-    if (current) await refreshTask(current.id)
-    else setActiveTask(null)
-  }, [refreshTask])
+    if (!nextSettings.enabled) {
+      setPhase('failed'); setError('Finish Omni setup in OmniCode before using the global shortcut.'); return
+    }
+    const tasks = await window.omniOverlay.tasks.list()
+    const current = tasks.find((task) => !TERMINAL.has(task.status))
+    if (current) {
+      await refreshTask(current.id)
+      return
+    }
+    await beginListening()
+  }, [beginListening, clearDismiss, refreshTask])
+
+  const close = useCallback(async () => {
+    clearDismiss()
+    const sessionId = sessionRef.current
+    sessionRef.current = null
+    if (sessionId) await window.omniOverlay.voice.cancelInput(sessionId).catch(() => false)
+    await window.omniOverlay.activation.hide()
+  }, [clearDismiss])
+
+  const enablePermission = useCallback(async () => {
+    if (!permissionNeeded || permissionBusy) return
+    setPermissionBusy(true)
+    setError('')
+    try {
+      const result = await window.omniOverlay.permissions.request(permissionNeeded)
+      if (result.state === 'granted') await beginListening()
+      else {
+        setPhase('permission')
+        setSummary(result.state === 'requires-settings' || result.state === 'denied'
+          ? `Enable ${result.label} in System Settings, then return to OmniCode.`
+          : `${result.label} is not available yet.`)
+      }
+    } catch (cause) {
+      setError(shortText(cause instanceof Error ? cause.message : String(cause)))
+    } finally { setPermissionBusy(false) }
+  }, [beginListening, permissionBusy, permissionNeeded])
 
   useEffect(() => {
-    void refresh().catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)))
+    const offShow = window.omniOverlay.activation.onShow(() => { void activate() })
     const offTask = window.omniOverlay.tasks.onTaskChanged((task) => {
-      setTasks((current) => [task, ...current.filter((candidate) => candidate.id !== task.id)])
-      setActiveTask((current) => {
-        if (current && current.id !== task.id && !TERMINAL.has(current.status)) return current
-        void refreshTask(task.id).catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)))
-        return current
-      })
+      const current = taskRef.current
+      if (current && current.id !== task.id && !TERMINAL.has(current.status)) return
+      void refreshTask(task.id).then((full) => {
+        if (full.status === 'completed') hideLater()
+      }).catch((cause) => { setPhase('failed'); setError(shortText(cause instanceof Error ? cause.message : String(cause))) })
     })
     const offEvent = window.omniOverlay.tasks.onEvent((event) => {
-      setActiveTask((current) => current?.id === event.taskId
-        ? { ...current, events: [...current.events.filter((item) => item.id !== event.id), event] }
-        : current)
+      if (taskRef.current?.id !== event.taskId) return
+      setSummary(shortText(eventSummary(event)))
+      if (event.status === 'failed') setPhase('failed')
     })
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') void window.omniOverlay.activation.hide()
-    }
+    const offInput = window.omniOverlay.voice.onInputEvent((event) => {
+      if (sessionRef.current !== event.sessionId) return
+      if (event.type === 'amplitude') { setAmplitude(event.amplitude ?? 0); return }
+      if (event.type === 'partial') { setTranscript(shortText(event.transcript ?? '', 240)); return }
+      if (event.type === 'listening') { setPhase('listening'); return }
+      sessionRef.current = null
+      if (event.type === 'final') { setTranscript(shortText(event.transcript ?? '', 240)); void startTask(event.transcript ?? ''); return }
+      if (event.type === 'cancelled') { setPhase('idle'); return }
+      setPhase('failed'); setError(shortText(event.error ?? 'Voice input stopped unexpectedly.'))
+    })
+    const offOutput = window.omniOverlay.voice.onOutputEvent((event: OmniSpeechOutputEvent) => {
+      if (event.taskId && taskRef.current?.id !== event.taskId) return
+      if (event.type === 'speaking') {
+        clearDismiss(); setPhase('speaking'); setSummary(shortText(event.text ?? ''))
+      } else if (event.type === 'finished' || event.type === 'interrupted') {
+        const task = taskRef.current
+        if (task?.status === 'completed') { setPhase('completed'); hideLater() }
+        else if (task) setPhase(taskPhase(task.status))
+      }
+    })
+    const offPermission = window.omniOverlay.permissions.onChanged((snapshot) => {
+      if (permissionNeeded && snapshot.permissions[permissionNeeded] === 'granted') void beginListening()
+    })
+    const onKeyDown = (event: KeyboardEvent): void => { if (event.key === 'Escape') void close() }
     window.addEventListener('keydown', onKeyDown)
-    return () => { offTask(); offEvent(); window.removeEventListener('keydown', onKeyDown) }
-  }, [refresh, refreshTask])
+    return () => {
+      offShow(); offTask(); offEvent(); offInput(); offOutput(); offPermission()
+      window.removeEventListener('keydown', onKeyDown)
+      clearDismiss()
+    }
+  }, [activate, beginListening, clearDismiss, close, hideLater, permissionNeeded, refreshTask, startTask])
 
-  const running = activeTask && !TERMINAL.has(activeTask.status)
-  const canStart = Boolean(settings?.enabled && settings.model.modelId.trim() && input.trim() && !running && !busy)
-  const recentEvents = useMemo(() => activeTask?.events.slice(-4).reverse() ?? [], [activeTask])
+  const bars = useMemo(() => Array.from({ length: 13 }, (_, index) => {
+    const center = 1 - Math.abs(index - 6) / 7
+    return Math.max(0.12, Math.min(1, amplitude * (0.78 + center * 1.5) + center * 0.16))
+  }), [amplitude])
 
-  const start = async (): Promise<void> => {
-    if (!canStart) return
-    setBusy(true); setError('')
-    try {
-      const task = await window.omniOverlay.tasks.start(input.trim())
-      setActiveTask(task)
-      setInput('')
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
-    } finally { setBusy(false) }
-  }
+  const running = Boolean(activeTask && !TERMINAL.has(activeTask.status))
+  const visibleText = error || transcript || summary
 
-  const control = async (action: 'pause' | 'resume' | 'stop'): Promise<void> => {
-    if (!activeTask) return
-    setBusy(true); setError('')
-    try {
-      const next = await window.omniOverlay.tasks[action](activeTask.id)
-      await refreshTask(next.id)
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
-    } finally { setBusy(false) }
-  }
-
-  return <main className="omni-overlay-shell">
-    <header className="omni-overlay-header">
-      <div className="omni-overlay-brand"><span><AudioWaveform /></span><div><strong>Omni</strong><small>{settings?.model.modelId || 'Model not configured'}</small></div></div>
-      <div className="omni-overlay-window-actions">
-        <button type="button" onClick={() => void window.omniOverlay.activation.openMainWindow()} aria-label="Open Omni in OmniCode"><ExternalLink /></button>
-        <button type="button" onClick={() => void window.omniOverlay.activation.hide()} aria-label="Close Omni overlay"><X /></button>
+  return <main className={`omni-voice-overlay phase-${phase}`} aria-live="polite">
+    <header className="omni-voice-header">
+      <div className="omni-voice-brand"><span className="omni-mark" aria-hidden="true" /><strong>Omni</strong></div>
+      <div className="omni-window-actions">
+        <button type="button" onClick={() => void window.omniOverlay.activation.openMainWindow()} aria-label="Open full Omni"><ExternalLink /></button>
+        <button type="button" onClick={() => void close()} aria-label="Close Omni"><X /></button>
       </div>
     </header>
 
-    {!settings?.enabled ? <section className="omni-overlay-blocked" role="status">
-      <strong>Omni is not enabled</strong>
-      <p>Open OmniCode to choose a model and enable system-assistant tasks.</p>
-      <button type="button" onClick={() => void window.omniOverlay.activation.openMainWindow()}>Open Omni settings</button>
-    </section> : <>
-      <section className="omni-overlay-status" aria-live="polite">
-        <span className={`omni-overlay-orb ${running ? 'active' : ''}`}><AudioWaveform /></span>
-        <div><small>{activeTask ? statusCopy(activeTask.status) : 'Ready'}</small><strong>{activeTask?.title ?? 'What can I help you do?'}</strong>
-          <p>{activeTask?.resultSummary ?? activeTask?.error ?? activeTask?.plan?.reasoningSummary ?? 'Invisible Mode uses approved background tools. Cursor Mode uses the signed native helper and pauses when you take control.'}</p>
-        </div>
-      </section>
+    <section className="omni-voice-center">
+      <div className="omni-wave" aria-hidden="true">
+        <span className="wave-bracket left" />
+        <div className="wave-bars">{bars.map((value, index) => <i key={index} style={{ '--level': value } as React.CSSProperties} />)}</div>
+        <span className="wave-bracket right" />
+      </div>
+      <strong className="omni-phase-label">{phase === 'completed' && <Check />}{phaseLabel(phase)}</strong>
+      <p className={error ? 'error' : ''}>{visibleText}</p>
+    </section>
 
-      {activeTask?.plan && <section className="omni-overlay-plan">
-        <span>{activeTask.plan.completedSteps}/{activeTask.plan.steps.length}</span>
-        <div><small>Current step</small><strong>{activeTask.plan.currentStep}</strong><p>Next: {activeTask.plan.nextStep}</p></div>
-      </section>}
-
-      {recentEvents.length > 0 && <section className="omni-overlay-events" aria-label="Recent verified activity">
-        {recentEvents.map((event: OmniEvent) => <div key={event.id}><span data-status={event.status} /><p><strong>{event.title}</strong>{event.summary}</p></div>)}
-      </section>}
-
-      {error && <div className="omni-overlay-error" role="alert">{error}</div>}
-
-      <form className="omni-overlay-compose" onSubmit={(event) => { event.preventDefault(); void start() }}>
-        <textarea value={input} onChange={(event) => setInput(event.target.value)} maxLength={16_384}
-          placeholder={running ? 'Finish or stop the active task before starting another.' : 'Ask Omni to do something…'} disabled={Boolean(running) || busy}
-          rows={2} aria-label="Omni request" autoFocus />
-        <button type="submit" disabled={!canStart} aria-label="Start Omni task">{busy ? <LoaderCircle className="spin" /> : <Send />}</button>
-      </form>
-
-      <footer className="omni-overlay-footer">
-        <span>{settings?.executionMode === 'cursor' ? 'Cursor selected' : 'Invisible Mode'} · {settings?.approvalMode === 'ask' ? 'Always ask' : settings?.approvalMode === 'auto' ? 'Ask when needed' : 'Full Access'}</span>
-        <div>
-          {activeTask?.status === 'paused'
-            ? <button type="button" onClick={() => void control('resume')} disabled={busy}><Play />Resume</button>
-            : <button type="button" onClick={() => void control('pause')} disabled={!running || busy}><Pause />Pause</button>}
-          <button type="button" onClick={() => void control('stop')} disabled={!running || busy}><Square />Stop</button>
-        </div>
-      </footer>
-    </>}
+    <footer className="omni-voice-actions">
+      {permissionNeeded && <>
+        <button className="primary" type="button" disabled={permissionBusy} onClick={() => void enablePermission()}><Mic />{permissionBusy ? 'Requesting…' : 'Enable'}</button>
+        <button type="button" onClick={() => void window.omniOverlay.permissions.openSettings(permissionNeeded)}>Open Settings</button>
+      </>}
+      {phase === 'failed' && !permissionNeeded && <button className="primary" type="button" onClick={() => void beginListening()}><RotateCcw />Try Again</button>}
+      {running && <button type="button" className="stop" onClick={() => activeTask && void window.omniOverlay.tasks.stop(activeTask.id)}><Square />Stop Task</button>}
+    </footer>
   </main>
 }
 
-createRoot(document.getElementById('omni-overlay-root')!).render(<StrictMode><Overlay /></StrictMode>)
+if (typeof document !== 'undefined') {
+  const root = document.getElementById('omni-overlay-root')
+  if (root) createRoot(root).render(<StrictMode><Overlay /></StrictMode>)
+}

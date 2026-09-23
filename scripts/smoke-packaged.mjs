@@ -16,7 +16,7 @@ async function targetsWhenReady() {
       const response = await fetch(`http://127.0.0.1:${port}/json`)
       if (response.ok) {
         const targets = await response.json()
-        if (targets.some((item) => item.type === 'page' && item.webSocketDebuggerUrl)) return targets
+        if (targets.some((item) => item.type === 'page' && item.webSocketDebuggerUrl && !item.url?.includes('omni-overlay.html'))) return targets
       }
     } catch {
       // The packaged app may still be starting.
@@ -27,7 +27,7 @@ async function targetsWhenReady() {
 }
 
 const targets = await targetsWhenReady()
-const target = targets.find((item) => item.type === 'page' && item.webSocketDebuggerUrl)
+const target = targets.find((item) => item.type === 'page' && item.webSocketDebuggerUrl && !item.url?.includes('omni-overlay.html'))
 if (!target) throw new Error('No packaged renderer DevTools target was found.')
 
 const socket = new WebSocket(target.webSocketDebuggerUrl)
@@ -129,37 +129,27 @@ if (!appResult.recentHasWorkspace || appResult.treeEntries < 1) {
   throw new Error(`Workspace IPC smoke test failed: ${JSON.stringify(appResult)}`)
 }
 
-const terminalResult = await evaluate(`
+const terminalSession = await evaluate(`
   const workspace = ${workspaceLiteral}
-  return await new Promise(async (resolve, reject) => {
-    let sessionId = ''
-    let session
-    let output = ''
-    const timeout = setTimeout(() => {
-      unsubscribeData()
-      reject(new Error('PTY smoke test timed out.'))
-    }, 10_000)
-    const unsubscribeData = window.omnicode.terminal.onData((event) => {
-      if (event.id !== sessionId) return
-      output += event.data
-      if (!output.includes('__OMNICODE_PTY_OK__')) return
-      clearTimeout(timeout)
-      unsubscribeData()
-      void window.omnicode.terminal.kill(sessionId).finally(() => resolve({
-        shell: session.shell,
-        output: output.slice(-500)
-      }))
-    })
-    try {
-      session = await window.omnicode.terminal.create({ cwd: workspace, name: 'Release smoke test' })
-      sessionId = session.id
-      window.omnicode.terminal.write(sessionId, "printf '\\\\137\\\\137OMNICODE_PTY_OK\\\\137\\\\137\\\\n'\\n")
-    } catch (error) {
-      clearTimeout(timeout)
-      unsubscribeData()
-      reject(error)
-    }
+  window.__omnicodeReleaseTerminal?.unsubscribe?.()
+  const state = { sessionId: '', shell: '', output: '', unsubscribe: null }
+  state.unsubscribe = window.omnicode.terminal.onData((event) => {
+    if (event.id === state.sessionId) state.output += event.data
   })
+  const session = await window.omnicode.terminal.create({ cwd: workspace, name: 'Release smoke test' })
+  state.sessionId = session.id
+  state.shell = session.shell
+  window.__omnicodeReleaseTerminal = state
+  window.omnicode.terminal.write(session.id, "printf '\\\\137\\\\137OMNICODE_PTY_OK\\\\137\\\\137\\\\n'\\n")
+  return { id: session.id, shell: session.shell }
+`)
+await waitFor(`window.__omnicodeReleaseTerminal?.output.includes('__OMNICODE_PTY_OK__')`, 20_000)
+const terminalResult = await evaluate(`
+  const state = window.__omnicodeReleaseTerminal
+  state.unsubscribe?.()
+  await window.omnicode.terminal.kill(state.sessionId)
+  delete window.__omnicodeReleaseTerminal
+  return { shell: state.shell, output: state.output.slice(-500) }
 `)
 if (!terminalResult.output.includes('__OMNICODE_PTY_OK__')) {
   throw new Error(`PTY output was not captured: ${JSON.stringify(terminalResult)}`)

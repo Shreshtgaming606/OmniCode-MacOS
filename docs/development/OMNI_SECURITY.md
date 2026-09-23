@@ -67,7 +67,7 @@ The audited repository provides these reusable and Omni-specific boundaries:
 
 These protections remain mandatory. Automated Omni controller/router/store,
 permission, browser, voice, and renderer tests exercise the implemented
-boundaries. The current serial run passed 66 files with 571 tests and one
+boundaries. The current serial run passed 70 files with 601 tests and one
 intentional native-Keychain skip. A built-app smoke verified the overlay has
 no `window.omnicode` and exposes only the intended `window.omniOverlay`
 settings/tasks/activation groups; packaged adversarial testing remains part of
@@ -416,7 +416,7 @@ coverage but still require packaged release testing:
 - model-visible tool-result sanitizer and browser public/loopback isolation.
 
 After the approval-display, agent-terminal, model-result, browser-isolation,
-and native-Cursor hardening, the complete serial run passes 66 files/571 tests
+and native-Cursor hardening, the complete serial run passes 70 files/601 tests
 with one intentionally skipped native-Keychain file/test. TypeScript checking
 also passes. The production/native-helper build and x64 directory package pass;
 the packaged smoke verifies the helper is available, Accessibility is granted,

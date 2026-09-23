@@ -790,9 +790,10 @@ kbd { min-width: 23px; padding: 2px 5px; border: 1px solid var(--border); border
 .omni-settings-segments button small { grid-column: 2; color: var(--text-muted); }
 .omni-settings-select small, .omni-settings-note { margin: 0; color: var(--text-muted); font-size: var(--font-xs); line-height: 1.45; }
 .omni-settings-permissions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
-.omni-settings-permissions > div { min-height: 44px; padding: 7px 8px; display: grid; grid-template-columns: 23px minmax(0, 1fr) auto; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); }
-.omni-settings-permissions > div > span { color: var(--warning); }.omni-settings-permissions > div[data-state="granted"] > span { color: var(--success); }
-.omni-settings-permissions svg { width: 14px; }.omni-settings-permissions strong { font-size: var(--font-xs); }.omni-settings-permissions small { color: var(--text-muted); font-size: 9px; text-transform: capitalize; }
+.omni-settings-permissions > div { min-height: 58px; padding: 8px; display: grid; grid-template-columns: 23px minmax(0, 1fr) auto; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); }
+.omni-settings-permissions > div > span:first-child { color: var(--warning); }.omni-settings-permissions > div[data-state="granted"] > span:first-child { color: var(--success); }
+.omni-settings-permissions > div > span:nth-child(2) { min-width: 0; display: grid; gap: 2px; }
+.omni-settings-permissions svg { width: 14px; }.omni-settings-permissions strong { font-size: var(--font-xs); }.omni-settings-permissions small { color: var(--text-muted); font-size: 9px; }
 .omni-settings-permissions button { grid-column: 2 / -1; width: max-content; color: var(--accent); font-size: 9px; text-decoration: underline; }
 .provider-setting { min-height: 47px; display: grid; grid-template-columns: minmax(145px, .9fr) minmax(160px, 1fr) auto auto auto; align-items: center; gap: 7px; }
 .provider-setting > div { display: flex; align-items: center; gap: 8px; }

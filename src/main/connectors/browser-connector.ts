@@ -286,7 +286,9 @@ async function createElectronPage(
   scope: ManagedBrowserScope,
   loopbackOrigin?: string
 ): Promise<ManagedBrowserPage> {
-  const isolatedSession = session.fromPartition(`persist:omnicode-${mode}-browser-${scope}-v2`, { cache: true })
+  // A partition without the `persist:` prefix is memory-only. Browser cookies,
+  // cache, and site storage therefore disappear when the app session ends.
+  const isolatedSession = session.fromPartition(`omnicode-${mode}-browser-${scope}-v2`, { cache: false })
   installSessionGuards(isolatedSession, resolveHost, scope, loopbackOrigin)
   const window = new BrowserWindow({
     width: 1120,

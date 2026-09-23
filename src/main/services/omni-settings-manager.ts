@@ -116,7 +116,11 @@ export function validateOmniSettings(value: unknown): OmniSettings {
     menuBarItem: record.menuBarItem,
     activation: {
       shortcut,
-      voiceActivation: activation.voiceActivation as OmniVoiceActivation
+      // Earlier builds exposed a wake-word option before a wake-word listener existed.
+      // Migrate that setting to the implemented shortcut/press-to-talk behavior.
+      voiceActivation: activation.voiceActivation === 'wake-word-and-shortcut'
+        ? 'shortcut-only'
+        : activation.voiceActivation as OmniVoiceActivation
     },
     voice: {
       voiceId,
@@ -132,7 +136,8 @@ export function validateOmniSettings(value: unknown): OmniSettings {
     fullAccessWarningAcknowledged: record.fullAccessWarningAcknowledged,
     privacy: {
       wakeWordProcessing: 'on-device-only',
-      screenObservationEnabled: privacy.screenObservationEnabled,
+      // Current Cursor Mode operates on Accessibility metadata and does not capture screens.
+      screenObservationEnabled: false,
       activityRetentionDays: privacy.activityRetentionDays as number
     }
   }

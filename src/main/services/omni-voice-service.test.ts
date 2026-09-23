@@ -342,11 +342,29 @@ describe('MacOSSpeechToTextProvider', () => {
     })
   })
 
+  it('requests speech authorization independently of recognizer availability', async () => {
+    const spawnProcess = vi.fn(() => fakeSpeechChild((request, child) => {
+      ;(child.stdout as PassThrough).write(`${JSON.stringify({
+        version: 1, id: request.id, event: 'permission', permission: 'speech-recognition', state: 'granted'
+      })}\n`)
+      queueMicrotask(() => child.emit('close', 0, null))
+    }))
+    const provider = new MacOSSpeechToTextProvider({
+      platform: 'darwin', helperPath: '/tmp/omnicode-speech-helper', spawnProcess,
+      accessFile: vi.fn(async () => undefined)
+    })
+
+    await expect(provider.requestPermission('speech-recognition')).resolves.toBe('granted')
+    expect(spawnProcess).toHaveBeenCalledOnce()
+  })
+
   it('streams transcript text and finalizes only after an explicit stop response', async () => {
     const partials: string[] = []
+    const amplitudes: number[] = []
     const spawnProcess = vi.fn(() => fakeSpeechChild((request, child) => {
       if (request.command === 'recognize') {
         ;(child.stdout as PassThrough).write(`${JSON.stringify({ version: 1, id: request.id, event: 'ready', locale: 'en-US', onDevice: true })}\n`)
+        ;(child.stdout as PassThrough).write(`${JSON.stringify({ version: 1, id: request.id, event: 'amplitude', amplitude: 0.42 })}\n`)
         ;(child.stdout as PassThrough).write(`${JSON.stringify({ version: 1, id: request.id, event: 'partial', transcript: 'Hello Omni' })}\n`)
       } else if (request.command === 'stop') {
         ;(child.stdout as PassThrough).write(`${JSON.stringify({ version: 1, id: request.id, event: 'final', transcript: 'Hello OmniCode', cancelled: false })}\n`)
@@ -358,8 +376,13 @@ describe('MacOSSpeechToTextProvider', () => {
       accessFile: vi.fn(async () => undefined)
     })
 
-    const session = await provider.start({ requireOnDevice: true, onPartial: (text) => partials.push(text) })
+    const session = await provider.start({
+      requireOnDevice: true,
+      onPartial: (text) => partials.push(text),
+      onAmplitude: (amplitude) => amplitudes.push(amplitude)
+    })
     expect(partials).toEqual(['Hello Omni'])
+    expect(amplitudes).toEqual([0.42])
     await expect(session.stop()).resolves.toEqual({ transcript: 'Hello OmniCode', cancelled: false })
     expect(spawnProcess).toHaveBeenCalledWith('/tmp/omnicode-speech-helper', [], {
       shell: false, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true
@@ -390,6 +413,7 @@ describe('OmniVoiceService', () => {
 
   it('emits provider-neutral listening, partial, and final input events', async () => {
     let partial: ((text: string) => void) | undefined
+    let amplitude: ((value: number) => void) | undefined
     let resolveCompletion!: (result: { transcript: string; cancelled: boolean }) => void
     const completion = new Promise<{ transcript: string; cancelled: boolean }>((resolve) => { resolveCompletion = resolve })
     const session: SpeechRecognitionSession = {
@@ -404,6 +428,7 @@ describe('OmniVoiceService', () => {
       capabilities: vi.fn(async () => ({ onDevice: true, streaming: true, supportedLocales: ['en-US'] })),
       start: vi.fn(async (options) => {
         partial = options.onPartial
+        amplitude = options.onAmplitude
         return session
       })
     }
@@ -416,11 +441,12 @@ describe('OmniVoiceService', () => {
       dispose: vi.fn(async () => undefined)
     }
     const service = new OmniVoiceService(textToSpeech, speechToText)
-    const events: Array<{ type: string; transcript?: string }> = []
+    const events: Array<{ type: string; transcript?: string; amplitude?: number }> = []
     service.onInputEvent((event) => events.push(event))
 
     await expect(service.startInput()).resolves.toEqual({ sessionId: 'voice-session' })
     expect(textToSpeech.stop).toHaveBeenCalledOnce()
+    amplitude?.(0.6)
     partial?.('partial words')
     resolveCompletion({ transcript: 'final words', cancelled: false })
     await completion
@@ -428,6 +454,7 @@ describe('OmniVoiceService', () => {
 
     expect(events).toEqual([
       { sessionId: 'voice-session', type: 'listening' },
+      { sessionId: 'voice-session', type: 'amplitude', amplitude: 0.6 },
       { sessionId: 'voice-session', type: 'partial', transcript: 'partial words' },
       { sessionId: 'voice-session', type: 'final', transcript: 'final words' }
     ])

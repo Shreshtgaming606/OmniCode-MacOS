@@ -13,6 +13,7 @@ import type { AppMode } from '../../shared/work-contracts'
 import type { AIToolCall, AIToolConversationMessage } from './ai-tool-types'
 import { AIManager } from './ai-manager'
 import { serializeToolResultForModel } from './model-tool-result-sanitizer'
+import { isGoogleWorkspaceConnector, ProviderPolicyManager } from './provider-policy-manager'
 
 const MAX_AGENT_STEPS = 8
 const MAX_TOOL_CALLS = 12
@@ -84,6 +85,11 @@ function validateRequest(request: WorkAgentChatRequest): void {
   for (const message of request.messages) {
     if (!message || (message.role !== 'user' && message.role !== 'assistant') || typeof message.content !== 'string' || message.content.includes('\0')) {
       throw new Error('The Work conversation contains an invalid message.')
+    }
+    if (message.dataSources !== undefined && (!Array.isArray(message.dataSources) ||
+        message.dataSources.some((source) => source !== 'google-workspace') ||
+        new Set(message.dataSources).size !== message.dataSources.length)) {
+      throw new Error('The Work conversation contains invalid data provenance.')
     }
     bytes += Buffer.byteLength(message.content, 'utf8')
   }
@@ -236,7 +242,10 @@ function toolResultContent(result: ToolExecutionResult, expectedToolId: string):
 }
 
 export class WorkAgentManager {
-  constructor(private readonly ai: AIManager) {}
+  constructor(
+    private readonly ai: AIManager,
+    private readonly providerPolicies = new ProviderPolicyManager()
+  ) {}
 
   async chat(
     request: WorkAgentChatRequest,
@@ -248,6 +257,11 @@ export class WorkAgentManager {
     assertNotAborted(options.signal)
     const mode = options.mode ?? 'work'
     const systemPrompt = options.systemPrompt ?? WORK_AGENT_SYSTEM
+    const providerPolicy = this.providerPolicies.policyFor(request.provider, request.model)
+    let usedGoogleWorkspaceData = request.messages.some((message) => message.dataSources?.includes('google-workspace'))
+    if (usedGoogleWorkspaceData) {
+      this.providerPolicies.assertGoogleWorkspaceTransferAllowed(request.provider, request.model)
+    }
     if (mode !== 'work' && mode !== 'code' && mode !== 'omni') throw new Error('Choose a supported tool-agent mode.')
     if (!systemPrompt.trim() || systemPrompt.length > 32 * 1024 || systemPrompt.includes('\0')) throw new Error('The tool-agent instructions are invalid.')
     const maxSteps = options.maxSteps ?? MAX_AGENT_STEPS
@@ -264,7 +278,12 @@ export class WorkAgentManager {
       const response = options.onDelta
         ? await this.ai.streamChat(chatRequest, options.onDelta, options.signal)
         : await this.ai.chat(chatRequest)
-      return { content: response.content, toolActivities: [], toolCallCount: 0 }
+      return {
+        content: response.content,
+        toolActivities: [],
+        toolCallCount: 0,
+        ...(usedGoogleWorkspaceData ? { dataSources: ['google-workspace' as const] } : {})
+      }
     }
 
     const messages: AIToolConversationMessage[] = request.messages.map((message) => ({
@@ -293,7 +312,12 @@ export class WorkAgentManager {
       validateTurnCalls(turn.calls)
       if (!turn.calls.length) {
         if (!turn.content.trim()) throw new Error(`The AI model ended without a Work response${turn.stopReason ? ` (${turn.stopReason})` : ''}.`)
-        return { content: turn.content, toolActivities: activities, toolCallCount: callCount }
+        return {
+          content: turn.content,
+          toolActivities: activities,
+          toolCallCount: callCount,
+          ...(usedGoogleWorkspaceData ? { dataSources: ['google-workspace' as const] } : {})
+        }
       }
 
       if (turn.calls.length > maxToolCalls - callCount) {
@@ -345,6 +369,19 @@ export class WorkAgentManager {
         }
         activities.push(activity)
         options.onToolActivity?.({ ...activity })
+        if (isGoogleWorkspaceConnector(descriptor.connectorId) && !providerPolicy.allowsGoogleWorkspaceData) {
+          const detail = `${providerPolicy.displayName} is not approved for Google Workspace content in this OmniCode configuration. Choose a local Ollama model, OpenAI API, or Anthropic API.`
+          activity.status = 'failed'
+          activity.completedAt = Date.now()
+          activity.summary = `${descriptor.name} was blocked: ${detail}`
+          activity.errorCode = 'PROVIDER_DATA_POLICY_BLOCKED'
+          options.onToolActivity?.({ ...activity })
+          messages.push({
+            role: 'tool', callId: call.callId, name: call.name,
+            content: JSON.stringify({ ok: false, error: detail })
+          })
+          continue
+        }
         try {
           const result = await execute({ toolId: descriptor.id, mode, input: call.input })
           assertNotAborted(options.signal)
@@ -354,6 +391,7 @@ export class WorkAgentManager {
           activity.preview = toolPreview(descriptor.id, call.input, result.result)
           options.onToolActivity?.({ ...activity })
           messages.push({ role: 'tool', callId: call.callId, name: call.name, content: toolResultContent(result, descriptor.id) })
+          if (isGoogleWorkspaceConnector(descriptor.connectorId)) usedGoogleWorkspaceData = true
         } catch (error) {
           if (options.signal?.aborted) throw options.signal.reason ?? error
           const detail = safeToolError(error)

@@ -68,6 +68,53 @@ describe('Work model tool boundary', () => {
 })
 
 describe('WorkAgentManager', () => {
+  it('blocks historical Google Workspace content before an unapproved provider receives a request', async () => {
+    const chat = vi.fn()
+    const toolTurn = vi.fn()
+    const manager = new WorkAgentManager({ chat, toolTurn } as unknown as AIManager)
+
+    await expect(manager.chat({
+      provider: 'google', model: 'gemini-test',
+      messages: [{ role: 'assistant', content: 'Earlier Gmail-derived summary.', dataSources: ['google-workspace'] }]
+    }, [], vi.fn())).rejects.toThrow(/not approved for Google Workspace content/i)
+
+    expect(chat).not.toHaveBeenCalled()
+    expect(toolTurn).not.toHaveBeenCalled()
+  })
+
+  it('does not execute a Google tool for a blocked provider configuration', async () => {
+    const toolTurn = vi.fn()
+      .mockResolvedValueOnce({ content: '', calls: [{ callId: 'gmail-call', name: 'tool_0_gmail_search', toolId: 'gmail.search', input: { query: 'launch' } }] })
+      .mockResolvedValueOnce({ content: 'Choose an approved provider to search Gmail.', calls: [] })
+    const execute = vi.fn()
+    const response = await new WorkAgentManager({ toolTurn } as unknown as AIManager).chat({
+      provider: 'google', model: 'gemini-test', messages: [{ role: 'user', content: 'Find my launch email.' }]
+    }, [gmailSearchTool], execute)
+
+    expect(execute).not.toHaveBeenCalled()
+    expect(response.toolActivities).toMatchObject([{
+      toolId: 'gmail.search', status: 'failed', errorCode: 'PROVIDER_DATA_POLICY_BLOCKED'
+    }])
+    expect(toolTurn.mock.calls[1]?.[0].messages.at(-1)?.content).not.toContain('launch email contents')
+  })
+
+  it('allows an approved API path and marks the response as derived from Google Workspace data', async () => {
+    const toolTurn = vi.fn()
+      .mockResolvedValueOnce({ content: '', calls: [{ callId: 'gmail-call', name: 'tool_0_gmail_search', toolId: 'gmail.search', input: { query: 'launch' } }] })
+      .mockResolvedValueOnce({ content: 'I found the relevant message.', calls: [] })
+    const execute = vi.fn(async () => ({
+      toolId: 'gmail.search', startedAt: '2026-01-01T00:00:00Z', completedAt: '2026-01-01T00:00:01Z',
+      result: { messages: [{ subject: 'Launch', snippet: 'Ready' }] }, authorization: automaticAuthorization
+    }))
+
+    const response = await new WorkAgentManager({ toolTurn } as unknown as AIManager).chat({
+      provider: 'openai', model: 'gpt-test', messages: [{ role: 'user', content: 'Find my launch email.' }]
+    }, [gmailSearchTool], execute)
+
+    expect(execute).toHaveBeenCalledOnce()
+    expect(response.dataSources).toEqual(['google-workspace'])
+  })
+
   it.each(['openai', 'anthropic', 'google', 'ollama'] as const)('routes %s tool requests through the same non-bypassable PermissionManager pipeline', async (provider) => {
     const proposedTool: ToolDescriptor = {
       ...browserTool,
@@ -181,7 +228,7 @@ describe('WorkAgentManager', () => {
     const manager = new WorkAgentManager({ toolTurn } as unknown as AIManager)
 
     const response = await manager.chat({
-      provider: 'google', model: 'gemini-test', messages: [{ role: 'user', content: 'Find the launch email.' }]
+      provider: 'openai', model: 'gpt-test', messages: [{ role: 'user', content: 'Find the launch email.' }]
     }, [gmailSearchTool], async () => ({
       toolId: 'gmail.search', startedAt: '2026-01-01T00:00:00Z', completedAt: '2026-01-01T00:00:01Z',
       authorization: automaticAuthorization,
@@ -208,7 +255,7 @@ describe('WorkAgentManager', () => {
     const manager = new WorkAgentManager({ toolTurn } as unknown as AIManager)
 
     const response = await manager.chat({
-      provider: 'google', model: 'gemini-test', messages: [{ role: 'user', content: 'Find my resume.' }]
+      provider: 'openai', model: 'gpt-test', messages: [{ role: 'user', content: 'Find my resume.' }]
     }, [driveSearchTool], async () => ({
       toolId: 'drive.search', startedAt: '2026-01-01T00:00:00Z', completedAt: '2026-01-01T00:00:01Z',
       result: { files: [{ id: 'private-drive-id', name: 'Resume.pdf', mimeType: 'application/pdf', sizeBytes: 2048, modifiedTime: '2026-09-09', webViewLink: 'https://example.invalid/private' }], untrustedContent: true },

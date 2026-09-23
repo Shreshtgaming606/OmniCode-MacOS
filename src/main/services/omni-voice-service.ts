@@ -78,6 +78,7 @@ export interface SpeechToTextProvider {
     requireOnDevice: boolean
     signal?: AbortSignal
     onPartial?(transcript: string): void
+    onAmplitude?(amplitude: number): void
   }): Promise<SpeechRecognitionSession>
 }
 
@@ -524,11 +525,32 @@ export class MacOSSpeechToTextProvider implements SpeechToTextProvider {
     }
   }
 
+  async requestPermission(
+    permission: 'microphone' | 'speech-recognition',
+    localeValue: unknown = DEFAULT_SPEECH_LOCALE
+  ): Promise<OmniPermissionState> {
+    if (this.#platform !== 'darwin') return 'unavailable'
+    try { await this.#accessFile(this.#helperPath, fsConstants.X_OK) } catch { return 'unavailable' }
+    const id = randomUUID()
+    const event = await this.#oneShot({
+      version: 1,
+      id,
+      command: 'request-permission',
+      locale: speechLocale(localeValue),
+      permission
+    }, id, this.#permissionTimeoutMs)
+    if (event.event !== 'permission' || event.permission !== permission) {
+      throw new Error('The speech helper returned an invalid permission response.')
+    }
+    return permissionState(event.state)
+  }
+
   async start(options: {
     locale?: string
     requireOnDevice: boolean
     signal?: AbortSignal
     onPartial?(transcript: string): void
+    onAmplitude?(amplitude: number): void
   }): Promise<SpeechRecognitionSession> {
     if (this.#platform !== 'darwin') throw new Error('Omni voice input currently requires macOS.')
     if (options.requireOnDevice !== true) throw new Error('Omni voice input currently requires on-device recognition.')
@@ -546,7 +568,7 @@ export class MacOSSpeechToTextProvider implements SpeechToTextProvider {
     }
   }
 
-  async #oneShot(request: Record<string, unknown>, id: string): Promise<SpeechHelperEvent> {
+  async #oneShot(request: Record<string, unknown>, id: string, timeoutMs?: number): Promise<SpeechHelperEvent> {
     return await new Promise((resolve, reject) => {
       const child = this.#spawnProcess(this.#helperPath, [], { shell: false, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
       let stdout = ''
@@ -562,7 +584,7 @@ export class MacOSSpeechToTextProvider implements SpeechToTextProvider {
         if (terminate) child.kill('SIGTERM')
         finish(() => reject(error))
       }
-      const timeout = setTimeout(() => fail(new Error('The speech helper did not respond in time.'), true), this.#helperTimeoutMs)
+      const timeout = setTimeout(() => fail(new Error('The speech helper did not respond in time.'), true), timeoutMs ?? this.#helperTimeoutMs)
       timeout.unref?.()
       child.stdout.on('data', (chunk: Buffer | string) => {
         stdout += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : chunk
@@ -601,7 +623,7 @@ export class MacOSSpeechToTextProvider implements SpeechToTextProvider {
   async #startRecognition(
     id: string,
     locale: string,
-    options: { signal?: AbortSignal; onPartial?(transcript: string): void }
+    options: { signal?: AbortSignal; onPartial?(transcript: string): void; onAmplitude?(amplitude: number): void }
   ): Promise<ActiveRecognition> {
     return await new Promise((resolve, reject) => {
       const child = this.#spawnProcess(this.#helperPath, [], { shell: false, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
@@ -691,6 +713,14 @@ export class MacOSSpeechToTextProvider implements SpeechToTextProvider {
             return
           }
           options.onPartial?.(parsed.transcript)
+          return
+        }
+        if (parsed.event === 'amplitude') {
+          if (!ready || typeof parsed.amplitude !== 'number' || !Number.isFinite(parsed.amplitude) || parsed.amplitude < 0 || parsed.amplitude > 1) {
+            fail(new Error('The speech helper returned invalid microphone amplitude.'), true)
+            return
+          }
+          options.onAmplitude?.(parsed.amplitude)
           return
         }
         if (parsed.event === 'final') {
@@ -791,6 +821,11 @@ export class OmniVoiceService {
     }))
   }
 
+  async requestInputPermission(permission: 'microphone' | 'speech-recognition'): Promise<OmniPermissionState> {
+    if (!(this.speechToText instanceof MacOSSpeechToTextProvider)) return 'unavailable'
+    return await this.speechToText.requestPermission(permission)
+  }
+
   async startInput(options: OmniSpeechStartOptions = {}): Promise<{ sessionId: string }> {
     if (this.#activeInput) throw new Error('Omni is already listening for a voice request.')
     if (options.requireOnDevice !== undefined && options.requireOnDevice !== true) {
@@ -805,6 +840,9 @@ export class OmniVoiceService {
       onPartial: (transcript) => {
         if (!sessionId) pendingPartial = transcript
         else this.#emit({ sessionId, type: 'partial', transcript })
+      },
+      onAmplitude: (amplitude) => {
+        if (sessionId) this.#emit({ sessionId, type: 'amplitude', amplitude })
       }
     })
     sessionId = session.id

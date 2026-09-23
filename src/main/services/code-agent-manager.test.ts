@@ -134,7 +134,7 @@ describe('CodeAgentManager', () => {
     expect(skipped.plan?.steps[0]?.status).toBe('skipped')
     expect(skipped.events).toEqual(expect.arrayContaining([expect.objectContaining({ title: 'Plan step skipped', kind: 'plan' })]))
     await manager.stop(12, started.id)
-    await vi.waitFor(() => expect(value.cleanupTask).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(value.cleanupTask).toHaveBeenCalledTimes(1))
   })
 
   it('pauses only at an action boundary, resumes, and stops an in-flight provider turn', async () => {

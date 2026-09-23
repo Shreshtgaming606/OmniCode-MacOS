@@ -1237,7 +1237,8 @@ export class AIManager {
           model,
           messages: openAIToolMessages(request.system, request.messages),
           tools: providerToolDefinitions(tools),
-          tool_choice: 'auto'
+          tool_choice: 'auto',
+          store: false
         }),
         signal: options.signal
       })
@@ -1394,7 +1395,7 @@ export class AIManager {
       await withStreamingResponse(this.#fetch, 'https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-        body: JSON.stringify({ model, messages, stream: true }),
+        body: JSON.stringify({ model, messages, stream: true, store: false }),
         signal
       }, async (response) => {
         await readSseData(response, (data) => {
@@ -1509,7 +1510,7 @@ export class AIManager {
     if (provider === 'openai') {
       const response = await fetchJson<{ choices?: Array<{ finish_reason?: string; message?: { content?: string | null; refusal?: string | null } }> }>(this.#fetch, 'https://api.openai.com/v1/chat/completions', {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-        body: JSON.stringify({ model, messages })
+        body: JSON.stringify({ model, messages, store: false })
       })
       const choice = response.choices?.[0]
       return cloudReply(provider, choice?.message?.content || choice?.message?.refusal, choice?.finish_reason)

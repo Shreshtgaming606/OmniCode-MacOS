@@ -8,6 +8,7 @@ type ToolRegistration = { descriptor: ToolDescriptor; execute: Parameters<ToolRe
 
 export interface OmniComputerToolServiceOptions {
   cursor: OmniCursorService
+  hasMacOSPermission?(permission: 'accessibility' | 'screen-recording'): Promise<boolean>
   onUserTakeover?(taskId: string, event: OmniCursorUserTakeoverEvent): void | Promise<void>
 }
 
@@ -142,7 +143,10 @@ export class OmniComputerToolService {
     return registrations
   }
 
-  private session(context: ToolExecutorContext): Promise<OmniCursorSession> {
+  private async session(context: ToolExecutorContext): Promise<OmniCursorSession> {
+    if (this.options.hasMacOSPermission && !await this.options.hasMacOSPermission('accessibility')) {
+      throw new Error('Accessibility permission is required for Cursor Mode. Enable it in Omni Settings → Permissions.')
+    }
     const taskId = owner(context)
     let session = this.#sessions.get(taskId)
     if (!session) {
@@ -152,6 +156,6 @@ export class OmniComputerToolService {
       this.#sessions.set(taskId, session)
       void session.catch(() => { if (this.#sessions.get(taskId) === session) this.#sessions.delete(taskId) })
     }
-    return session
+    return await session
   }
 }

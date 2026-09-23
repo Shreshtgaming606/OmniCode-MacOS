@@ -1,6 +1,6 @@
 {
   "name": "omnicode",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "A native macOS code editor with local and cloud AI assistance.",
   "main": "./out/main/index.js",
   "author": "OmniCode contributors",
@@ -11,6 +11,7 @@
     "postinstall": "electron-builder install-app-deps",
     "dev": "electron-vite dev",
     "build": "npm run typecheck && electron-vite build && npm run build:native",
+    "build:main": "electron-vite build -c electron.main.vite.config.ts",
     "build:native": "node scripts/build-omni-cursor-helper.mjs && node scripts/build-omni-speech-helper.mjs",
     "audit:omni-cursor-live": "node scripts/audit-omni-cursor-live.mjs",
     "preview": "electron-vite preview",
@@ -79,6 +80,7 @@
       "minimumSystemVersion": "14.0",
       "target": ["dmg", "zip"],
       "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
       "gatekeeperAssess": false,
       "extendInfo": {
         "NSHighResolutionCapable": true,

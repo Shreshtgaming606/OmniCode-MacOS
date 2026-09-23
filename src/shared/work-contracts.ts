@@ -4,6 +4,7 @@ export type AppMode = 'code' | 'work' | 'omni'
 
 export type WorkMessageRole = 'user' | 'assistant'
 export type WorkMessageStatus = 'pending' | 'streaming' | 'complete' | 'failed' | 'cancelled'
+export type WorkMessageDataSource = 'google-workspace'
 export type WorkAttachmentKind = 'file' | 'image' | 'connected-resource'
 export type WorkAttachmentSource = 'computer' | 'connected-app'
 export type WorkToolActivityStatus =
@@ -83,6 +84,7 @@ export interface WorkMessage {
   status?: WorkMessageStatus
   attachments?: WorkAttachment[]
   toolActivities?: WorkToolActivity[]
+  dataSources?: WorkMessageDataSource[]
 }
 
 export interface WorkConversationSummary {
@@ -119,6 +121,7 @@ export interface CreateWorkMessageRequest {
   status?: WorkMessageStatus
   attachments?: WorkAttachment[]
   toolActivities?: WorkToolActivity[]
+  dataSources?: WorkMessageDataSource[]
 }
 
 export interface UpdateWorkMessageRequest {
@@ -126,6 +129,7 @@ export interface UpdateWorkMessageRequest {
   status?: WorkMessageStatus
   attachments?: WorkAttachment[]
   toolActivities?: WorkToolActivity[]
+  dataSources?: WorkMessageDataSource[]
 }
 
 export interface WorkConversationSearchRequest {
@@ -136,13 +140,14 @@ export interface WorkConversationSearchRequest {
 export interface WorkAgentChatRequest {
   provider: AIProviderId
   model: string
-  messages: Array<Pick<WorkMessage, 'role' | 'content'> & { attachmentIds?: string[] }>
+  messages: Array<Pick<WorkMessage, 'role' | 'content' | 'dataSources'> & { attachmentIds?: string[] }>
 }
 
 export interface WorkAgentChatResponse {
   content: string
   toolActivities: WorkToolActivity[]
   toolCallCount: number
+  dataSources?: WorkMessageDataSource[]
   cancelled?: boolean
 }
 

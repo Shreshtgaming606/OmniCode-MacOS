@@ -3,6 +3,52 @@
 This log records repairs and audit milestones made during the no-new-features
 stabilization phase.
 
+## OmniCode 0.7.0 global voice overlay and macOS permissions — 2026-09-22
+
+- Replaced the 720×520 global mini-dashboard with one 320×248 top-right,
+  voice-only glass overlay. Removed typed input, plan, current-step, Activity,
+  history, provider/model, execution, and approval controls from that surface.
+- Changed global activation to `showInactive()` so Omni no longer forces focus
+  away from the foreground app. The singleton window follows the cursor's
+  display work area, remains full-screen-Space capable, and separates Hide from
+  Stop Task.
+- Added bounded live transcript, amplitude-driven waveform, concise
+  listening/understanding/working/speaking/completed/failure states, contextual
+  permission actions, result auto-dismiss, and Reduce Motion/Transparency
+  handling.
+- Added `MacOSPermissionManager`, normalized status/details, real
+  request/open-settings/refresh IPC, and activation-return refresh broadcasts.
+  Microphone, Apple Speech, Accessibility, screen capture, Notifications, and
+  Launch at Login now invoke supported OS workflows. Automation and folder
+  access are honestly represented as per-target/per-selection capabilities.
+- Added an explicit native Speech permission command that runs before locale or
+  on-device asset validation, fixing the prior condition where a missing asset
+  prevented macOS from ever showing its permission prompt.
+- Added native microphone RMS events and propagated only normalized amplitude
+  plus bounded transcript text across IPC. Raw audio remains inside the helper.
+- Reworked first-run Omni setup into nine guided stages and made Settings →
+  Omni → Permissions controls perform real authorization actions instead of
+  acting as cosmetic preferences.
+- Added macOS capability preflight to Cursor tool-session creation, focused
+  permission/voice/overlay regression tests, and permanent permission/overlay
+  architecture records.
+- Accessibility uses Apple's native trust prompt on the first explicit request;
+  a later explicit retry opens the exact Privacy & Security pane required after
+  a decline.
+- Fixed the packaged overlay sender allowlist to include the new centralized
+  permission and voice channels. A live production audit found and reproduced
+  the previous fail-closed rejection before the installer was finalized.
+- Fixed Code Agent Stop returning before its run loop finished terminal-state
+  persistence and cleanup. Stop now waits for completion and cleans task-owned
+  resources exactly once, removing a teardown race found by the full suite.
+- Produced fresh 0.7.0 x64 and arm64 DMG/ZIP artifacts. Both images, archives,
+  embedded versions, Applications links, icons, Electron executables, native
+  helpers, `node-pty` bundles, and SHA-256 records verify; the x64 app also
+  passed core, nine-stage setup, responsive UI, and compact-overlay live audits.
+- The complete serial suite now passes 70 files/601 tests with one intentional
+  native-Keychain skip and zero failures. TypeScript and the full 3,122-module
+  multi-entry production build pass.
+
 ## OmniCode 0.6.0 dual-architecture installers — 2026-09-22
 
 - Bumped the release version to 0.6.0 for the voice-first Omni dashboard and

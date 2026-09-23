@@ -9,6 +9,7 @@ private let maximumLocaleCharacters = 64
 private let minimumDurationMs = 1_000
 private let maximumDurationMs = 60_000
 private let maximumTranscriptCharacters = 16_384
+private let outputLock = NSLock()
 
 private struct HelperFailure: Error {
     let code: String
@@ -18,6 +19,8 @@ private struct HelperFailure: Error {
 private func writeObject(_ object: [String: Any]) {
     guard JSONSerialization.isValidJSONObject(object),
           let data = try? JSONSerialization.data(withJSONObject: object) else { return }
+    outputLock.lock()
+    defer { outputLock.unlock() }
     FileHandle.standardOutput.write(data)
     FileHandle.standardOutput.write(Data("\n".utf8))
 }
@@ -114,6 +117,40 @@ private func status(id: String, locale: String) -> Never {
     exit(0)
 }
 
+private func requestPermission(id: String, permission: String) -> Never {
+    if permission == "speech-recognition" {
+        let current = SFSpeechRecognizer.authorizationStatus()
+        if current == .notDetermined {
+            SFSpeechRecognizer.requestAuthorization { result in
+                writeEvent(id: id, event: "permission", values: [
+                    "permission": permission,
+                    "state": permissionName(result)
+                ])
+                exit(0)
+            }
+            RunLoop.main.run()
+        }
+        writeEvent(id: id, event: "permission", values: ["permission": permission, "state": permissionName(current)])
+        exit(0)
+    }
+    if permission == "microphone" {
+        let current = AVCaptureDevice.authorizationStatus(for: .audio)
+        if current == .notDetermined {
+            AVCaptureDevice.requestAccess(for: .audio) { _ in
+                writeEvent(id: id, event: "permission", values: [
+                    "permission": permission,
+                    "state": microphonePermissionName(AVCaptureDevice.authorizationStatus(for: .audio))
+                ])
+                exit(0)
+            }
+            RunLoop.main.run()
+        }
+        writeEvent(id: id, event: "permission", values: ["permission": permission, "state": microphonePermissionName(current)])
+        exit(0)
+    }
+    fail(id: id, HelperFailure(code: "invalid-request", message: "The requested speech permission is unsupported."))
+}
+
 private final class RecognitionController {
     private let id: String
     private let locale: String
@@ -128,6 +165,7 @@ private final class RecognitionController {
     private var stopping = false
     private var tapInstalled = false
     private var timeout: DispatchSourceTimer?
+    private var lastAmplitudeAt = 0.0
 
     init(id: String, locale: String, requireOnDevice: Bool, maximumDurationMs: Int, maximumTranscriptCharacters: Int) {
         self.id = id
@@ -200,7 +238,19 @@ private final class RecognitionController {
             throw HelperFailure(code: "microphone-unavailable", message: "No usable microphone input format is available.")
         }
         inputNode.installTap(onBus: 0, bufferSize: 1_024, format: format) { [weak self] buffer, _ in
-            self?.request?.append(buffer)
+            guard let self else { return }
+            self.request?.append(buffer)
+            let now = ProcessInfo.processInfo.systemUptime
+            guard now - self.lastAmplitudeAt >= 0.05,
+                  let samples = buffer.floatChannelData?[0] else { return }
+            self.lastAmplitudeAt = now
+            let frames = Int(buffer.frameLength)
+            guard frames > 0 else { return }
+            var sum: Float = 0
+            for index in 0..<frames { sum += samples[index] * samples[index] }
+            let rms = sqrt(sum / Float(frames))
+            let normalized = min(1, max(0, (rms - 0.006) / 0.18))
+            writeEvent(id: self.id, event: "amplitude", values: ["amplitude": normalized])
         }
         tapInstalled = true
         audioEngine.prepare()
@@ -329,6 +379,13 @@ do {
     if command == "status" {
         try strictKeys(request, allowed: ["version", "id", "command", "locale"])
         status(id: id, locale: locale)
+    }
+    if command == "request-permission" {
+        try strictKeys(request, allowed: ["version", "id", "command", "locale", "permission"])
+        guard let permission = request["permission"] as? String else {
+            throw HelperFailure(code: "invalid-request", message: "The speech permission is missing.")
+        }
+        requestPermission(id: id, permission: permission)
     }
     guard command == "recognize" else {
         throw HelperFailure(code: "invalid-request", message: "The speech helper command is unsupported.")

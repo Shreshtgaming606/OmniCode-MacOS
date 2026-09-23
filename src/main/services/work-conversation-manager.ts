@@ -27,6 +27,7 @@ const ATTACHMENT_KINDS = new Set(['file', 'image', 'connected-resource'])
 const ATTACHMENT_SOURCES = new Set(['computer', 'connected-app'])
 const TOOL_STATUSES = new Set(['pending', 'running', 'awaiting-confirmation', 'succeeded', 'failed', 'cancelled'])
 const TOOL_PREVIEW_KINDS = new Set(['gmail-messages', 'gmail-message', 'gmail-draft', 'drive-files', 'drive-file', 'transferred-file'])
+const MESSAGE_DATA_SOURCES = new Set(['google-workspace'])
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u
 const TOOL_ID_PATTERN = /^[a-z][a-z0-9-]{0,31}\.[a-z][a-z0-9-]{0,63}$/u
 const MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,255}$/u
@@ -140,7 +141,7 @@ function validateToolActivity(value: unknown, label: string): asserts value is W
 
 function validateMessage(value: unknown, label: string): asserts value is WorkMessage {
   if (!isRecord(value)) throw new Error(`${label} must be a message object.`)
-  assertAllowedKeys(value, ['id', 'role', 'content', 'createdAt', 'status', 'attachments', 'toolActivities'], label)
+  assertAllowedKeys(value, ['id', 'role', 'content', 'createdAt', 'status', 'attachments', 'toolActivities', 'dataSources'], label)
   assertId(value.id, `${label}.id`)
   if (typeof value.role !== 'string' || !MESSAGE_ROLES.has(value.role)) throw new Error(`${label}.role is invalid.`)
   assertContent(value.content, `${label}.content`)
@@ -159,6 +160,13 @@ function validateMessage(value: unknown, label: string): asserts value is WorkMe
     }
     value.toolActivities.forEach((activity, index) => validateToolActivity(activity, `${label}.toolActivities[${index}]`))
     if (new Set(value.toolActivities.map((activity) => activity.id)).size !== value.toolActivities.length) throw new Error(`${label} contains duplicate tool activity IDs.`)
+  }
+  if (value.dataSources !== undefined) {
+    if (!Array.isArray(value.dataSources) || value.dataSources.length > MESSAGE_DATA_SOURCES.size ||
+        value.dataSources.some((source) => typeof source !== 'string' || !MESSAGE_DATA_SOURCES.has(source)) ||
+        new Set(value.dataSources).size !== value.dataSources.length) {
+      throw new Error(`${label}.dataSources is invalid.`)
+    }
   }
 }
 
@@ -220,7 +228,7 @@ function validateUpdateRequest(value: unknown): UpdateWorkConversationRequest {
 
 function validateCreateMessageRequest(value: unknown): CreateWorkMessageRequest {
   if (!isRecord(value)) throw new Error('Message creation options must be an object.')
-  assertAllowedKeys(value, ['role', 'content', 'status', 'attachments', 'toolActivities'], 'Message creation options')
+  assertAllowedKeys(value, ['role', 'content', 'status', 'attachments', 'toolActivities', 'dataSources'], 'Message creation options')
   const draft = { id: 'validation', createdAt: 0, ...value }
   validateMessage(draft, 'message')
   return value as unknown as CreateWorkMessageRequest
@@ -228,7 +236,7 @@ function validateCreateMessageRequest(value: unknown): CreateWorkMessageRequest 
 
 function validateUpdateMessageRequest(value: unknown): UpdateWorkMessageRequest {
   if (!isRecord(value)) throw new Error('Message updates must be an object.')
-  assertAllowedKeys(value, ['content', 'status', 'attachments', 'toolActivities'], 'Message updates')
+  assertAllowedKeys(value, ['content', 'status', 'attachments', 'toolActivities', 'dataSources'], 'Message updates')
   if (value.content !== undefined) assertContent(value.content, 'message.content')
   if (value.status !== undefined && (typeof value.status !== 'string' || !MESSAGE_STATUSES.has(value.status))) throw new Error('message.status is invalid.')
   if (value.attachments !== undefined) {
@@ -238,6 +246,11 @@ function validateUpdateMessageRequest(value: unknown): UpdateWorkMessageRequest 
   if (value.toolActivities !== undefined) {
     if (!Array.isArray(value.toolActivities) || value.toolActivities.length > WORK_CONVERSATION_LIMITS.toolActivitiesPerMessage) throw new Error('The message has too many tool activities.')
     value.toolActivities.forEach((activity, index) => validateToolActivity(activity, `message.toolActivities[${index}]`))
+  }
+  if (value.dataSources !== undefined && (!Array.isArray(value.dataSources) || value.dataSources.length > MESSAGE_DATA_SOURCES.size ||
+      value.dataSources.some((source) => typeof source !== 'string' || !MESSAGE_DATA_SOURCES.has(source)) ||
+      new Set(value.dataSources).size !== value.dataSources.length)) {
+    throw new Error('message.dataSources is invalid.')
   }
   return value as UpdateWorkMessageRequest
 }
@@ -347,7 +360,8 @@ export class WorkConversationManager {
         createdAt: this.timestamp(),
         ...(validated.status === undefined ? {} : { status: validated.status }),
         ...(validated.attachments === undefined ? {} : { attachments: structuredClone(validated.attachments) }),
-        ...(validated.toolActivities === undefined ? {} : { toolActivities: structuredClone(validated.toolActivities) })
+        ...(validated.toolActivities === undefined ? {} : { toolActivities: structuredClone(validated.toolActivities) }),
+        ...(validated.dataSources === undefined ? {} : { dataSources: [...validated.dataSources] })
       }
       validateMessage(message, 'message')
       conversation.messages.push(message)
@@ -369,6 +383,7 @@ export class WorkConversationManager {
       if (validated.status !== undefined) message.status = validated.status
       if (validated.attachments !== undefined) message.attachments = structuredClone(validated.attachments)
       if (validated.toolActivities !== undefined) message.toolActivities = structuredClone(validated.toolActivities)
+      if (validated.dataSources !== undefined) message.dataSources = [...validated.dataSources]
       validateMessage(message, 'message')
       conversation.updatedAt = this.nextUpdatedAt(conversation.updatedAt)
       return structuredClone(message)
@@ -407,6 +422,14 @@ export class WorkConversationManager {
       if (index < 0) throw new Error('Work conversation was not found.')
       store.conversations.splice(index, 1)
     })
+  }
+
+  async attachmentIds(): Promise<string[]> {
+    await this.queue
+    const store = await this.readStore()
+    return [...new Set(store.conversations.flatMap((conversation) =>
+      conversation.messages.flatMap((message) => message.attachments?.map((attachment) => attachment.id) ?? [])
+    ))]
   }
 
   recoverCorruptStore(): Promise<RecoverWorkConversationStoreResult> {

@@ -24,7 +24,23 @@ const api: OmniOverlayAPI = {
   },
   activation: {
     hide: () => ipcRenderer.invoke('omni:overlay:hide'),
-    openMainWindow: () => ipcRenderer.invoke('omni:overlay:open-main')
+    openMainWindow: () => ipcRenderer.invoke('omni:overlay:open-main'),
+    onShow: (callback) => subscribe('omni:overlay-activated', callback)
+  },
+  permissions: {
+    status: () => ipcRenderer.invoke('omni:overlay:permissions-status'),
+    request: (permissionId) => ipcRenderer.invoke('omni:overlay:permissions-request', permissionId),
+    openSettings: (permissionId) => ipcRenderer.invoke('omni:overlay:permissions-open-settings', permissionId),
+    onChanged: (callback) => subscribe('omni:permissions-changed', callback)
+  },
+  voice: {
+    inputAvailability: () => ipcRenderer.invoke('omni:overlay:voice-input-availability'),
+    startInput: (options) => ipcRenderer.invoke('omni:overlay:voice-start-input', options),
+    stopInput: (sessionId) => ipcRenderer.invoke('omni:overlay:voice-stop-input', sessionId),
+    cancelInput: (sessionId) => ipcRenderer.invoke('omni:overlay:voice-cancel-input', sessionId),
+    stop: () => ipcRenderer.invoke('omni:overlay:voice-stop'),
+    onInputEvent: (callback) => subscribe('omni:voice-input-event', callback),
+    onOutputEvent: (callback) => subscribe('omni:voice-output-event', callback)
   }
 }
 

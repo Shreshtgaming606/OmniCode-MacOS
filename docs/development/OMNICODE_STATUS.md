@@ -1,6 +1,28 @@
 # OmniCode Stabilization Status
 
-Last updated: 2026-09-22
+Last updated: 2026-09-23
+
+## OmniCode 0.7.0 permission/overlay stabilization
+
+- ✅ The global shortcut now opens one compact 320×248 voice-only overlay in
+  the active display's top-right work area without forcing focus.
+- ✅ The overlay contains no typed input, plan, Activity, history, model, or
+  execution-policy UI. It shows bounded transcript, actual microphone amplitude,
+  high-level task state, speech state, contextual permission recovery, and a
+  separate Stop Task action.
+- ✅ `MacOSPermissionManager` now owns operating-system detection, request,
+  explanation metadata, exact Settings routing, return refresh, and broadcast.
+- ✅ Setup and Settings invoke the real manager. A denied optional permission
+  does not block Invisible Mode, and scoped Automation/file access is no longer
+  presented as a global success toggle.
+- ✅ Speech authorization can be requested before recognizer availability is
+  checked, so a missing on-device asset no longer prevents the macOS permission
+  workflow itself.
+- 🟡 Current host limitation: `en-US` on-device Speech recognition remains
+  unavailable, so live transcription cannot pass on this Mac even after the
+  authorization request path is fixed.
+- 🔵 Public identity remains blocked by Developer ID signing/notarization; the
+  development and internal installer helpers are ad-hoc signed.
 
 Status legend:
 
@@ -61,8 +83,8 @@ surface alone is not evidence that its backing operation works.
   checksum verification. The Intel package ran the smokes; arm64 execution still
   requires matching Apple Silicon hardware.
 
-- Current Omni verification: the complete serial run passed 66 test files with
-  571 tests passed and one intentionally skipped native-Keychain file/test.
+- Current Omni verification: the complete serial run passed 70 test files with
+  601 tests passed and one intentionally skipped native-Keychain file/test.
   TypeScript checking and the complete multi-entry production build passed,
   including the dedicated `omni-overlay.cjs` preload and
   `omni-overlay.html` renderer. A built-app live smoke rendered the
@@ -74,20 +96,21 @@ surface alone is not evidence that its backing operation works.
   clearly without creating task history. Approval-display, agent-terminal,
   model-result, browser-isolation, and native-Cursor hardening pass the complete
   serial suite, typecheck, 3,122-module production build, x86_64 native-helper
-  build, x64 directory package, and packaged core/Omni readiness smoke. A packaged installer-
-  level Omni audit remains required before release readiness.
+  build, x64 package, and packaged core/Omni readiness smoke. The 0.7.0 x64
+  installer-level overlay audit also verified restricted IPC, permission state,
+  no focus theft, compact geometry, and zero renderer errors.
 
-- Current voice-first UI verification: the seven-step first-run setup, compact
+- Current voice-first UI verification: the nine-step first-run setup, compact
   dashboard, opt-in text fallback, Settings → Omni sections, legacy-settings
   migration, and production audit are implemented. The fresh-profile audit
-  advanced all seven steps, verified the Core/microphone/four command selectors/
+  advanced all nine steps, verified the Core/microphone/four command selectors/
   Activity structure, confirmed the removed permanent Course/History/
   Availability panels stay absent, checked 960×600 and 720×720 layouts,
   validated Reduce Motion and persistence, and recorded zero renderer errors.
   TypeScript and the complete 3,122-module production build pass.
 
-- Current distribution: OmniCode 0.6.0 x64 and arm64 DMG/ZIP artifacts were
-  rebuilt after the voice-first UI work. Both disk images pass `hdiutil verify`
+- Current distribution: OmniCode 0.7.0 x64 and arm64 DMG/ZIP artifacts were
+  rebuilt after the compact-overlay and permission work. Both disk images pass `hdiutil verify`
   and mounted-content/version/architecture checks; both ZIPs pass integrity
   testing. The x64 packaged app passed the release smoke with a real PTY,
   localhost security boundary, Omni native readiness, navigation denial, and
@@ -142,11 +165,11 @@ native/release gates.
 | Application startup | ✅ Working & Verified | Electron lifecycle, single-instance handling, secure window options, first-launch setup, React workbench, macOS menu | Fresh packaged launch and console capture passed; refreshed three-cycle soak verified onboarding and reached shell/workspace in 5.4/7.1 s cold and at most 4.3/4.7 s warm, used 392–441 MiB RSS and 1.4–2.6% settled CPU, then quit in 0.6–1.1 s with complete helper cleanup; resize/minimize/zoom/full-screen/close/reopen passed | Removed terminal idle repaint load; added a bounded preload queue; repaired the reusable soak so a genuine fresh-install onboarding surface is validated instead of misreported as a timeout | None in the tested Intel Sonoma lifecycle |
 | Code / Work mode boundary | ✅ Working & Verified | Shared persistent `Code` / `Work` switcher; Code workbench remains mounted while Work has an independent conversation surface | Renderer tests and refreshed packaged smokes performed 12 rapid switches in dark and compact-light layouts, retained exactly one Code and Work host, and returned with Work visible and no stuck overlays | Added a validated persistent mode preference, Code-only command/drop routing, and a reduced-motion-aware sliding selection indicator without remounting either mode | None in the tested packaged mode lifecycle |
 | Omni design and safety records | ✅ Working & Verified | Five permanent records distinguish the implemented controller/tool/persistence/overlay/TTS foundation from remaining helper/STT/wake/cursor targets | Repository and implementation inspection completed; records preserve explicit test/release gates | Replaced stale design-only claims with evidence-backed current disposition | Keep synchronized with implementation and remove no gate without evidence |
-| Omni voice-first setup/dashboard/settings UI | ✅ Working & Verified | Bounded contracts; private atomic settings/task stores; seven-step setup; central state-reactive Core; provider/model/execution/approval command bar; current task; redacted Activity; push-to-talk dock; secondary history; opt-in typed fallback; Settings → Omni | Focused settings/renderer tests, typecheck, complete production build, and fresh-profile production CDP audit pass. The audit exercised all seven steps, 960×600 and 720×720 layouts, Reduce Motion, input preference/persistence, and zero renderer errors | Replaced the dense card dashboard, removed fake-permanent Course/Availability emphasis, made typed input default-off, added real setup/persistence and friendly error mapping, fixed a bottom-row dead-space layout bug, kept the optional composer inside its dock/viewport, and disabled submission when Omni is off | Live microphone transcript remains host-blocked by the missing on-device Speech asset; configured-model tool success remains externally blocked by provider availability; signed installer audit remains |
+| Omni voice-first setup/dashboard/settings UI | ✅ Working & Verified | Bounded contracts; private atomic settings/task stores; nine-step setup; central state-reactive Core; provider/model/execution/approval command bar; current task; redacted Activity; push-to-talk dock; secondary history; opt-in typed fallback; Settings → Omni | Focused settings/renderer tests, typecheck, complete production build, and fresh-profile production CDP audit pass. The audit exercised all nine steps, 960×600 and 720×720 layouts, Reduce Motion, input preference/persistence, and zero renderer errors | Replaced the dense card dashboard, removed fake-permanent Course/Availability emphasis, made typed input default-off, added real setup/persistence and friendly error mapping, fixed a bottom-row dead-space layout bug, kept the optional composer inside its dock/viewport, and disabled submission when Omni is off | Live microphone transcript remains host-blocked by the missing on-device Speech asset; configured-model tool success remains externally blocked by provider availability; public signed installer audit remains |
 | Omni tool routing and Invisible mode | ✅ Working & Verified | One shared PermissionManager; source-aware Code/Work routing; stricter connector policy composition; connected/scope-filtered Gmail/Drive catalog; dedicated isolated Omni browser | Router/controller/permission/browser tests and complete serial regression pass; build passes. New repeatable packaged audit requires exactly one real `runtime.detect` call and rejects extra actions; two live Google attempts returned transient HTTP 503 before any tool call, and Omni ended Failed without false success | Removed policy-lowering path, disconnected connector exposure, shared-browser session/focus collision, visible app launch in Invisible mode, and ambiguous live-audit acceptance criteria | Successful packaged configured-model workflow remains **BLOCKED — EXTERNAL PROVIDER AVAILABILITY REQUIRED**; real connector/browser/code-tool matrix remains |
-| Agent terminal security | ✅ Working & Verified | Every model-driven terminal run/start/input requires direct approval; agent zsh/bash/fish skip login/rc files and inherit a credential-stripped allowlisted toolchain/locale environment | Focused security tests, complete 571-test serial run, typecheck, and production build pass | Removed Full Access bypass risk, shell-profile credential loading, arbitrary inherited exports, and active-task authority-display mismatch | Packaged approval/environment audit remains |
+| Agent terminal security | ✅ Working & Verified | Every model-driven terminal run/start/input requires direct approval; agent zsh/bash/fish skip login/rc files and inherit a credential-stripped allowlisted toolchain/locale environment | Focused security tests, complete 601-test serial run, typecheck, and production build pass | Removed Full Access bypass risk, shell-profile credential loading, arbitrary inherited exports, and active-task authority-display mismatch | Packaged approval/environment audit remains |
 | Omni global activation/background overlay | 🟡 Partially Working | Configurable resident global shortcut, optional tray, restricted overlay renderer/preload, main-owned state, packaged login background launch without main window/Dock | Built-app live smoke verified `⌘⇧Space` from another foreground app and exact restricted overlay globals; background-launch selection/login settings are unit-tested; production entries build | Added exact overlay window/frame/URL/channel checks, pending main activation, safe native approval owner, and no-window packaged login startup | No post-quit native helper; packaged login/Space/closed-window/focus/conflict audit remains |
-| Omni speech output / voice input / local wake | 🟡 Partially Working | Real macOS `say` TTS plus a signed Swift Apple Speech helper, provider-neutral STT service, bounded streaming transcript IPC, permission/capability status, and push-to-talk UI; local wake remains absent | 25 focused voice/UI tests and the 571-test serial suite pass; the x64 package contains both usage strings and an entitlement-signed helper; its warm packaged status/UI smoke passed with zero renderer errors and accurately reported not-determined permissions plus an unavailable `en-US` on-device asset; speech and Cursor helpers also cross-compile and signature-verify as arm64 before x86_64 development outputs are restored | Added fixed executable/no shell, transcript/protocol/output/time bounds, on-device-only enforcement, pre-permission capability failure, Stop/Cancel/parent-EOF teardown, usage descriptions, audio entitlement, hidden-mode cancellation, and removal of stale “bridge not connected” UI claims | Install/enable a macOS on-device Speech asset, then run real microphone grant/deny/partial/final packaged tests; the first unsigned nested-helper invocation can time out until retried, so stable Developer ID signing/notarization remains a gate; audible packaged TTS, arm64 hardware execution, and local wake still remain |
+| Omni speech output / voice input / local wake | 🟡 Partially Working | Real macOS `say` TTS plus a signed Swift Apple Speech helper, provider-neutral STT service, bounded transcript/amplitude IPC, explicit authorization, and push-to-talk UI; local wake remains absent | Focused voice/UI tests and the 601-test serial suite pass; the x64 package contains both usage strings and an entitlement-signed helper; its packaged status/UI smoke passed with zero renderer errors and accurately reported not-determined permissions plus an unavailable `en-US` on-device asset; both helpers also build/sign as arm64 | Added fixed executable/no shell, transcript/protocol/output/time bounds, on-device-only enforcement, permission request independent from recognizer availability, Stop/Cancel/parent-EOF teardown, usage descriptions, audio entitlement, and hidden-mode cancellation | Install/enable a macOS on-device Speech asset, then run real microphone grant/deny/partial/final packaged tests; stable Developer ID signing/notarization, audible packaged TTS, arm64 hardware execution, and local wake remain gates |
 | Omni Cursor Mode | 🟡 Partially Working | Fixed-protocol Swift helper plus task-owned service expose observe/move/click/double-click/scroll/type/key/fixed-app focus only in Cursor mode; observations include non-sensitive frontmost-window geometry; focused secure/password roles and input to OmniCode/unallowlisted apps are rejected; UI gates on helper, Accessibility, and main-process emergency stop | Adapter/session/tool/controller tests pass; x86_64 and arm64 helpers compile; packaged disposable TextEdit/Safari audit passed move/restore, click/double-click, scroll, focus, exact Unicode type/save, key input, unallowlisted-app denial, and secure-field denial; x64 package reports all readiness gates; a real Google-backed Cursor task was stopped with actual `⌘⇧Esc` | Fixed long-move false takeover, asynchronous pointer completion, dropped Unicode CGEvents, added selected-text AX input without clipboard use, native and service target allowlists, focused secure-field refusal, strict protocol/limits, direct approval, secret blocking, takeover pause, renderer-independent stop, and cleanup | Semantic AX/screen targeting, system-authorization/dialog adversarial matrix, helper-owned stop defense, signed/notarized identity, and Apple Silicon runtime test remain |
 | Shared UI design system | ✅ Working & Verified | Semantic light/dark surface, type, spacing, radius, elevation, motion, focus, and reduced-motion tokens documented and used by the shared shell plus refreshed Work/Connected Apps surfaces | TypeScript, production bundle, 11 focused renderer tests, dark and 960×600 light packaged screenshots, horizontal-overflow checks, `prefers-reduced-motion` emulation, keyboard dismissal, and rapid-switch stress pass | Replaced ad hoc shell/mode/Work values with shared tokens; raised tiny interactive labels; added restrained 120–240 ms motion, 1 ms reduced-motion overrides, accessible live toast states, and Escape dismissal for Connected Apps and Settings | Continue ordinary visual regression checks as UI code changes; no known defect remains in the tested surfaces |
 | Work conversations | ✅ Working & Verified | Main-process private atomic JSON store; create/open/search/rename/pin/delete, messages, Copy/Edit/Regenerate, bounded recovery | Unit tests cover validation, ordering, concurrent writes, private modes, corruption/recovery, and bounds; packaged smoke created, updated, searched, reopened, and deleted a real conversation | Conversation state moved out of renderer-only storage; retries replace the same exchange instead of duplicating it | None within documented limits |

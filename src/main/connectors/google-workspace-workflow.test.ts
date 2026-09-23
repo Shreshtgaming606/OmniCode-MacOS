@@ -98,7 +98,7 @@ describe('Google Workspace cross-connector workflows', () => {
     const tools = registry.list('work')
 
     const response = await manager.chat({
-      provider: 'google', model: 'gemini-test',
+      provider: 'openai', model: 'gpt-test',
       messages: [{ role: 'user', content: 'Find the PDF my teacher emailed today and save it to Drive.' }]
     }, tools, (request) => registry.execute(request, { accessLevel: 'ask-before-changes', approvalMode: 'auto', confirm }))
 
@@ -151,7 +151,7 @@ describe('Google Workspace cross-connector workflows', () => {
     const confirm = vi.fn(async () => true)
 
     const response = await manager.chat({
-      provider: 'google', model: 'gemini-test',
+      provider: 'openai', model: 'gpt-test',
       messages: [{ role: 'user', content: 'Find my latest resume in Drive and attach it to a Gmail draft for Alex.' }]
     }, registry.list('work'), (request) => registry.execute(request, { accessLevel: 'ask-before-changes', approvalMode: 'ask', confirm }))
 
@@ -188,7 +188,7 @@ describe('Google Workspace cross-connector workflows', () => {
       return { content: 'Your unread email says the release meeting is Friday at 2 PM.', calls: [] }
     })
     const response = await new WorkAgentManager({ toolTurn } as unknown as AIManager).chat({
-      provider: 'google', model: 'gemini-test', messages: [{ role: 'user', content: 'Summarize my unread email.' }]
+      provider: 'openai', model: 'gpt-test', messages: [{ role: 'user', content: 'Summarize my unread email.' }]
     }, registry.list('work', 'gmail'), (request) => registry.execute(request, { accessLevel: 'ask-before-changes', approvalMode: 'ask', confirm: vi.fn() }))
 
     expect(response).toMatchObject({ content: expect.stringContaining('Friday at 2 PM'), toolCallCount: 2 })
@@ -214,7 +214,7 @@ describe('Google Workspace cross-connector workflows', () => {
       return { content: 'Add measurable outcomes to strengthen the resume.', calls: [] }
     })
     const response = await new WorkAgentManager({ toolTurn } as unknown as AIManager).chat({
-      provider: 'google', model: 'gemini-test', messages: [{ role: 'user', content: 'Find my resume and tell me what to improve.' }]
+      provider: 'openai', model: 'gpt-test', messages: [{ role: 'user', content: 'Find my resume and tell me what to improve.' }]
     }, registry.list('work', 'google-drive'), (request) => registry.execute(request, { accessLevel: 'ask-before-changes', approvalMode: 'ask', confirm: vi.fn() }))
 
     expect(response).toMatchObject({ content: expect.stringContaining('measurable outcomes'), toolCallCount: 2 })

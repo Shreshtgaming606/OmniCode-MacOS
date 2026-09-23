@@ -18,10 +18,14 @@ const OMNI_PROVIDERS: Array<{ id: AIProviderId; name: string }> = [
   { id: 'ollama', name: 'Ollama · local' }, { id: 'openai', name: 'OpenAI' },
   { id: 'anthropic', name: 'Claude' }, { id: 'google', name: 'Google Gemini' }
 ]
-const OMNI_PERMISSIONS: Array<{ id: OmniPermissionId; name: string }> = [
-  { id: 'microphone', name: 'Microphone' }, { id: 'speech-recognition', name: 'Speech Recognition' },
-  { id: 'accessibility', name: 'Accessibility' }, { id: 'screen-recording', name: 'Screen Recording' },
-  { id: 'automation', name: 'Automation' }, { id: 'files-and-folders', name: 'Files & Folders' }
+const OMNI_PERMISSIONS: Array<{ id: OmniPermissionId; name: string; detail: string }> = [
+  { id: 'microphone', name: 'Microphone', detail: 'Voice input while Omni is listening' },
+  { id: 'speech-recognition', name: 'Speech Recognition', detail: 'On-device voice transcription' },
+  { id: 'accessibility', name: 'Accessibility', detail: 'Cursor Mode buttons, menus, and fields' },
+  { id: 'notifications', name: 'Notifications', detail: 'Background completion alerts' },
+  { id: 'automation', name: 'App Automation', detail: 'Authorized separately for each target app' },
+  { id: 'files-and-folders', name: 'Files & Folders', detail: 'Folders you explicitly select' },
+  { id: 'launch-at-login', name: 'Launch at Login', detail: 'Global Omni availability after sign-in' }
 ]
 
 function connectorStatusLabel(connector: ConnectorDescriptor): string {
@@ -100,6 +104,7 @@ export function SettingsPanel({
   const [omniPermissions, setOmniPermissions] = useState<OmniPermissionsSnapshot | null>(null)
   const [omniVoices, setOmniVoices] = useState<Array<{ id: string; name: string; locale: string }>>([])
   const [omniBusy, setOmniBusy] = useState(false)
+  const [omniPermissionBusy, setOmniPermissionBusy] = useState<OmniPermissionId | null>(null)
   useEffect(() => {
     const dismiss = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape') return
@@ -193,7 +198,8 @@ export function SettingsPanel({
       setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause))
     })
     const unsubscribe = window.omnicode.omni.settings.onChanged((next) => { if (active) setOmniSettings(next) })
-    return () => { active = false; unsubscribe() }
+    const unsubscribePermissions = window.omnicode.omni.permissions.onChanged((next) => { if (active) setOmniPermissions(next) })
+    return () => { active = false; unsubscribe(); unsubscribePermissions() }
   }, [])
   useEffect(() => {
     const provider = omniSettings?.model.provider
@@ -365,7 +371,7 @@ export function SettingsPanel({
               </div>
               <div className="omni-settings-group"><h3><Zap />Activation</h3>
                 <div className="omni-settings-shortcut"><span><strong>Global shortcut</strong><small>Activate Omni from anywhere</small></span><kbd>⌘</kbd><kbd>⇧</kbd><kbd>Space</kbd></div>
-                <label className="setting-toggle"><span><strong>Enable “Hey Omni”</strong><small>Wake phrase processing stays on-device.</small></span><input type="checkbox" disabled={omniBusy} checked={omniSettings.activation.voiceActivation === 'wake-word-and-shortcut'} onChange={(event) => void updateOmni({ activation: { voiceActivation: event.target.checked ? 'wake-word-and-shortcut' : 'shortcut-only' } })} /></label>
+                <p className="omni-settings-note">Voice input is press-to-talk. This build does not run an always-listening wake-word service.</p>
                 <label className="setting-toggle"><span><strong>Start Omni with my Mac</strong><small>Keep global activation available after login.</small></span><input type="checkbox" disabled={omniBusy} checked={omniSettings.launchHelperAtLogin} onChange={(event) => void updateOmni({ launchHelperAtLogin: event.target.checked })} /></label>
               </div>
               <div className="omni-settings-group"><h3><KeyRound />AI</h3><div className="omni-settings-fields two-fields">
@@ -385,11 +391,19 @@ export function SettingsPanel({
                 } else void updateOmni({ approvalMode: mode })
               }}><option value="ask">Ask for approval</option><option value="auto">Approve for me</option><option value="full">Full access</option></select><small>Critical and irreversible actions always require direct approval.</small></label></div>
               <div className="omni-settings-group"><h3><AudioWaveform />Input</h3><label className="setting-toggle"><span><strong>Show text input</strong><small>Display a compact optional text field beneath the voice controls.</small></span><input type="checkbox" disabled={omniBusy} checked={omniSettings.showTextInput} onChange={(event) => void updateOmni({ showTextInput: event.target.checked })} /></label></div>
-              <div className="omni-settings-group"><h3><Shield />Permissions</h3><div className="omni-settings-permissions">{OMNI_PERMISSIONS.map((permission) => {
+              <div className="omni-settings-group"><h3><Shield />Permissions</h3><p className="omni-settings-note">These controls request real macOS authorization. Scoped access is requested only when its associated action is used.</p><div className="omni-settings-permissions">{OMNI_PERMISSIONS.map((permission) => {
                 const state = omniPermissions?.permissions[permission.id] ?? 'not-determined'
-                return <div key={permission.id} data-state={state}><span>{state === 'granted' ? <CheckCircle2 /> : <Shield />}</span><strong>{permission.name}</strong><small>{state.replace('-', ' ')}</small>{state !== 'granted' && state !== 'unavailable' && <button type="button" onClick={() => void window.omnicode.omni.permissions.openSettings(permission.id)}>Open Settings</button>}</div>
+                const detail = omniPermissions?.details[permission.id]
+                const enabled = state === 'granted'
+                const actionable = detail?.canRequest ?? !enabled
+                return <div key={permission.id} data-state={state}><span>{enabled ? <CheckCircle2 /> : <Shield />}</span><span><strong>{permission.name}</strong><small>{detail?.explanation ?? permission.detail}</small>{detail?.featureReason && <small>{detail.featureReason}</small>}</span><small>{state.replaceAll('-', ' ')}</small>{!enabled && actionable && <button type="button" disabled={omniPermissionBusy !== null} onClick={() => {
+                  setOmniPermissionBusy(permission.id)
+                  void window.omnicode.omni.permissions.request(permission.id).then(() => window.omnicode.omni.permissions.status()).then(setOmniPermissions).catch((cause) => {
+                    setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause))
+                  }).finally(() => setOmniPermissionBusy(null))
+                }}>{omniPermissionBusy === permission.id ? 'Requesting…' : 'Enable'}</button>}{!enabled && detail?.canOpenSettings && !actionable && <button type="button" onClick={() => void window.omnicode.omni.permissions.openSettings(permission.id)}>Open Settings</button>}</div>
               })}</div><button type="button" className="omni-rerun-setup" onClick={() => void window.omnicode.omni.permissions.status().then(setOmniPermissions)}><RefreshCw />Refresh Permissions</button></div>
-              <div className="omni-settings-group"><h3><Shield />Privacy</h3><label className="setting-toggle"><span><strong>Screen observation</strong><small>Allow screen context only when a task explicitly needs it.</small></span><input type="checkbox" disabled={omniBusy} checked={omniSettings.privacy.screenObservationEnabled} onChange={(event) => void updateOmni({ privacy: { screenObservationEnabled: event.target.checked } })} /></label><p className="omni-settings-note">Wake phrase processing is locked to on-device only.</p></div>
+              <div className="omni-settings-group"><h3><Shield />Privacy</h3><p className="omni-settings-note">Cursor Mode uses macOS Accessibility and structured window information. It does not capture or retain screenshots in this build. Press-to-talk audio is transcribed with on-device Apple Speech Recognition and is not saved as an audio file.</p></div>
               <div className="omni-settings-group"><h3><RefreshCw />Activity</h3><label className="omni-settings-select"><strong>Keep activity for</strong><select disabled={omniBusy} value={omniSettings.privacy.activityRetentionDays} onChange={(event) => void updateOmni({ privacy: { activityRetentionDays: Number(event.target.value) } })}><option value={0}>Current session only</option><option value={7}>7 days</option><option value={30}>30 days</option><option value={60}>60 days</option><option value={90}>90 days</option></select><small>The main dashboard renders only the 40 most recent events.</small></label></div>
             </div>}
           </section>
@@ -400,6 +414,7 @@ export function SettingsPanel({
             <p className="work-permission-boundary"><strong>Always protected:</strong> critical actions, financial transactions, account-security changes, and irreversible destructive actions still need direct approval—even with Full access.</p>
           </section>
           <section id="connected-apps"><h2>Work Mode · Connected Apps</h2><p>Only real registered connectors appear here. A connector is shown as connected only after its own connection verification succeeds.</p>
+            <div className="work-settings-summary"><Shield /><span><strong>Google OAuth</strong><small>OmniCode uses Google OAuth to access only the Google services and permissions you authorize. It never asks for your Google password.</small></span></div>
             {googleAccount && <div className={`settings-google-account state-${googleAccount.state}`}><span>{googleAccount.state === 'connected' ? <Shield /> : <Plug />}</span><span><strong>Google account</strong><small>{googleAccount.message}</small></span></div>}
             <div className="settings-connectors">
               {connectors.map((connector) => {
@@ -415,8 +430,9 @@ export function SettingsPanel({
                   {(connector.id === 'gmail' || connector.id === 'google-drive') && <small className="settings-connector-note">Google revocation disconnects both Gmail and Drive from OmniCode.</small>}
                   <label className="settings-connector-approval"><strong>Action approval</strong><select disabled={permissionBusy} value={workPermissions.connectorOverrides[connector.id] ?? ''} onChange={(event) => void setConnectorWorkPermission(connector.id, event.target.value ? event.target.value as WorkApprovalMode : null)}><option value="">Use global · {WORK_APPROVAL_MODE_COPY[workPermissions.globalMode].shortLabel}</option>{WORK_APPROVAL_MODES.map((mode) => <option value={mode} key={mode}>{WORK_APPROVAL_MODE_COPY[mode].label}</option>)}</select><small>{workPermissions.connectorOverrides[connector.id] ? `Overrides the global setting for ${connector.name}.` : 'Follows the global Work Mode setting.'}</small></label>
                   <div className="settings-connector-actions">
-                    {(connector.id === 'gmail' || connector.id === 'google-drive') && connected && <button type="button" onClick={() => void window.omnicode.app.openExternal('https://myaccount.google.com/connections').catch((cause) => setConnectorError(cause instanceof Error ? cause.message : String(cause)))}><ExternalLink />Manage permissions</button>}
-                    <button type="button" disabled={busy} className={connected ? 'disconnect' : 'primary-button'} onClick={() => void toggleConnector(connector)}>{busy ? <LoaderCircle className="spin" /> : connected ? <Unplug /> : <Plug />}{busy ? 'Working…' : connected ? 'Disconnect' : reconnect ? 'Reconnect' : 'Connect'}</button>
+                    {(connector.id === 'gmail' || connector.id === 'google-drive') && <button type="button" onClick={() => void window.omnicode.app.openExternal('https://omnicode.steampirate.life/privacy/').catch((cause) => setConnectorError(cause instanceof Error ? cause.message : String(cause)))}><ExternalLink />View Privacy Policy</button>}
+                    {(connector.id === 'gmail' || connector.id === 'google-drive') && connected && <button type="button" onClick={() => void window.omnicode.app.openExternal('https://myaccount.google.com/connections').catch((cause) => setConnectorError(cause instanceof Error ? cause.message : String(cause)))}><ExternalLink />Manage Google Connection</button>}
+                    <button type="button" disabled={busy} className={connected ? 'disconnect' : 'primary-button'} onClick={() => void toggleConnector(connector)}>{busy ? <LoaderCircle className="spin" /> : connected ? <Unplug /> : <Plug />}{busy ? 'Working…' : connected && (connector.id === 'gmail' || connector.id === 'google-drive') ? 'Disconnect Google' : connected ? 'Disconnect' : reconnect ? 'Reconnect' : 'Connect'}</button>
                   </div>
                 </article>
               })}
@@ -437,12 +453,17 @@ export function SettingsPanel({
               catch (cause) { setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause)) }
             }}>Save Workspace Settings</button>
           </section>
-          <section id="permissions"><h2>AI Permissions</h2><p>Every AI file change stays behind diff review. Agent commands are filtered in the main process and require native confirmation; dangerous, privileged, and Keychain-read commands are blocked.</p>
+          <section id="permissions"><h2>Privacy & Security</h2><p>Every AI file change stays behind diff review. Agent commands are filtered in the main process and require native confirmation; dangerous, privileged, and Keychain-read commands are blocked.</p>
             <div className="permission-options">{[
               ['ask', 'Ask Every Time', 'Confirm cloud context for both Chat and Agent requests.'],
               ['workspace', 'Workspace Access', 'Allow chosen Chat context; Agent context still confirms each task.'],
               ['agent', 'Agent Mode', 'Allow chosen Chat and Agent context; edits and commands still require review.']
             ].map(([id, name, detail]) => <button key={id} className={permission === id ? 'active' : ''} onClick={() => onPermission(id as typeof permission)}><Shield /><span><strong>{name}</strong><small>{detail}</small></span>{permission === id && <CheckCircle2 />}</button>)}</div>
+            <div className="settings-connector-actions">
+              <button type="button" onClick={() => void window.omnicode.app.openExternal('https://omnicode.steampirate.life/privacy/').catch((cause) => { setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause)) })}><ExternalLink />Privacy Policy</button>
+              <button type="button" onClick={() => void window.omnicode.app.openExternal('https://omnicode.steampirate.life/terms/').catch((cause) => { setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause)) })}><ExternalLink />Terms of Service</button>
+              <button type="button" onClick={() => void window.omnicode.app.openExternal('https://omnicode.steampirate.life/about/').catch((cause) => { setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause)) })}><ExternalLink />About OmniCode</button>
+            </div>
           </section>
         </main>
       </div>

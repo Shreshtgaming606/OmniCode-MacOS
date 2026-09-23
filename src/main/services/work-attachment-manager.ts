@@ -145,4 +145,17 @@ export class WorkAttachmentManager {
       fs.unlink(path.join(this.root, `${id}.json`)).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOENT') throw error })
     ])
   }
+
+  async removeUnreferenced(referencedIds: Iterable<string>): Promise<void> {
+    const referenced = new Set([...referencedIds].map(safeId))
+    const entries = await fs.readdir(this.root).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return []
+      throw error
+    })
+    const storedIds = new Set(entries.flatMap((entry) => {
+      const match = entry.match(/^([0-9a-f-]{36})\.(?:content|json)$/iu)
+      return match?.[1] && ATTACHMENT_ID_PATTERN.test(match[1]) ? [match[1]] : []
+    }))
+    await Promise.all([...storedIds].filter((id) => !referenced.has(id)).map((id) => this.remove(id)))
+  }
 }

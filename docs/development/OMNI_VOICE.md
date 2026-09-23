@@ -269,19 +269,22 @@ fixed executable/no-shell invocation, stdin text, invalid voice/rate rejection,
 redaction, embedded-command removal, provider failures, AbortSignal
 cancellation, explicit Stop, concurrent speech supersession, and disposal.
 `/usr/bin/say -v ?` was also invoked on the host to verify the real installed
-voice format used by the parser. The current complete serial run passed 66
-files with 571 tests and one intentionally skipped native-Keychain file/test. A
+voice format used by the parser. The current complete serial run passed 70
+files with 601 tests and one intentionally skipped native-Keychain file/test. A
 built-app live smoke queried the real TTS availability and installed macOS voice
 list through the production preload/main-process route.
 
 Focused tests now cover helper-path resolution, non-macOS unavailability,
-permission/capability parsing, strict text event streaming, Stop/final ordering,
-service listening/partial/final events, and the typed UI fallback. A real native
-probe compiled and ad-hoc signed the x86_64 helper, returned not-determined
-microphone/Speech permissions, and accurately reported the missing `en-US`
-on-device asset. A real recognize request failed with `on-device-unavailable`
-before prompting, proving there is no silent cloud fallback. Real microphone
-capture and transcript accuracy remain blocked by the missing host asset.
+permission/capability parsing, explicit authorization before recognizer
+availability, amplitude and text event streaming, Stop/final ordering, service
+listening/partial/final events, and the typed UI fallback. A real native probe
+compiled and ad-hoc signed the x86_64 helper, returned an accurate authorization
+state, and separately reported the missing `en-US` on-device asset. The
+dedicated permission command no longer lets that missing asset prevent the real
+macOS authorization workflow, while recognition itself still fails closed with
+`on-device-unavailable` rather than silently using a network recognizer. Real
+microphone capture and transcript accuracy remain blocked by the missing host
+asset.
 The speech and Cursor helpers also cross-compile and ad-hoc signature-verify as
 arm64; the development outputs were restored to x86_64 afterward. Matching-
 hardware arm64 execution is still untested.

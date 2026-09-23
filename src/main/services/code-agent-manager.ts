@@ -67,6 +67,7 @@ const PLAN_TOOL: ToolDescriptor = {
 
 interface ActiveTask {
   controller: AbortController
+  completion?: Promise<void>
   pauseRequested: boolean
   pauseWaiter?: Promise<void>
   resume?: () => void
@@ -188,7 +189,8 @@ export class CodeAgentManager {
     this.#active.set(task.id, active)
     this.options.onTaskStarted?.(task.id, request.focusBehavior)
     this.emitTask(senderId, task)
-    void this.run(task.id, request).catch(() => undefined)
+    active.completion = this.run(task.id, request)
+    void active.completion.catch(() => undefined)
     return task
   }
 
@@ -271,8 +273,10 @@ export class CodeAgentManager {
     active.pauseRequested = false
     active.resume?.()
     active.controller.abort(new DOMException('Code Agent task stopped.', 'AbortError'))
-    await this.options.toolService.cleanupTask(taskId)
-    this.#active.delete(taskId)
+    // Wait for the run loop to record its terminal state and finish cleanup.
+    // Returning earlier lets its final activity write race with window teardown,
+    // workspace removal, or a subsequent task using the same resources.
+    await active.completion
     const current = await this.options.activity.get(taskId)
     if (current.status === 'completed' || current.status === 'failed' || current.status === 'stopped') return current
     return this.updateTask(senderId, taskId, 'stopped', { completedAt: Date.now(), resultSummary: 'Stopped by the user.' })

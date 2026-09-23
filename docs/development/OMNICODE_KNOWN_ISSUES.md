@@ -1,9 +1,48 @@
 # OmniCode Known Issues
 
-Last updated: 2026-09-22
+Last updated: 2026-09-23
 
 Resolved issues remain in this file with a resolution so audit history is not
 lost. Secrets, tokens, and authorization headers must never be included here.
+
+## OMI-054 — Global Omni was a focus-stealing miniature dashboard — Resolved
+
+- Severity: High for the global voice experience
+- Reproduction: Press `⌘⇧Space` in the previous build from another app.
+- Expected: A small top-right, voice-only assistant appears without disrupting
+  the foreground app and shows only transcript and high-level state.
+- Actual: A centered 720×520 resizable window took focus and exposed typed
+  input, plans, events, model details, execution policy, and task controls.
+- Suspected cause: The first overlay reused dashboard information hierarchy
+  rather than defining a global-assistant surface.
+- Relevant files: `src/main/index.ts`, `src/preload/omni-overlay.ts`,
+  `src/renderer/src/omni-overlay.tsx`, `src/renderer/src/omni-overlay.css`.
+- Current status: ✅ Resolved in 0.7.0 — the singleton overlay is fixed-size,
+  top-right, shown inactive, voice-only, amplitude/transcript-aware, and keeps
+  Hide separate from Stop. Cross-app/full-screen/multi-display packaged manual
+  coverage remains a release verification item rather than a code defect.
+
+## OMI-053 — Omni permission controls did not request macOS authorization — Resolved
+
+- Severity: Critical for Voice and Cursor setup
+- Reproduction: Press Enable/Open Settings in the previous setup or Settings
+  permission list before OmniCode has requested Microphone, Speech,
+  Accessibility, or Screen Recording.
+- Expected: OmniCode invokes the supported native request, recovers denied
+  access through the exact Settings pane, and refreshes on return.
+- Actual: The UI mostly opened Settings. Accessibility was checked with prompt
+  disabled, screen capture was never invoked, Automation/Files were hard-coded,
+  and the speech helper rejected an unavailable on-device asset before asking
+  for Speech authorization—so macOS had no request to list.
+- Suspected cause: Detection and UI presentation existed without a centralized
+  operating-system request lifecycle.
+- Relevant files: `src/main/services/macos-permission-manager.ts`,
+  `native/omni-speech-helper/main.swift`, `src/main/index.ts`,
+  `src/renderer/src/components/omni/OmniMode.tsx`.
+- Current status: ✅ Resolved in 0.7.0 for supported request paths. Automation
+  remains correctly per-target and Files & Folders remains picker-scoped. Public
+  release identity still depends on Developer ID signing/notarization, and the
+  host still lacks an on-device Speech asset for a real transcript.
 
 ## OMI-052 — Omni's primary UI was dense and setup was not first-run complete — Resolved
 
@@ -12,11 +51,12 @@ lost. Secrets, tokens, and authorization headers must never be included here.
   availability, history, composer, settings cards, and task controls with the
   requested voice-first operating flow; reset Omni preferences and look for a
   complete permission/voice/model/execution activation setup.
-- Expected: First launch walks through seven real setup steps, then presents a
+- Expected: First launch walks through guided permission and configuration
+  steps, then presents a
   focused Core, microphone dock, current task, operating controls, and concise
   Activity. Typed input is optional and the compact layouts remain usable.
 - Actual: The previous renderer exposed too many permanent cards and had no
-  persisted Omni-specific seven-step setup gate.
+  persisted Omni-specific setup gate.
 - Suspected cause: The original Phase 1 surface prioritized broad controller
   observability over the final voice-first information hierarchy.
 - Relevant files: `src/renderer/src/components/omni/OmniMode.tsx`,
@@ -24,7 +64,7 @@ lost. Secrets, tokens, and authorization headers must never be included here.
   `src/renderer/src/components/SettingsPanel.tsx`,
   `src/main/services/omni-settings-manager.ts`,
   `scripts/audit-omni-ui.mjs`.
-- Current status: ✅ Resolved — the seven-step setup, private persistence,
+- Current status: ✅ Resolved — the nine-step setup, private persistence,
   Settings → Omni controls, central Core, compact Activity timeline, real
   selectors, microphone dock, secondary history, and default-off typed fallback
   are implemented. A fresh production-profile audit passed all setup steps,
@@ -54,7 +94,7 @@ lost. Secrets, tokens, and authorization headers must never be included here.
 - Current status: ✅ Resolved — the controller, settings/task stores, router,
   shared permission path, third-mode UI, restricted overlay, background launch,
   TTS, native-Cursor foundation, and tool-result safety boundaries are wired.
-  The current complete serial run passed 66 files with 571 tests and one
+  The current complete serial run passed 70 files with 601 tests and one
   intentionally skipped native-Keychain file/test; typecheck, the production
   build, native helper, x64 package, and packaged readiness smoke pass. A built-app live smoke rendered all three modes, verified the
   overlay boundary/global shortcut/TTS query, and confirmed missing-model
@@ -119,9 +159,9 @@ lost. Secrets, tokens, and authorization headers must never be included here.
   `docs/development/OMNI_BACKGROUND_SERVICE.md`,
   `docs/development/OMNI_SECURITY.md`.
 - Current status: 🟡 Partially resolved — speech output and the push-to-talk STT
-  stack are implemented; 25 focused tests and a real helper status/start probe
-  pass, including fail-before-permission behavior when on-device recognition is
-  unavailable. Real capture remains **BLOCKED — HOST CONFIGURATION REQUIRED**
+  stack are implemented; focused tests and a real helper status/start probe
+  pass, including an explicit permission request that is independent of
+  on-device recognizer availability. Real capture remains **BLOCKED — HOST CONFIGURATION REQUIRED**
   until an on-device speech asset is installed and permission can be approved.
   The unsigned x64 package also reproduced the known first nested-helper timeout;
   an immediate warm retry returned exact status and passed the UI smoke. Stable

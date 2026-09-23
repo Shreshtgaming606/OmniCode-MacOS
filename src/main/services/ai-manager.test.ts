@@ -336,7 +336,7 @@ describe('AIManager cloud providers', () => {
     expect(requests[0]?.method).toBe('POST')
     expect(requests[0]?.headers.get('content-type')).toBe('application/json')
     expect(requests[0]?.headers.get('authorization')).toBe('Bearer secret-openai-key')
-    expect(requests[0]?.body).toEqual({ model: 'gpt-5', messages })
+    expect(requests[0]?.body).toEqual({ model: 'gpt-5', messages, store: false })
   })
 
   it('moves system messages into Anthropic system text and joins text response blocks', async () => {

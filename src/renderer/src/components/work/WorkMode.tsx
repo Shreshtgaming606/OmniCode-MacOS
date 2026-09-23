@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ExternalLink, FolderClosed, Globe2, LoaderCircle, Mail, Plug, ShieldCheck, Unplug, X } from 'lucide-react'
 
-import type { AIModel, AIProviderId } from '../../../../shared/contracts'
+import type { AIModel, AIProviderId, ProviderDataPolicy } from '../../../../shared/contracts'
 import type {
   AIModelCatalogResult,
   AIModelCapabilities,
@@ -123,13 +123,21 @@ function connectionLabel(connector: ConnectorDescriptor): string {
   }
 }
 
+function dataSourcesForMessage(message: WorkMessage): WorkMessage['dataSources'] {
+  if (message.dataSources?.includes('google-workspace')) return ['google-workspace']
+  return message.toolActivities?.some((activity) =>
+    activity.status === 'succeeded' && (activity.connectorId === 'gmail' || activity.connectorId === 'google-drive')
+  ) ? ['google-workspace'] : undefined
+}
+
 function ConnectedAppsDialog({
   connectors,
   busyId,
   onClose,
   onToggle,
   onOpenBrowser,
-  onManageGoogle
+  onManageGoogle,
+  onOpenPrivacy
 }: {
   connectors: ConnectorDescriptor[]
   busyId: string | null
@@ -137,6 +145,7 @@ function ConnectedAppsDialog({
   onToggle(connector: ConnectorDescriptor): void
   onOpenBrowser(): void
   onManageGoogle(): void
+  onOpenPrivacy(): void
 }) {
   useEffect(() => {
     const dismiss = (event: KeyboardEvent): void => {
@@ -154,6 +163,7 @@ function ConnectedAppsDialog({
     <section className="work-apps-dialog" role="dialog" aria-modal="true" aria-label="Connected Apps">
       <header><div><Plug /><span><h2>Connected Apps</h2><small>Only verified connections are shown as connected.</small></span></div><button type="button" autoFocus title="Close Connected Apps" onClick={onClose}><X /></button></header>
       <div className="work-apps-notice"><ShieldCheck /><span><strong>Permission boundary</strong><small>Connections, OAuth tokens, and tool permissions stay in OmniCode’s main process. Read tools are bounded; account changes require confirmation, and email is never sent without exact-content approval.</small></span></div>
+      <div className="work-apps-notice"><ShieldCheck /><span><strong>Google OAuth</strong><small>OmniCode uses Google OAuth to access only the Google services and permissions you authorize.</small><button type="button" onClick={onOpenPrivacy}><ExternalLink />View Privacy Policy</button></span></div>
       <div className="work-apps-list">
         {googleAccount && <div className={`work-google-account state-${googleAccount.state}`}><span>{googleAccount.state === 'connected' ? <ShieldCheck /> : <Plug />}</span><span><strong>Google account</strong><small>{googleAccount.message}</small></span></div>}
         {connectors.map((connector) => {
@@ -190,6 +200,7 @@ export function WorkMode({ active, onOpenSettings, onError, onRequireAttention, 
   const [modelState, setModelState] = useState<AIModelCatalogResult | null>(null)
   const [modelsLoading, setModelsLoading] = useState(false)
   const [modelError, setModelError] = useState<string | undefined>()
+  const [providerPolicy, setProviderPolicy] = useState<ProviderDataPolicy | null>(null)
   const [connectors, setConnectors] = useState<ConnectorDescriptor[]>([])
   const [showConnectedApps, setShowConnectedApps] = useState(false)
   const [connectorBusyId, setConnectorBusyId] = useState<string | null>(null)
@@ -328,6 +339,18 @@ export function WorkMode({ active, onOpenSettings, onError, onRequireAttention, 
     if (active) void refreshConnectors(true).catch(onError)
   }, [active, refreshConnectors, onError])
 
+  useEffect(() => {
+    let current = true
+    if (!selectedModelId) {
+      setProviderPolicy(null)
+      return () => { current = false }
+    }
+    void window.omnicode.work.providerPolicy(selectedProvider, selectedModelId)
+      .then((policy) => { if (current) setProviderPolicy(policy) })
+      .catch(onError)
+    return () => { current = false }
+  }, [selectedProvider, selectedModelId, onError])
+
   const selectConversation = async (id: string): Promise<void> => {
     try {
       const conversation = await window.omnicode.work.conversations.get(id)
@@ -443,7 +466,8 @@ export function WorkMode({ active, onOpenSettings, onError, onRequireAttention, 
       await window.omnicode.work.conversations.updateMessage(conversation.id, pendingAssistantId, {
         content: response.content,
         status: 'complete',
-        toolActivities: response.toolActivities
+        toolActivities: response.toolActivities,
+        dataSources: response.dataSources ?? []
       })
       setCurrentConversation(await window.omnicode.work.conversations.get(conversation.id))
       await refreshConversationList('')
@@ -495,7 +519,8 @@ export function WorkMode({ active, onOpenSettings, onError, onRequireAttention, 
           .map((message) => ({
             role: message.role,
             content: message.content,
-            attachmentIds: message.attachments?.map((attachment) => attachment.id)
+            attachmentIds: message.attachments?.map((attachment) => attachment.id),
+            dataSources: dataSourcesForMessage(message)
           }))
       )
     } catch (cause) {
@@ -510,12 +535,13 @@ export function WorkMode({ active, onOpenSettings, onError, onRequireAttention, 
     if (sending || !conversation || !selectedModelId) return
     const index = conversation.messages.findIndex((message) => message.id === messageId)
     if (index < 0 || index !== conversation.messages.length - 1 || conversation.messages[index]?.role !== 'assistant') return
-    const requestMessages = conversation.messages.slice(0, index)
+      const requestMessages = conversation.messages.slice(0, index)
       .filter((message) => message.status !== 'failed' && message.status !== 'cancelled' && message.status !== 'pending')
       .map((message) => ({
         role: message.role,
         content: message.content,
-        attachmentIds: message.attachments?.map((attachment) => attachment.id)
+        attachmentIds: message.attachments?.map((attachment) => attachment.id),
+        dataSources: dataSourcesForMessage(message)
       }))
     if (!requestMessages.some((message) => message.role === 'user')) return
     setSending(true)
@@ -560,7 +586,8 @@ export function WorkMode({ active, onOpenSettings, onError, onRequireAttention, 
       const requestMessages = updated.messages.slice(0, index + 1).map((item) => ({
         role: item.role,
         content: item.content,
-        attachmentIds: item.attachments?.map((attachment) => attachment.id)
+        attachmentIds: item.attachments?.map((attachment) => attachment.id),
+        dataSources: dataSourcesForMessage(item)
       }))
       await requestAssistantResponse(updated, assistant.id, requestMessages)
     } catch (cause) {
@@ -683,6 +710,7 @@ export function WorkMode({ active, onOpenSettings, onError, onRequireAttention, 
       modelsLoading={modelsLoading}
       modelsStale={modelState?.stale}
       modelError={modelError}
+      providerPolicy={providerPolicy}
       error={error}
       approvalMode={permissionSettings.globalMode}
       onSearchChange={setSearchQuery}
@@ -710,7 +738,7 @@ export function WorkMode({ active, onOpenSettings, onError, onRequireAttention, 
       onOpenActivity={() => setShowActivity(true)}
       onLinkError={(message) => onError(new Error(message))}
     />
-    {showConnectedApps && <ConnectedAppsDialog connectors={connectors} busyId={connectorBusyId} onClose={() => setShowConnectedApps(false)} onToggle={(connector) => void toggleConnector(connector)} onOpenBrowser={() => void openManagedBrowser()} onManageGoogle={() => void window.omnicode.app.openExternal('https://myaccount.google.com/connections').catch(onError)} />}
+    {showConnectedApps && <ConnectedAppsDialog connectors={connectors} busyId={connectorBusyId} onClose={() => setShowConnectedApps(false)} onToggle={(connector) => void toggleConnector(connector)} onOpenBrowser={() => void openManagedBrowser()} onManageGoogle={() => void window.omnicode.app.openExternal('https://myaccount.google.com/connections').catch(onError)} onOpenPrivacy={() => void window.omnicode.app.openExternal('https://omnicode.steampirate.life/privacy/').catch(onError)} />}
     {showActivity && <WorkActivityDialog onClose={() => setShowActivity(false)} onError={onError} />}
     {showFullAccessWarning && <FullAccessWarning onCancel={() => setShowFullAccessWarning(false)} onEnable={() => void changeApprovalMode('full', true)} />}
     {pendingApproval && <WorkApprovalCard request={pendingApproval} busy={approvalBusy} onResolve={(approved) => void resolveApproval(approved)} />}

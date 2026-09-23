@@ -2,91 +2,160 @@
   color-scheme: dark;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
   background: transparent;
-  color: #f6f8ff;
+  color: #f4f8ff;
 }
 
 * { box-sizing: border-box; }
-html, body, #omni-overlay-root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
-button, textarea { font: inherit; }
-button { color: inherit; }
+html, body, #omni-overlay-root { width: 100%; height: 100%; margin: 0; overflow: hidden; background: transparent; }
+button { font: inherit; color: inherit; }
 
-.omni-overlay-shell {
+.omni-voice-overlay {
+  position: relative;
+  width: 100%;
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: color-mix(in srgb, #11151f 94%, transparent);
-  border: 1px solid rgba(142, 174, 255, .28);
-  border-radius: 22px;
-  box-shadow: 0 24px 80px rgba(0, 0, 0, .55), inset 0 1px rgba(255, 255, 255, .05);
   overflow: hidden;
+  border: 1px solid rgba(99, 207, 255, .5);
+  border-radius: 26px;
+  background:
+    radial-gradient(circle at 52% 48%, rgba(40, 130, 255, .16), transparent 48%),
+    linear-gradient(145deg, rgba(7, 17, 35, .9), rgba(20, 15, 42, .86));
+  box-shadow: 0 20px 70px rgba(0, 0, 0, .48), 0 0 34px rgba(42, 159, 255, .22), inset 0 1px rgba(255, 255, 255, .12);
+  backdrop-filter: blur(28px) saturate(150%);
+  -webkit-backdrop-filter: blur(28px) saturate(150%);
 }
 
-.omni-overlay-header {
-  min-height: 62px;
+.omni-voice-overlay::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background: linear-gradient(115deg, rgba(68, 209, 255, .08), transparent 40%, rgba(175, 82, 255, .08));
+}
+
+.omni-voice-header {
+  position: relative;
+  z-index: 1;
+  min-height: 48px;
+  padding: 11px 11px 4px 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 15px 10px 18px;
   -webkit-app-region: drag;
-  border-bottom: 1px solid rgba(255, 255, 255, .075);
 }
 
-.omni-overlay-brand, .omni-overlay-brand > span, .omni-overlay-window-actions, .omni-overlay-footer, .omni-overlay-footer > div { display: flex; align-items: center; }
-.omni-overlay-brand { gap: 11px; }
-.omni-overlay-brand > span { width: 36px; height: 36px; justify-content: center; border-radius: 12px; color: #8eb6ff; background: linear-gradient(145deg, rgba(77, 122, 237, .35), rgba(86, 58, 171, .28)); box-shadow: inset 0 0 0 1px rgba(130, 165, 255, .24); }
-.omni-overlay-brand svg { width: 20px; }
-.omni-overlay-brand div { display: grid; gap: 2px; }
-.omni-overlay-brand strong { font-size: 15px; }
-.omni-overlay-brand small { color: #8f98ab; font-size: 11px; }
-.omni-overlay-window-actions { gap: 5px; -webkit-app-region: no-drag; }
-.omni-overlay-window-actions button { width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 9px; background: transparent; color: #9da7bb; cursor: pointer; }
-.omni-overlay-window-actions button:hover { background: rgba(255, 255, 255, .08); color: #fff; }
-.omni-overlay-window-actions svg { width: 15px; }
+.omni-voice-brand, .omni-window-actions, .omni-voice-actions { display: flex; align-items: center; }
+.omni-voice-brand { gap: 9px; font-size: 15px; letter-spacing: -.01em; }
+.omni-mark {
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  background: linear-gradient(#0b1730, #0b1730) padding-box, conic-gradient(from 20deg, #38dcff, #5585ff, #c25dff, #38dcff) border-box;
+  box-shadow: 0 0 15px rgba(66, 188, 255, .55);
+}
 
-.omni-overlay-blocked { margin: auto; max-width: 430px; text-align: center; }
-.omni-overlay-blocked strong { font-size: 20px; }
-.omni-overlay-blocked p { color: #9aa4b8; line-height: 1.5; }
-.omni-overlay-blocked button { border: 1px solid rgba(126, 164, 255, .45); background: rgba(75, 118, 224, .22); padding: 9px 14px; border-radius: 10px; cursor: pointer; }
+.omni-window-actions { gap: 2px; -webkit-app-region: no-drag; }
+.omni-window-actions button {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  color: rgba(221, 231, 249, .66);
+  background: transparent;
+}
+.omni-window-actions button:hover { color: #fff; background: rgba(255,255,255,.09); }
+.omni-window-actions svg { width: 14px; height: 14px; }
 
-.omni-overlay-status { display: grid; grid-template-columns: 58px 1fr; gap: 15px; padding: 20px 22px 14px; min-height: 118px; }
-.omni-overlay-orb { width: 56px; height: 56px; display: grid; place-items: center; align-self: center; border-radius: 50%; color: #a8c4ff; background: radial-gradient(circle at 35% 30%, #779df5, #4c56ba 56%, #242848 100%); box-shadow: 0 0 0 7px rgba(102, 131, 224, .09), 0 0 34px rgba(93, 124, 232, .3); }
-.omni-overlay-orb.active { animation: pulse 1.8s ease-in-out infinite; }
-.omni-overlay-orb svg { width: 26px; }
-.omni-overlay-status > div { min-width: 0; }
-.omni-overlay-status small, .omni-overlay-plan small { display: block; color: #7f9fe4; text-transform: uppercase; letter-spacing: .1em; font-size: 9px; font-weight: 700; margin-bottom: 5px; }
-.omni-overlay-status strong { display: block; font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.omni-overlay-status p, .omni-overlay-plan p { color: #9ca6ba; font-size: 12px; line-height: 1.45; margin: 5px 0 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.omni-voice-center {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-height: 0;
+  padding: 5px 24px 7px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
 
-.omni-overlay-plan { margin: 0 22px 10px; padding: 10px 12px; display: grid; grid-template-columns: 36px 1fr; gap: 11px; background: rgba(255, 255, 255, .035); border: 1px solid rgba(255, 255, 255, .07); border-radius: 12px; }
-.omni-overlay-plan > span { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 9px; color: #a9c3ff; background: rgba(83, 118, 210, .18); font-size: 11px; font-weight: 700; }
-.omni-overlay-plan strong { font-size: 12px; }
+.omni-wave { width: 220px; height: 82px; display: flex; align-items: center; justify-content: center; gap: 10px; }
+.wave-bars { height: 58px; display: flex; align-items: center; justify-content: center; gap: 4px; }
+.wave-bars i {
+  width: 4px;
+  height: calc(9px + var(--level) * 43px);
+  min-height: 9px;
+  max-height: 52px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #f4feff, #46e8ff 43%, #7676ff 80%, #d866ff);
+  box-shadow: 0 0 10px rgba(69, 222, 255, .74);
+  transition: height 70ms linear, opacity 180ms ease;
+}
+.phase-idle .wave-bars i { opacity: .68; animation: breathe 2.2s ease-in-out infinite alternate; }
+.phase-thinking .wave-bars i, .phase-working .wave-bars i { animation: think 1.25s ease-in-out infinite alternate; }
+.phase-speaking .wave-bars i { animation: speak .72s ease-in-out infinite alternate; }
+.phase-completed .wave-bars i { opacity: .55; }
+.phase-failed .wave-bars i, .phase-permission .wave-bars i { background: linear-gradient(180deg, #fff, #ac80ff); opacity: .64; box-shadow: 0 0 9px rgba(171, 105, 255, .55); }
 
-.omni-overlay-events { margin: 0 22px 10px; display: grid; gap: 5px; overflow: auto; }
-.omni-overlay-events > div { display: grid; grid-template-columns: 8px 1fr; gap: 8px; align-items: start; }
-.omni-overlay-events span { width: 6px; height: 6px; border-radius: 50%; margin-top: 5px; background: #75839b; }
-.omni-overlay-events span[data-status="succeeded"] { background: #55d69a; }
-.omni-overlay-events span[data-status="failed"] { background: #ff7e89; }
-.omni-overlay-events span[data-status="running"] { background: #76a4ff; }
-.omni-overlay-events p { margin: 0; color: #8f99ad; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.omni-overlay-events strong { color: #d6dbea; margin-right: 7px; }
+.wave-bracket { width: 22px; height: 54px; opacity: .78; filter: drop-shadow(0 0 7px #4bbfff); }
+.wave-bracket.left { border-left: 2px solid #45cfff; border-radius: 50% 0 0 50%; transform: skewY(-9deg); }
+.wave-bracket.right { border-right: 2px solid #a775ff; border-radius: 0 50% 50% 0; transform: skewY(9deg); }
 
-.omni-overlay-error { margin: 0 22px 8px; padding: 8px 10px; color: #ffc0c6; background: rgba(166, 48, 65, .16); border: 1px solid rgba(255, 101, 120, .25); border-radius: 9px; font-size: 11px; }
-.omni-overlay-compose { margin: auto 16px 10px; min-height: 66px; display: grid; grid-template-columns: 1fr 44px; gap: 8px; padding: 8px; border-radius: 15px; background: rgba(4, 7, 13, .45); border: 1px solid rgba(134, 163, 226, .18); }
-.omni-overlay-compose:focus-within { border-color: rgba(110, 151, 250, .55); box-shadow: 0 0 0 3px rgba(83, 123, 226, .1); }
-.omni-overlay-compose textarea { resize: none; border: 0; outline: 0; padding: 5px 7px; color: #eef2ff; background: transparent; line-height: 1.4; font-size: 13px; }
-.omni-overlay-compose textarea::placeholder { color: #667086; }
-.omni-overlay-compose button { width: 42px; height: 42px; align-self: center; display: grid; place-items: center; border: 0; border-radius: 12px; cursor: pointer; background: linear-gradient(145deg, #5d86eb, #575fca); box-shadow: 0 5px 18px rgba(67, 96, 195, .3); }
-.omni-overlay-compose button:disabled { opacity: .35; cursor: default; box-shadow: none; }
-.omni-overlay-compose svg { width: 18px; }
+.omni-phase-label { display: flex; align-items: center; gap: 6px; font-size: 14px; line-height: 20px; }
+.omni-phase-label svg { width: 16px; color: #5de7b0; }
+.omni-voice-center p {
+  width: 100%;
+  margin: 6px 0 0;
+  color: rgba(220, 232, 252, .78);
+  font-size: 12px;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.omni-voice-center p.error { color: #ffb6c4; }
 
-.omni-overlay-footer { min-height: 42px; justify-content: space-between; padding: 6px 16px 8px 21px; border-top: 1px solid rgba(255, 255, 255, .055); color: #778298; font-size: 10px; }
-.omni-overlay-footer > div { gap: 5px; }
-.omni-overlay-footer button { display: flex; align-items: center; gap: 5px; border: 0; border-radius: 8px; padding: 6px 8px; color: #9ba6ba; background: transparent; font-size: 10px; cursor: pointer; }
-.omni-overlay-footer button:hover:not(:disabled) { background: rgba(255, 255, 255, .07); color: #fff; }
-.omni-overlay-footer button:disabled { opacity: .3; cursor: default; }
-.omni-overlay-footer svg { width: 12px; }
-.spin { animation: spin .8s linear infinite; }
+.omni-voice-actions {
+  position: relative;
+  z-index: 1;
+  justify-content: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 0 14px 12px;
+}
+.omni-voice-actions:empty { min-height: 12px; padding-bottom: 0; }
+.omni-voice-actions button {
+  height: 30px;
+  padding: 0 11px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(145, 178, 239, .22);
+  border-radius: 10px;
+  color: #cbd8ef;
+  background: rgba(255,255,255,.055);
+  font-size: 11px;
+  cursor: pointer;
+}
+.omni-voice-actions button.primary { color: white; border-color: rgba(72, 196, 255, .45); background: linear-gradient(135deg, rgba(34, 158, 242, .54), rgba(114, 71, 225, .52)); }
+.omni-voice-actions button.stop { color: #ffb8c2; }
+.omni-voice-actions button:disabled { opacity: .5; cursor: default; }
+.omni-voice-actions svg { width: 13px; height: 13px; }
 
-@keyframes pulse { 50% { transform: scale(1.045); box-shadow: 0 0 0 10px rgba(102, 131, 224, .06), 0 0 44px rgba(93, 124, 232, .45); } }
-@keyframes spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .omni-overlay-orb.active, .spin { animation: none; } }
+@keyframes breathe { to { transform: scaleY(.72); opacity: .42; } }
+@keyframes think { 0% { transform: scaleY(.55); } 100% { transform: scaleY(1); } }
+@keyframes speak { 0% { transform: scaleY(.45); } 100% { transform: scaleY(1.08); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .wave-bars i { animation: none !important; transition: opacity 180ms ease; height: 25px; }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .omni-voice-overlay { background: #0b1425; backdrop-filter: none; -webkit-backdrop-filter: none; }
+}

@@ -26,14 +26,40 @@ export type OmniPermissionId =
   | 'speech-recognition'
   | 'accessibility'
   | 'screen-recording'
+  | 'notifications'
   | 'automation'
   | 'files-and-folders'
+  | 'launch-at-login'
 
-export type OmniPermissionState = 'granted' | 'denied' | 'not-determined' | 'restricted' | 'unavailable'
+export type OmniPermissionState =
+  | 'granted'
+  | 'denied'
+  | 'not-determined'
+  | 'requesting'
+  | 'restricted'
+  | 'unavailable'
+  | 'requires-settings'
+  | 'requires-restart'
+
+export type OmniPermissionCategory = 'core' | 'computer-control' | 'optional' | 'scoped'
+
+export interface OmniPermissionDetail {
+  id: OmniPermissionId
+  state: OmniPermissionState
+  category: OmniPermissionCategory
+  label: string
+  explanation: string
+  canRequest: boolean
+  canOpenSettings: boolean
+  /** False means the capability itself is unavailable, independently of authorization. */
+  featureAvailable: boolean
+  featureReason?: string
+}
 
 export interface OmniPermissionsSnapshot {
   checkedAt: number
   permissions: Record<OmniPermissionId, OmniPermissionState>
+  details: Record<OmniPermissionId, OmniPermissionDetail>
 }
 
 export interface OmniVoiceSettings {
@@ -67,9 +93,16 @@ export interface OmniSpeechInputAvailability {
 
 export interface OmniSpeechInputEvent {
   sessionId: string
-  type: 'listening' | 'partial' | 'final' | 'cancelled' | 'error'
+  type: 'listening' | 'amplitude' | 'partial' | 'final' | 'cancelled' | 'error'
   transcript?: string
+  amplitude?: number
   error?: string
+}
+
+export interface OmniSpeechOutputEvent {
+  type: 'speaking' | 'finished' | 'interrupted' | 'error'
+  taskId?: string
+  text?: string
 }
 
 export interface OmniSpeechRecognitionResult {

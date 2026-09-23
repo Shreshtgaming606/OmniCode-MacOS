@@ -1,6 +1,6 @@
 # Omni First-Time Setup
 
-Last updated: 2026-09-22
+Last updated: 2026-09-23
 
 ## Entry and persistence
 
@@ -13,25 +13,24 @@ not erase credentials, history, or unrelated application settings.
 Older version-1 Omni settings documents migrate missing `setupCompleted` and
 `showTextInput` fields to false without resetting valid existing preferences.
 
-## Seven steps
+## Nine guided steps
 
 1. **Welcome** explains the existing Code, Work, approved automation, and voice
    capabilities without claiming unavailable access.
-2. **Permissions** displays the real main-process macOS snapshot for microphone,
-   speech recognition, Accessibility, screen recording, automation, and files.
-   Grant/open-settings actions use the existing permission APIs; focus return
-   refreshes the snapshot.
-3. **Voice** exercises the real push-to-talk session and local TTS route. Voice
-   list/rate use the same validated global settings.
-4. **AI** selects a real existing provider and a model from the provider catalog.
+2. **Voice** requests Microphone and Speech Recognition sequentially through the
+   real macOS APIs. A denial can be skipped and recovered later.
+3. **Computer Control** requests optional Accessibility and Screen Recording;
+   Automation and user-selected folder access are described as scoped rather
+   than fake global switches.
+4. **Background** optionally requests Notifications and configures Launch at
+   Login.
+5. **Activation** explains the global shortcut and optional local wake setting.
+6. **AI** selects a real existing provider and a model from the provider catalog.
    No model is fabricated and no API key is exposed to the renderer.
-5. **Execution** selects Invisible or genuinely ready Cursor mode and the real
-   approval policy. Full Access still uses the existing acknowledged warning and
-   main-process enforcement.
-6. **Activation** configures the existing shortcut/wake preference and login
-   background setting. Unsupported local wake behavior is not presented as a
-   verified running engine.
-7. **Ready** summarizes actual permission, model, shortcut, execution, and
+7. **Execution** selects Invisible or genuinely ready Cursor mode.
+8. **Approvals** selects the real approval policy. Full Access still uses the
+   acknowledged warning and main-process enforcement.
+9. **Ready** summarizes actual permission, model, shortcut, execution, and
    approval readiness. Missing optional permissions are shown as needing
    attention; they do not become fake successes.
 
@@ -41,7 +40,8 @@ The renderer does not receive media devices or Node access. Microphone capture
 is owned by the fixed-protocol Swift helper through the main process. Only
 bounded text events cross IPC; raw audio is not persisted. If the required
 on-device Speech asset or permission is unavailable, setup gives a real status
-and Omni remains usable through an explicitly enabled typed fallback.
+and full Omni remains usable through an explicitly enabled typed fallback. The
+global overlay remains voice-only.
 
 ## Settings surface
 
@@ -54,7 +54,7 @@ not write preferences directly.
 ## Verification
 
 The fresh-profile production audit advances every step using the same rendered
-controls as a user, verifies all seven progress items, footer visibility, no
+controls as a user, verifies all nine progress items, footer visibility, no
 horizontal overflow, setup persistence, and zero renderer errors. Unit tests
 cover defaults, concurrent updates, legacy migration, setup rendering, Settings
 navigation, and friendly error presentation.

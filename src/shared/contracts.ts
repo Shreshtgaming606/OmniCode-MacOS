@@ -37,16 +37,19 @@ import type {
   CodeAgentVisibility
 } from './code-agent-contracts'
 import type {
+  OmniActivationSource,
   OmniEvent,
   OmniExecutionMode,
   OmniInstalledVoice,
   OmniPermissionId,
   OmniPermissionsSnapshot,
+  OmniPermissionDetail,
   OmniSpeechInputAvailability,
   OmniSpeechInputEvent,
   OmniSpeechRecognitionResult,
   OmniSpeechStartOptions,
   OmniSettings,
+  OmniSpeechOutputEvent,
   OmniStartRequest,
   OmniTask,
   OmniTaskSummary,
@@ -241,6 +244,21 @@ export interface PackageScript {
 }
 
 export type AIProviderId = 'ollama' | 'openai' | 'anthropic' | 'google'
+
+export interface ProviderDataPolicy {
+  provider: AIProviderId
+  model?: string
+  displayName: string
+  allowsGoogleWorkspaceData: boolean
+  cloud: boolean
+  endpointType: string
+  retention: string
+  training: string
+  dataRegion: string
+  rationale: string
+  lastReviewed: string
+  documentationUrls: string[]
+}
 
 export type AIProviderConnectionState =
   | 'not-configured'
@@ -513,6 +531,7 @@ export interface WorkAPI {
     connect(id: string): Promise<ConnectorDescriptor['status']>
     disconnect(id: string): Promise<ConnectorDescriptor['status']>
   }
+  providerPolicy(provider: AIProviderId, model?: string): Promise<ProviderDataPolicy>
   permissions: {
     get(): Promise<WorkPermissionSettings>
     setGlobal(mode: WorkApprovalMode, acknowledgeFullAccess?: boolean): Promise<WorkPermissionSettings>
@@ -586,7 +605,9 @@ export interface OmniAPI {
   }
   permissions: {
     status(): Promise<OmniPermissionsSnapshot>
+    request(permissionId: OmniPermissionId): Promise<OmniPermissionDetail>
     openSettings(permissionId: OmniPermissionId): Promise<void>
+    onChanged(callback: (snapshot: OmniPermissionsSnapshot) => void): () => void
   }
   voice: {
     availability(): Promise<OmniVoiceAvailability>
@@ -598,6 +619,7 @@ export interface OmniAPI {
     stopInput(sessionId: string): Promise<OmniSpeechRecognitionResult>
     cancelInput(sessionId: string): Promise<boolean>
     onInputEvent(callback: (event: OmniSpeechInputEvent) => void): () => void
+    onOutputEvent(callback: (event: OmniSpeechOutputEvent) => void): () => void
   }
   cursor: {
     status(): Promise<OmniCursorRuntimeStatus>
@@ -622,6 +644,22 @@ export interface OmniOverlayAPI {
   activation: {
     hide(): Promise<void>
     openMainWindow(): Promise<void>
+    onShow(callback: (payload: { source: OmniActivationSource }) => void): () => void
+  }
+  permissions: {
+    status(): Promise<OmniPermissionsSnapshot>
+    request(permissionId: OmniPermissionId): Promise<OmniPermissionDetail>
+    openSettings(permissionId: OmniPermissionId): Promise<void>
+    onChanged(callback: (snapshot: OmniPermissionsSnapshot) => void): () => void
+  }
+  voice: {
+    inputAvailability(): Promise<OmniSpeechInputAvailability>
+    startInput(options?: OmniSpeechStartOptions): Promise<{ sessionId: string }>
+    stopInput(sessionId: string): Promise<OmniSpeechRecognitionResult>
+    cancelInput(sessionId: string): Promise<boolean>
+    stop(): Promise<boolean>
+    onInputEvent(callback: (event: OmniSpeechInputEvent) => void): () => void
+    onOutputEvent(callback: (event: OmniSpeechOutputEvent) => void): () => void
   }
 }
 

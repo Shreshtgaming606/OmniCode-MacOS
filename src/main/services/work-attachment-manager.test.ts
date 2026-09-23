@@ -62,4 +62,20 @@ describe('WorkAttachmentManager', () => {
     await expect(manager.context([attachment.id])).rejects.toThrow()
     await expect(manager.remove('../../outside')).rejects.toThrow(/identifier is invalid/i)
   })
+
+  it('prunes orphaned attachment pairs while retaining referenced attachments', async () => {
+    const { root, source, manager } = await fixture()
+    const first = path.join(source, 'first.txt')
+    const second = path.join(source, 'second.txt')
+    await fs.writeFile(first, 'keep me')
+    await fs.writeFile(second, 'remove me')
+    const kept = await manager.importFile(first)
+    const removed = await manager.importFile(second)
+
+    await manager.removeUnreferenced([kept.id])
+
+    await expect(manager.context([kept.id])).resolves.toContain('keep me')
+    await expect(manager.context([removed.id])).rejects.toThrow()
+    await expect(fs.stat(path.join(root, 'store', `${removed.id}.content`))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
 })

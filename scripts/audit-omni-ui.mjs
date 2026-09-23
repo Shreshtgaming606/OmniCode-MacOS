@@ -8,7 +8,7 @@ let target
 while (!target && Date.now() < deadline) {
   target = await fetch(`http://127.0.0.1:${port}/json`)
     .then((response) => response.json())
-    .then((targets) => targets.find((item) => item.type === 'page' && item.webSocketDebuggerUrl))
+    .then((targets) => targets.find((item) => item.type === 'page' && item.webSocketDebuggerUrl && !item.url?.includes('omni-overlay.html')))
     .catch(() => undefined)
   if (!target) await new Promise((resolve) => setTimeout(resolve, 250))
 }
@@ -75,9 +75,9 @@ await call('Page.reload', { ignoreCache: true })
 await waitFor('document.querySelector(".omni-setup") && window.omnicode', 30_000)
 
 const setupSnapshots = []
-for (let step = 0; step < 7; step++) {
-  await waitFor(`document.querySelector('.omni-setup-count')?.textContent.includes('${step + 1} of 7')`)
-  if (step === 3) {
+for (let step = 0; step < 9; step++) {
+  await waitFor(`document.querySelector('.omni-setup-count')?.textContent.includes('${step + 1} of 9')`)
+  if (step === 5) {
     await evaluate(`return await window.omnicode.omni.settings.update({ model: { provider: 'google', modelId: 'gemini-2.5-flash' } })`)
     await waitFor(`document.querySelector('.omni-wide-field select')?.value === 'gemini-2.5-flash'`)
   }
@@ -89,11 +89,11 @@ for (let step = 0; step < 7; step++) {
     footerVisible: document.querySelector('.omni-setup-footer')?.getBoundingClientRect().bottom <= innerHeight + 1,
     rawCoursePanel: Boolean(document.querySelector('.omni-plan'))
   }`)
-  if (snapshot.progressItems !== 7 || snapshot.horizontalOverflow || !snapshot.footerVisible || snapshot.rawCoursePanel) {
+  if (snapshot.progressItems !== 9 || snapshot.horizontalOverflow || !snapshot.footerVisible || snapshot.rawCoursePanel) {
     throw new Error(`Omni setup layout failed: ${JSON.stringify(snapshot)}`)
   }
   setupSnapshots.push(snapshot)
-  if (step === 0 || step === 1 || step === 6) await screenshot(`omni-setup-${step + 1}`)
+  if (step === 0 || step === 1 || step === 8) await screenshot(`omni-setup-${step + 1}`)
   await evaluate(`document.querySelector('.omni-setup-footer .omni-primary-button')?.click(); return true`)
 }
 

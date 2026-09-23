@@ -9,7 +9,7 @@ import type { AIModel, AIProviderId, OmniSettingsChanges } from '../../../../sha
 import type { CloudAIProviderId } from '../../../../shared/model-contracts'
 import type {
   OmniEvent, OmniExecutionMode, OmniInstalledVoice, OmniPermissionId, OmniPermissionState,
-  OmniPermissionsSnapshot, OmniSettings, OmniSpeechInputAvailability, OmniStatus, OmniTask, OmniTaskSummary,
+  OmniPermissionDetail, OmniPermissionsSnapshot, OmniSettings, OmniSpeechInputAvailability, OmniStatus, OmniTask, OmniTaskSummary,
   OmniVoiceAvailability,
 } from '../../../../shared/omni-contracts'
 import type { WorkApprovalMode } from '../../../../shared/tool-contracts'
@@ -28,15 +28,15 @@ const PROVIDERS: Array<{ id: AIProviderId; label: string; group: 'Local' | 'Clou
   { id: 'anthropic', label: 'Claude', group: 'Cloud' },
   { id: 'google', label: 'Google Gemini', group: 'Cloud' },
 ]
-const PERMISSIONS: Array<{ id: OmniPermissionId; label: string; detail: string; optional?: boolean }> = [
-  { id: 'microphone', label: 'Microphone', detail: 'Voice commands and speech input' },
-  { id: 'speech-recognition', label: 'Speech Recognition', detail: 'Convert your voice into requests' },
-  { id: 'accessibility', label: 'Accessibility', detail: 'Required only for Cursor Mode', optional: true },
-  { id: 'screen-recording', label: 'Screen Recording', detail: 'Understand visible interfaces when requested', optional: true },
-  { id: 'automation', label: 'Automation', detail: 'Interact with supported macOS applications', optional: true },
-  { id: 'files-and-folders', label: 'Files & Folders', detail: 'Use locations you explicitly approve', optional: true },
+const PERMISSIONS: Array<{ id: OmniPermissionId; label: string; detail: string; group: 'voice' | 'computer' | 'background'; optional?: boolean }> = [
+  { id: 'microphone', label: 'Microphone', detail: 'Used only while Omni is listening', group: 'voice' },
+  { id: 'speech-recognition', label: 'Speech Recognition', detail: 'Convert your voice into requests', group: 'voice' },
+  { id: 'accessibility', label: 'Accessibility', detail: 'Cursor Mode buttons, menus, and fields', group: 'computer', optional: true },
+  { id: 'automation', label: 'App Automation', detail: 'Requested separately for each target app', group: 'computer', optional: true },
+  { id: 'files-and-folders', label: 'Files & Folders', detail: 'Use locations you explicitly approve', group: 'computer', optional: true },
+  { id: 'notifications', label: 'Notifications', detail: 'Background completion alerts', group: 'background', optional: true },
 ]
-const SETUP_STEPS = ['Welcome', 'Permissions', 'Voice', 'AI', 'Execution', 'Activation', 'Ready'] as const
+const SETUP_STEPS = ['Welcome', 'Voice', 'Computer Control', 'Background', 'Activation', 'AI', 'Execution', 'Approvals', 'Ready'] as const
 const ACTIVITY_LIMIT = 40
 
 type PresentedError = { title: string; message: string; detail: string }
@@ -188,7 +188,8 @@ export function OmniMode({ active }: { active: boolean }) {
         setError(presentOmniError(event.error ?? 'Voice recognition failed.'))
       }
     })
-    return () => { unsubscribeSettings(); unsubscribeTask(); unsubscribeEvent(); unsubscribeVoiceInput() }
+    const unsubscribePermissions = window.omnicode.omni.permissions.onChanged(setPermissions)
+    return () => { unsubscribeSettings(); unsubscribeTask(); unsubscribeEvent(); unsubscribeVoiceInput(); unsubscribePermissions() }
   }, [load, refreshTask])
 
   useEffect(() => {
@@ -320,8 +321,7 @@ function OmniSetupWizard({
   onProvider(provider: AIProviderId): Promise<void>; onModel(modelId: string): void; onApproval(mode: WorkApprovalMode): Promise<void>
   onVoice(): void; onVoiceTest(): void; onFinish(): void
 }) {
-  const granted = PERMISSIONS.filter(({ id }) => permissions?.permissions[id] === 'granted').length
-  const nextDisabled = step === 3 && (!settings.model.modelId || !modelDraft)
+  const nextDisabled = step === 5 && (!settings.model.modelId || !modelDraft)
   return <section className="omni-mode omni-setup" aria-label="Set up Omni"><div className="omni-setup-shell">
     <header className="omni-setup-header"><span className="omni-setup-logo"><AudioWaveform /></span>
       <span><strong>Set Up Omni</strong><small>Your voice-first system assistant</small></span>
@@ -331,13 +331,14 @@ function OmniSetupWizard({
     <main className="omni-setup-content">
       {error && <OmniAlert error={error} onDismiss={onDismissError} />}
       {step === 0 && <SetupIntro />}
-      {step === 1 && <SetupPermissions permissions={permissions} granted={granted} onRefresh={onRefresh} />}
-      {step === 2 && <SetupVoice settings={settings} input={voiceInput} output={voiceOutput} sessionId={voiceSessionId}
-        transcript={transcript} voices={voices} busy={busy} onUpdate={onUpdate} onVoice={onVoice} onVoiceTest={onVoiceTest} />}
-      {step === 3 && <SetupAI settings={settings} models={models} modelDraft={modelDraft} busy={busy} onProvider={onProvider} onModel={onModel} />}
-      {step === 4 && <SetupExecution settings={settings} cursorReady={cursorReady} busy={busy} onUpdate={onUpdate} onApproval={onApproval} />}
-      {step === 5 && <SetupActivation settings={settings} busy={busy} onUpdate={onUpdate} />}
-      {step === 6 && <SetupReady settings={settings} permissions={permissions} cursorReady={cursorReady} />}
+      {step === 1 && <SetupPermissions group="voice" title="Help Omni hear you" kicker="VOICE ACCESS" permissions={permissions} onRefresh={onRefresh} />}
+      {step === 2 && <SetupPermissions group="computer" title="Computer control" kicker="CURSOR MODE" permissions={permissions} onRefresh={onRefresh} />}
+      {step === 3 && <SetupBackground settings={settings} permissions={permissions} busy={busy} onRefresh={onRefresh} onUpdate={onUpdate} />}
+      {step === 4 && <SetupActivation settings={settings} busy={busy} onUpdate={onUpdate} />}
+      {step === 5 && <SetupAI settings={settings} models={models} modelDraft={modelDraft} busy={busy} onProvider={onProvider} onModel={onModel} />}
+      {step === 6 && <SetupExecution settings={settings} cursorReady={cursorReady} busy={busy} onUpdate={onUpdate} />}
+      {step === 7 && <SetupApprovals settings={settings} busy={busy} onApproval={onApproval} />}
+      {step === 8 && <SetupReady settings={settings} permissions={permissions} cursorReady={cursorReady} />}
     </main>
     <footer className="omni-setup-footer"><button type="button" className="omni-secondary-button" disabled={step === 0 || busy} onClick={() => onStep(step - 1)}><ChevronLeft />Back</button>
       {step < SETUP_STEPS.length - 1
@@ -358,20 +359,30 @@ function SetupIntro() {
   </div>
 }
 
-function SetupPermissions({ permissions, granted, onRefresh }: { permissions: OmniPermissionsSnapshot | null; granted: number; onRefresh(): void }) {
-  return <div className="omni-setup-step"><div className="omni-setup-title"><span><ShieldCheck /></span><div><p className="omni-kicker">SYSTEM ACCESS</p><h1>System Permissions</h1><p>{granted} of {PERMISSIONS.length} currently enabled. Optional capabilities will not block setup.</p></div></div>
-    <div className="omni-permission-progress"><span style={{ width: `${Math.round(granted / PERMISSIONS.length * 100)}%` }} /></div>
-    <div className="omni-permission-list">{PERMISSIONS.map((permission) => <PermissionRow key={permission.id} permission={permission} state={permissions?.permissions[permission.id] ?? 'not-determined'} />)}</div>
+function SetupPermissions({ group, title, kicker, permissions, onRefresh }: {
+  group: typeof PERMISSIONS[number]['group']; title: string; kicker: string
+  permissions: OmniPermissionsSnapshot | null; onRefresh(): void
+}) {
+  const visible = PERMISSIONS.filter((permission) => permission.group === group)
+  const granted = visible.filter(({ id }) => permissions?.permissions[id] === 'granted').length
+  return <div className="omni-setup-step"><div className="omni-setup-title"><span><ShieldCheck /></span><div><p className="omni-kicker">{kicker}</p><h1>{title}</h1><p>{group === 'voice' ? 'These core permissions let Omni hear and understand you.' : 'These are optional. Invisible Mode remains available if you set them up later.'}</p></div></div>
+    <div className="omni-permission-progress"><span style={{ width: `${Math.round(granted / visible.length * 100)}%` }} /></div>
+    <div className="omni-permission-list">{visible.map((permission) => <PermissionRow key={permission.id} permission={permission} state={permissions?.permissions[permission.id] ?? 'not-determined'} detail={permissions?.details[permission.id]} onRefresh={onRefresh} />)}</div>
     <button type="button" className="omni-secondary-button" onClick={onRefresh}><RefreshCw />Refresh permission state</button>
   </div>
 }
 
-function PermissionRow({ permission, state }: { permission: typeof PERMISSIONS[number]; state: OmniPermissionState }) {
+function PermissionRow({ permission, state, detail, onRefresh }: { permission: typeof PERMISSIONS[number]; state: OmniPermissionState; detail?: OmniPermissionDetail; onRefresh(): void }) {
+  const [requesting, setRequesting] = useState(false)
   const granted = state === 'granted'
+  const request = (): void => {
+    setRequesting(true)
+    void window.omnicode.omni.permissions.request(permission.id).then(onRefresh).finally(() => setRequesting(false))
+  }
   return <div className="omni-permission-row" data-state={state}><span className="omni-permission-icon">{granted ? <Check /> : <CircleAlert />}</span>
     <span><strong>{permission.label}{permission.optional && <em>Optional</em>}</strong><small>{permission.detail}</small></span>
-    <span className="omni-permission-state">{permissionStateLabel(state)}</span>
-    {!granted && state !== 'unavailable' && <button type="button" onClick={() => void window.omnicode.omni.permissions.openSettings(permission.id)}>Open System Settings</button>}
+    <span className="omni-permission-state">{detail && !detail.canRequest && state === 'not-determined' ? 'Requested when used' : permissionStateLabel(state)}</span>
+    {!granted && state !== 'unavailable' && detail?.canRequest !== false && <button type="button" disabled={requesting} onClick={request}>{requesting ? 'Requesting…' : state === 'requires-settings' || state === 'denied' ? 'Enable in System Settings' : 'Enable'}</button>}
   </div>
 }
 
@@ -382,7 +393,7 @@ function SetupVoice({ settings, input, output, sessionId, transcript, voices, bu
 }) {
   return <div className="omni-setup-step"><div className="omni-setup-title"><span><Mic /></span><div><p className="omni-kicker">VOICE</p><h1>Make sure Omni can hear you</h1><p>Speech stays on this Mac. Test input and choose the voice Omni uses for spoken responses.</p></div></div>
     <div className={`omni-mic-test${sessionId ? ' listening' : ''}`}><button type="button" onClick={onVoice} disabled={busy || (!input.available && !sessionId)} aria-label={sessionId ? 'Stop microphone test' : 'Start microphone test'}>{sessionId ? <Square /> : <Mic />}</button>
-      <span><strong>{sessionId ? 'Listening…' : input.available ? 'Microphone ready' : 'Voice input unavailable'}</strong><small>{transcript || input.reason || 'Say “Hey Omni, are you ready?”'}</small></span>
+      <span><strong>{sessionId ? 'Listening…' : input.available ? 'Microphone ready' : 'Voice input unavailable'}</strong><small>{transcript || input.reason || 'Press the microphone and speak a test request.'}</small></span>
       <i aria-hidden="true">{Array.from({ length: 18 }, (_, index) => <b key={index} />)}</i></div>
     <div className="omni-setup-fields"><label><span>Omni voice</span><select value={settings.voice.voiceId} disabled={busy || !output.available} onChange={(event) => void onUpdate({ voice: { voiceId: event.target.value } })}>
       <option value="">System Default</option>{voices.map((voice) => <option key={`${voice.id}-${voice.locale}`} value={voice.id}>{voice.name} · {voice.locale}</option>)}</select></label>
@@ -403,35 +414,55 @@ function SetupAI({ settings, models, modelDraft, busy, onProvider, onModel }: {
   </div>
 }
 
-function SetupExecution({ settings, cursorReady, busy, onUpdate, onApproval }: {
-  settings: OmniSettings; cursorReady: boolean; busy: boolean
-  onUpdate(changes: OmniSettingsChanges): Promise<OmniSettings | undefined>; onApproval(mode: WorkApprovalMode): Promise<void>
+function SetupBackground({ settings, permissions, busy, onRefresh, onUpdate }: {
+  settings: OmniSettings; permissions: OmniPermissionsSnapshot | null; busy: boolean; onRefresh(): void
+  onUpdate(changes: OmniSettingsChanges): Promise<OmniSettings | undefined>
 }) {
-  return <div className="omni-setup-step"><div className="omni-setup-title"><span><Zap /></span><div><p className="omni-kicker">CONTROL</p><h1>Choose how Omni works</h1><p>Execution controls where actions happen. Approval controls when Omni must ask.</p></div></div>
+  const notification = PERMISSIONS.find((permission) => permission.id === 'notifications')!
+  return <div className="omni-setup-step"><div className="omni-setup-title"><span><Activity /></span><div><p className="omni-kicker">BACKGROUND</p><h1>Stay available when needed</h1><p>Notifications and launch at login are optional. Omni works normally while OmniCode is open without them.</p></div></div>
+    <div className="omni-permission-list"><PermissionRow permission={notification} state={permissions?.permissions.notifications ?? 'not-determined'} detail={permissions?.details.notifications} onRefresh={onRefresh} /></div>
+    <label className="omni-setup-toggle"><span><strong>Start Omni with my Mac</strong><small>Keep the global shortcut available after sign-in.</small></span><input type="checkbox" disabled={busy} checked={settings.launchHelperAtLogin} onChange={(event) => void onUpdate({ launchHelperAtLogin: event.target.checked })} /></label>
+  </div>
+}
+
+function SetupExecution({ settings, cursorReady, busy, onUpdate }: {
+  settings: OmniSettings; cursorReady: boolean; busy: boolean
+  onUpdate(changes: OmniSettingsChanges): Promise<OmniSettings | undefined>
+}) {
+  return <div className="omni-setup-step"><div className="omni-setup-title"><span><Zap /></span><div><p className="omni-kicker">EXECUTION</p><h1>Choose how Omni works</h1><p>Invisible Mode uses approved background tools. Cursor Mode visibly controls supported Mac interfaces.</p></div></div>
     <h2>Execution</h2><div className="omni-choice-grid two-column"><Choice selected={settings.executionMode === 'invisible'} icon={<EyeOff />} title="Invisible · Recommended" detail="Perform supported tasks in the background." onClick={() => void onUpdate({ executionMode: 'invisible' })} />
       <Choice selected={settings.executionMode === 'cursor'} disabled={!cursorReady} icon={<MousePointer2 />} title="Cursor" detail={cursorReady ? `Visible Mac control · stop with ${OMNI_CURSOR_EMERGENCY_STOP_LABEL}.` : 'Accessibility and the native cursor helper are required.'} onClick={() => void onUpdate({ executionMode: 'cursor' })} /></div>
-    <h2>Approvals</h2><div className="omni-choice-grid three-column"><Choice selected={settings.approvalMode === 'ask'} icon={<ShieldCheck />} title="Ask for approval" detail="Ask before changes and external actions." onClick={() => void onApproval('ask')} />
+    {busy && <LoaderCircle className="omni-spin" />}
+  </div>
+}
+
+function SetupApprovals({ settings, busy, onApproval }: { settings: OmniSettings; busy: boolean; onApproval(mode: WorkApprovalMode): Promise<void> }) {
+  return <div className="omni-setup-step"><div className="omni-setup-title"><span><ShieldCheck /></span><div><p className="omni-kicker">APPROVALS</p><h1>Stay in control</h1><p>Choose when Omni should ask. Critical, financial, account-security, and irreversible actions always remain protected.</p></div></div>
+    <div className="omni-choice-grid three-column"><Choice selected={settings.approvalMode === 'ask'} icon={<ShieldCheck />} title="Ask for approval" detail="Ask before changes and external actions." onClick={() => void onApproval('ask')} />
       <Choice selected={settings.approvalMode === 'auto'} icon={<Sparkles />} title="Approve for me" detail="Handle low-risk reversible work automatically." onClick={() => void onApproval('auto')} />
       <Choice selected={settings.approvalMode === 'full'} icon={<Zap />} title="Full access" detail="Maximum autonomy within protected boundaries." onClick={() => void onApproval('full')} /></div>
     {busy && <LoaderCircle className="omni-spin" />}
   </div>
 }
 
-function SetupActivation({ settings, busy, onUpdate }: { settings: OmniSettings; busy: boolean; onUpdate(changes: OmniSettingsChanges): Promise<OmniSettings | undefined> }) {
-  return <div className="omni-setup-step"><div className="omni-setup-title"><span><AudioWaveform /></span><div><p className="omni-kicker">ACTIVATION</p><h1>Call Omni from anywhere</h1><p>Your global shortcut is registered when setup finishes. Wake phrase processing remains on-device.</p></div></div>
+function SetupActivation({ busy }: { settings: OmniSettings; busy: boolean; onUpdate(changes: OmniSettingsChanges): Promise<OmniSettings | undefined> }) {
+  return <div className="omni-setup-step"><div className="omni-setup-title"><span><AudioWaveform /></span><div><p className="omni-kicker">ACTIVATION</p><h1>Call Omni from anywhere</h1><p>Your global shortcut is registered when setup finishes. Omni listens only after you activate the microphone.</p></div></div>
     <div className="omni-shortcut-card"><span><strong>Global shortcut</strong><small>Activate Omni</small></span><kbd>⌘</kbd><kbd>⇧</kbd><kbd>Space</kbd></div>
-    <label className="omni-setup-toggle"><span><strong>Enable “Hey Omni”</strong><small>Listen for the wake phrase using the local voice system.</small></span><input type="checkbox" disabled={busy} checked={settings.activation.voiceActivation === 'wake-word-and-shortcut'} onChange={(event) => void onUpdate({ activation: { voiceActivation: event.target.checked ? 'wake-word-and-shortcut' : 'shortcut-only' } })} /></label>
-    <label className="omni-setup-toggle"><span><strong>Start Omni with my Mac</strong><small>Recommended for global activation and background availability.</small></span><input type="checkbox" disabled={busy} checked={settings.launchHelperAtLogin} onChange={(event) => void onUpdate({ launchHelperAtLogin: event.target.checked })} /></label>
+    <div className="omni-setup-toggle"><span><strong>Press to talk</strong><small>Omni does not run an always-listening wake-word service.</small></span><input type="checkbox" disabled={busy} checked readOnly aria-label="Press-to-talk enabled" /></div>
   </div>
 }
 
 function SetupReady({ settings, permissions, cursorReady }: { settings: OmniSettings; permissions: OmniPermissionsSnapshot | null; cursorReady: boolean }) {
   const items = [
-    ['Microphone', permissions?.permissions.microphone === 'granted'], ['Speech recognition', permissions?.permissions['speech-recognition'] === 'granted'],
-    ['AI model', Boolean(settings.model.modelId)], ['Global shortcut', true], [`${settings.executionMode === 'cursor' ? 'Cursor' : 'Invisible'} Mode`, settings.executionMode !== 'cursor' || cursorReady], ['Approval settings', true],
+    ['Core · Microphone', permissions?.permissions.microphone === 'granted'],
+    ['Core · Speech recognition', permissions?.permissions['speech-recognition'] === 'granted'],
+    ['Computer Control · Accessibility', permissions?.permissions.accessibility === 'granted'],
+    ['AI model', Boolean(settings.model.modelId)],
+    ['Invisible Mode', true],
+    ['Cursor Mode', cursorReady],
   ] as const
   return <div className="omni-setup-ready"><div className="omni-ready-mark"><Check /></div><p className="omni-kicker">SETUP COMPLETE</p><h1>Omni is ready.</h1>
-    <p>You can start now. Capabilities without macOS permission remain safely unavailable until you enable them.</p>
+    <p>Invisible Mode is ready. Cursor Mode remains safely unavailable until Accessibility is enabled.</p>
     <ul>{items.map(([label, ready]) => <li key={label} data-ready={ready}><span>{ready ? <Check /> : <CircleAlert />}</span>{label}<small>{ready ? 'Ready' : 'Needs attention'}</small></li>)}</ul>
   </div>
 }
@@ -499,7 +530,7 @@ function OmniDashboard({
         <section className={`omni-voice-dock${voiceSessionId ? ' listening' : ''}${settings.showTextInput && !voiceSessionId ? ' has-text-input' : ''}`} aria-label="Voice activation">
           <div className="omni-voice-hint"><AudioWaveform /><span>Press <kbd>⌘</kbd><kbd>⇧</kbd><kbd>Space</kbd><small>to activate Omni</small></span></div>
           <button type="button" className="omni-mic-button" disabled={!settings.enabled || busy || taskRunning || (!voiceInput.available && !voiceSessionId)} title={!settings.enabled ? 'Enable Omni in Settings to use voice input.' : voiceInput.reason} onClick={onVoice} aria-label={voiceSessionId ? 'Stop listening and send request' : 'Start voice request'}>{voiceSessionId ? <Square /> : <Mic />}</button>
-          <div className="omni-voice-hint align-right"><span>Or just say<strong>“Hey Omni”</strong></span><AudioWaveform /></div>
+          <div className="omni-voice-hint align-right"><span>Or press<strong>the microphone</strong></span><AudioWaveform /></div>
           {voiceSessionId && <p className="omni-live-transcript">{requestText || 'Listening…'}</p>}
           {settings.showTextInput && !voiceSessionId && <form className="omni-compact-composer" onSubmit={(event) => { event.preventDefault(); onStart() }}><input value={requestText} onChange={(event) => onRequest(event.target.value)} placeholder="Type an Omni request…" disabled={!settings.enabled || taskRunning || busy} /><button type="submit" disabled={!settings.enabled || !requestText.trim() || taskRunning || busy || !modelDraft}><Send /></button></form>}
         </section>
@@ -558,8 +589,11 @@ function omniStateCopy(status: OmniStatus, task: OmniTask | null): { title: stri
 function permissionStateLabel(state: OmniPermissionState): string {
   if (state === 'granted') return 'Enabled'
   if (state === 'not-determined') return 'Not enabled'
+  if (state === 'requires-settings') return 'Enable in Settings'
+  if (state === 'requires-restart') return 'Restart required'
+  if (state === 'requesting') return 'Requesting…'
   if (state === 'unavailable') return 'Unavailable'
-  return state[0].toUpperCase() + state.slice(1)
+  return state.split('-').map((part) => part[0]?.toUpperCase() + part.slice(1)).join(' ')
 }
 
 function formatTimestamp(timestamp: number): string {

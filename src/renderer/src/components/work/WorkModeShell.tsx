@@ -34,7 +34,7 @@ import {
   X
 } from 'lucide-react'
 
-import type { AIProviderId } from '../../../../shared/contracts'
+import type { AIProviderId, ProviderDataPolicy } from '../../../../shared/contracts'
 import type { WorkApprovalMode } from '../../../../shared/tool-contracts'
 import type { AIModelDescriptor } from '../../../../shared/model-contracts'
 import { assessModelForUseCase } from '../../../../shared/model-contracts'
@@ -81,6 +81,7 @@ export interface WorkModeShellProps {
   modelsLoading?: boolean
   modelsStale?: boolean
   modelError?: string
+  providerPolicy?: ProviderDataPolicy | null
   error?: string
   approvalMode: WorkApprovalMode
   onSearchChange(value: string): void
@@ -316,6 +317,7 @@ export function WorkModeShell({
   modelsLoading = false,
   modelsStale = false,
   modelError,
+  providerPolicy,
   error,
   approvalMode,
   onSearchChange,
@@ -351,7 +353,11 @@ export function WorkModeShell({
       : conversationGroups(recent),
     [recent, searchQuery]
   )
-  const suggestions = useMemo(() => suggestionsForConnectedApps(connectedApps), [connectedApps])
+  const suggestions = useMemo(() => suggestionsForConnectedApps(
+    providerPolicy?.allowsGoogleWorkspaceData === false
+      ? connectedApps.filter((app) => app.id !== 'gmail' && app.id !== 'google-drive')
+      : connectedApps
+  ), [connectedApps, providerPolicy?.allowsGoogleWorkspaceData])
   const models = useMemo(() => modelCatalog.filter((model) => model.provider === selectedProvider), [modelCatalog, selectedProvider])
   const selectedModel = modelCatalog.find((model) => model.provider === selectedProvider && model.id === selectedModelId)
   const local = selectedModel?.local ?? selectedProvider === 'ollama'
@@ -420,9 +426,11 @@ export function WorkModeShell({
       <div className="work-model-status" role={modelError ? 'alert' : 'status'}>
         {!selectedModel
           ? <><CircleAlert /><span>Choose an available model to start a Work conversation.</span></>
+          : providerPolicy?.allowsGoogleWorkspaceData === false
+            ? <><CircleAlert /><span><strong>Google Workspace blocked</strong> — Gmail and Drive content will not be sent to {providerPolicy.displayName}. Choose a local Ollama model, OpenAI, or Anthropic for those tools.</span></>
           : local
-            ? <><Cpu /><span><strong>Local AI</strong> — processed on this Mac. Connected services may still use the network.</span></>
-            : <><Cloud /><span><strong>Cloud AI</strong> — attached or connected-service content may be processed by {PROVIDER_NAMES[selectedProvider]}.</span></>}
+            ? <><Cpu /><span><strong>Local AI</strong> — relevant Gmail or Drive content can be processed on this Mac. Google API requests still use the network.</span></>
+            : <><Cloud /><span><strong>Cloud AI: {PROVIDER_NAMES[selectedProvider]}</strong> — when needed for your request, the minimum relevant Gmail or Drive content will be sent to this provider.</span></>}
         {capabilityLabels.length > 0 && <span className="work-capability-labels">{capabilityLabels.map((label) => <small key={label}>{label}</small>)}</span>}
         {connectedToolsPresent && toolAssessment?.support === 'chat-only' && <em className="warning">Chat only — connected-app tools are disabled for this model.</em>}
         {modelsStale && <em>Using cached model information</em>}

@@ -100,7 +100,7 @@ interface ActiveOmniTask {
 export interface OmniControllerOptions {
   store: OmniTaskStore
   agent: WorkAgentManager
-  createRouter(taskId: string): Promise<OmniToolRouter>
+  createRouter(taskId: string, provider: OmniStartRequest['provider'], model: string): Promise<OmniToolRouter>
   canUseTools?(provider: OmniStartRequest['provider'], model: string): Promise<boolean>
   confirm(taskId: string, request: ToolConfirmationRequest, signal?: AbortSignal): Promise<boolean>
   cleanupTask?(taskId: string): Promise<void>
@@ -199,7 +199,7 @@ export class OmniController {
       })
       const active: ActiveOmniTask = {
         controller: new AbortController(),
-        router: await this.options.createRouter(task.id),
+        router: await this.options.createRouter(task.id, request.provider, request.model.trim()),
         executionMode: request.executionMode,
         actionGeneration: 0,
         stopRequested: false,

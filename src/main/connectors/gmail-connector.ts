@@ -407,6 +407,7 @@ export class GmailConnector implements ConnectorAdapter {
 
   async createDraft(input: Record<string, JsonValue>, signal?: AbortSignal): Promise<JsonValue> {
     const value = await this.#json(`${GMAIL_API}/drafts`, { method: 'POST', body: JSON.stringify({ message: { raw: await mimeMessage(input, false, this.transfers) } }) }, signal) as { id?: unknown; message?: { id?: unknown; threadId?: unknown } }
+    await this.#removeConsumedTransfers(input)
     return { id: requireId(value.id, 'Gmail draft ID'), messageId: requireId(value.message?.id, 'Gmail message ID'), threadId: requireId(value.message?.threadId, 'Gmail thread ID') }
   }
 
@@ -416,11 +417,17 @@ export class GmailConnector implements ConnectorAdapter {
       method: 'POST',
       body: JSON.stringify({ raw: await mimeMessage(input, reply, this.transfers), ...(threadId ? { threadId } : {}) })
     }, signal) as { id?: unknown; threadId?: unknown; labelIds?: unknown }
+    await this.#removeConsumedTransfers(input)
     return {
       id: requireId(value.id, 'Gmail message ID'),
       threadId: requireId(value.threadId, 'Gmail thread ID'),
       labels: Array.isArray(value.labelIds) ? value.labelIds.filter((label): label is string => typeof label === 'string').slice(0, 100) : []
     }
+  }
+
+  async #removeConsumedTransfers(input: Record<string, JsonValue>): Promise<void> {
+    if (!this.transfers) return
+    await Promise.allSettled(transferIds(input.transferIds).map((id) => this.transfers!.remove(id)))
   }
 
   async modify(id: string, addLabelIds: string[], removeLabelIds: string[], signal?: AbortSignal): Promise<JsonValue> {

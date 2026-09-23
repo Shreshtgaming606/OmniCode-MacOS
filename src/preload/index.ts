@@ -137,6 +137,7 @@ const api: OmniCodeAPI = {
       connect: (id) => ipcRenderer.invoke('work:connectors:connect', id),
       disconnect: (id) => ipcRenderer.invoke('work:connectors:disconnect', id)
     },
+    providerPolicy: (provider, model) => ipcRenderer.invoke('work:provider-policy', provider, model),
     permissions: {
       get: () => ipcRenderer.invoke('work:permissions:get'),
       setGlobal: (mode, acknowledgeFullAccess) => ipcRenderer.invoke('work:permissions:set-global', mode, acknowledgeFullAccess),
@@ -198,7 +199,9 @@ const api: OmniCodeAPI = {
     },
     permissions: {
       status: () => ipcRenderer.invoke('omni:permissions:status'),
-      openSettings: (permissionId) => ipcRenderer.invoke('omni:permissions:open-settings', permissionId)
+      request: (permissionId) => ipcRenderer.invoke('omni:permissions:request', permissionId),
+      openSettings: (permissionId) => ipcRenderer.invoke('omni:permissions:open-settings', permissionId),
+      onChanged: (callback) => subscribe('omni:permissions-changed', callback)
     },
     voice: {
       availability: () => ipcRenderer.invoke('omni:voice:availability'),
@@ -209,7 +212,8 @@ const api: OmniCodeAPI = {
       startInput: (options) => ipcRenderer.invoke('omni:voice:start-input', options),
       stopInput: (sessionId) => ipcRenderer.invoke('omni:voice:stop-input', sessionId),
       cancelInput: (sessionId) => ipcRenderer.invoke('omni:voice:cancel-input', sessionId),
-      onInputEvent: (callback) => subscribe('omni:voice-input-event', callback)
+      onInputEvent: (callback) => subscribe('omni:voice-input-event', callback),
+      onOutputEvent: (callback) => subscribe('omni:voice-output-event', callback)
     },
     cursor: {
       status: () => ipcRenderer.invoke('omni:cursor:status')

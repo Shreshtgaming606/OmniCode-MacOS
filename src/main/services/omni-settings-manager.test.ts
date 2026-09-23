@@ -64,6 +64,8 @@ describe('Omni settings defaults and validation', () => {
 
     const validated = validateOmniSettings(input)
     expect(validated).toMatchObject({ enabled: true, executionMode: 'cursor', approvalMode: 'auto' })
+    expect(validated.activation.voiceActivation).toBe('shortcut-only')
+    expect(validated.privacy.screenObservationEnabled).toBe(false)
     expect(validated).not.toHaveProperty('apiKey')
     expect(validated).not.toBe(input)
     expect(validated.activation).not.toBe(input.activation)
@@ -109,11 +111,11 @@ describe('OmniSettingsManager persistence', () => {
       value.update({ enabled: true }),
       value.update({ setupCompleted: true, showTextInput: true }),
       value.update({ launchHelperAtLogin: true, menuBarItem: true }),
-      value.update({ activation: { voiceActivation: 'wake-word-and-shortcut' } }),
+      value.update({ activation: { shortcut: 'CommandOrControl+Option+Space' } }),
       value.update({ voice: { voiceId: 'voice.test', speakingRate: 1.5 } }),
       value.update({ model: { provider: 'anthropic', modelId: 'claude-test' } }),
       value.update({ executionMode: 'cursor', approvalMode: 'auto' }),
-      value.update({ privacy: { screenObservationEnabled: true, activityRetentionDays: 14 } })
+      value.update({ privacy: { activityRetentionDays: 14 } })
     ])
 
     expect(await value.get()).toMatchObject({
@@ -122,12 +124,12 @@ describe('OmniSettingsManager persistence', () => {
       showTextInput: true,
       launchHelperAtLogin: true,
       menuBarItem: true,
-      activation: { voiceActivation: 'wake-word-and-shortcut' },
+      activation: { shortcut: 'CommandOrControl+Option+Space' },
       voice: { voiceId: 'voice.test', speakingRate: 1.5 },
       model: { provider: 'anthropic', modelId: 'claude-test' },
       executionMode: 'cursor',
       approvalMode: 'auto',
-      privacy: { screenObservationEnabled: true, activityRetentionDays: 14 }
+      privacy: { screenObservationEnabled: false, activityRetentionDays: 14 }
     })
     expect((await fs.stat(file)).mode & 0o777).toBe(0o600)
     expect(await fs.readdir(path.dirname(file))).toEqual(['settings.json'])

@@ -17,7 +17,7 @@ const KEYCHAIN_ACCOUNT = 'google-workspace'
 const CALLBACK_PATH = '/oauth2/callback'
 const DEFAULT_AUTHORIZATION_TIMEOUT_MS = 5 * 60_000
 
-export const GOOGLE_IDENTITY_SCOPES = ['openid', 'email', 'profile'] as const
+export const GOOGLE_IDENTITY_SCOPES = ['openid', 'email'] as const
 export const GOOGLE_GMAIL_SCOPES = ['https://www.googleapis.com/auth/gmail.modify'] as const
 export const GOOGLE_DRIVE_SCOPES = ['https://www.googleapis.com/auth/drive'] as const
 export const GOOGLE_WORKSPACE_SCOPES = [...GOOGLE_IDENTITY_SCOPES, ...GOOGLE_GMAIL_SCOPES, ...GOOGLE_DRIVE_SCOPES] as const
@@ -317,11 +317,11 @@ export class GoogleOAuthManager {
 
   isConfigured(): boolean { return Boolean(this.config?.clientId) }
 
-  async connect(_service: GoogleWorkspaceService): Promise<GoogleAccountIdentity> {
+  async connect(service: GoogleWorkspaceService): Promise<GoogleAccountIdentity> {
     if (this.#connecting) throw new Error('A Google account connection is already in progress.')
     this.#connecting = true
     try {
-      const account = await this.#connect()
+      const account = await this.#connect(service)
       this.#lastConnectionFailure = undefined
       return account
     } catch (error) {
@@ -338,10 +338,14 @@ export class GoogleOAuthManager {
     }
   }
 
-  async #connect(): Promise<GoogleAccountIdentity> {
+  async #connect(service: GoogleWorkspaceService): Promise<GoogleAccountIdentity> {
     const config = this.#requireConfig()
     const previous = await this.#loadOptional()
-    const scopes = uniqueScopes([...GOOGLE_WORKSPACE_SCOPES, ...(previous?.scopes ?? [])])
+    const scopes = uniqueScopes([
+      ...GOOGLE_IDENTITY_SCOPES,
+      ...scopesForGoogleService(service),
+      ...(previous?.scopes ?? [])
+    ])
     const verifier = this.#randomBytes(64).toString('base64url')
     const challenge = createHash('sha256').update(verifier, 'ascii').digest('base64url')
     const state = this.#randomBytes(32).toString('base64url')
@@ -357,7 +361,8 @@ export class GoogleOAuthManager {
         code_challenge_method: 'S256',
         state,
         access_type: 'offline',
-        prompt: 'consent'
+        prompt: 'consent',
+        include_granted_scopes: 'true'
       }).toString()
       await this.dependencies.openExternal(authorizationUrl.toString())
       const code = await callback.code
@@ -371,7 +376,7 @@ export class GoogleOAuthManager {
         refreshToken,
         tokenType: 'Bearer',
         expiresAt: this.#now() + tokens.expiresIn * 1_000,
-        scopes: tokens.scopes.length ? tokens.scopes : scopes,
+        scopes: uniqueScopes([...scopes, ...tokens.scopes]),
         account
       })
       return account
@@ -471,12 +476,18 @@ export class GoogleOAuthManager {
       return
     }
     const token = record.refreshToken ?? record.accessToken
-    const response = await this.#fetch(REVOKE_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ token })
-    })
-    if (!response.ok && response.status !== 400) throw await responseError(response)
+    // Revocation is best-effort: loss of network access must never leave the local
+    // authorization usable after the user has pressed Disconnect.
+    try {
+      await this.#fetch(REVOKE_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ token })
+      })
+    } catch {
+      // The local grant is still removed below. Google also lets the user revoke
+      // OmniCode later from their Google Account security settings.
+    }
     await this.store.delete(KEYCHAIN_ACCOUNT)
     this.#lastConnectionFailure = undefined
   }

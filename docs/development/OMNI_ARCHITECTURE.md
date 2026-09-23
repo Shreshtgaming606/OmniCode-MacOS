@@ -1,9 +1,9 @@
 # Omni Mode Architecture
 
-Last updated: 2026-09-21
+Last updated: 2026-09-23
 
-Status: **The redesigned dashboard, seven-step first-run setup, text/overlay,
-push-to-talk, TTS, and structured native Cursor foundations are implemented and
+Status: **The redesigned dashboard, nine-step permission-aware setup, compact
+voice-only global overlay, push-to-talk, TTS, and structured native Cursor foundations are implemented and
 automated-verified; local wake, semantic screen observation, a helper-owned stop
 event tap, and a post-quit helper remain**
 
@@ -49,7 +49,7 @@ Omni is now a real third application mode in the working tree:
   its required scopes exist. The Omni Managed Browser uses a dedicated
   `persist:omnicode-omni-browser-v1` session rather than sharing Code or Work
   browser state.
-- `src/renderer/src/components/omni/OmniMode.tsx` presents the seven-step setup
+- `src/renderer/src/components/omni/OmniMode.tsx` presents the nine-step setup
   and the compact voice-first dashboard. The main surface contains the Omni Core
   state, provider/model/execution/approval command bar, current task, redacted
   Activity, push-to-talk dock, and task controls. Previous tasks are secondary;
@@ -57,9 +57,14 @@ Omni is now a real third application mode in the working tree:
   requires an explicit warning acknowledgement that is also enforced in the
   main process.
 - A separate sandboxed overlay is built from `src/renderer/omni-overlay.html`
-  and `src/preload/omni-overlay.ts`. Its allowlisted IPC surface can start and
-  control Omni tasks but cannot invoke filesystem, terminal, Git, connector,
-  credential, browser, or application APIs directly.
+  and `src/preload/omni-overlay.ts`. It is a 320×248 top-right, non-focus-stealing,
+  voice-only surface with native-amplitude visualization, bounded transcript,
+  concise state, contextual permission recovery, and separate hide/stop
+  behavior. Its allowlisted IPC cannot invoke filesystem, terminal, Git,
+  connector, credential, browser, or application APIs directly.
+- `MacOSPermissionManager` centralizes real operating-system detection, request,
+  exact Settings routing, activation-return refresh, and normalized state. It is
+  distinct from the AI action `PermissionManager`.
 - The resident Electron process owns a configurable global shortcut (default
   `⌘⇧Space`), optional menu-bar item, and optional main-app login item. A
   packaged login/background launch initializes Omni without creating the main
@@ -302,7 +307,7 @@ the gate; Settings → Omni can deliberately rerun it.
   catalog.
 - Code and Work regression coverage remains in the shared suite.
 
-Evidence: the current complete serial run passed 66 files with 571 tests and
+Evidence: the current complete serial run passed 69 files with 585 tests and
 one intentionally skipped native-Keychain file/test. TypeScript, the 3,122-
 module production renderer, main/preload bundles, x86_64 Swift helper, and x64
 directory package build pass. The packaged smoke verifies the embedded helper,
@@ -311,7 +316,7 @@ errors.
 
 ### Phase 1 — Omni UI and Invisible Mode — implemented foundation
 
-- The third selector entry, seven-step setup, and purpose-built voice-first Omni
+- The third selector entry, nine-step setup, and purpose-built voice-first Omni
   surface are present.
 - Model selection, planning, Code tools, and connected-app tools are reused.
 - Main-owned pause/resume/stop and Activity are implemented.

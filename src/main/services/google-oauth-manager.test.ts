@@ -51,7 +51,7 @@ describe('GoogleOAuthManager', () => {
           refresh_token: 'refresh-token-value',
           expires_in: 3_600,
           token_type: 'Bearer',
-          scope: `openid email profile ${GOOGLE_GMAIL_SCOPES[0]} ${GOOGLE_DRIVE_SCOPES[0]}`
+          scope: `openid email ${GOOGLE_GMAIL_SCOPES[0]}`
         }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }
       if (url === 'https://openidconnect.googleapis.com/v1/userinfo') {
@@ -82,7 +82,8 @@ describe('GoogleOAuthManager', () => {
     expect(authorizationUrl?.searchParams.get('state')).toMatch(/^[A-Za-z0-9_-]{40,}$/u)
     expect(authorizationUrl?.searchParams.get('redirect_uri')).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/oauth2\/callback$/u)
     expect(authorizationUrl?.searchParams.get('scope')).toContain(GOOGLE_GMAIL_SCOPES[0])
-    expect(authorizationUrl?.searchParams.get('scope')).toContain(GOOGLE_DRIVE_SCOPES[0])
+    expect(authorizationUrl?.searchParams.get('scope')).not.toContain(GOOGLE_DRIVE_SCOPES[0])
+    expect(authorizationUrl?.searchParams.get('include_granted_scopes')).toBe('true')
     expect(authorizationUrl?.toString()).not.toContain('desktop-public-value')
     expect(new URLSearchParams(tokenBody).get('code_verifier')).toMatch(/^[A-Za-z0-9_-]{43,128}$/u)
     expect(new URLSearchParams(tokenBody).get('client_secret')).toBe('desktop-public-value')
@@ -91,10 +92,7 @@ describe('GoogleOAuthManager', () => {
       state: 'connected',
       message: 'Connected as person@example.com.'
     })
-    await expect(manager.verify('google-drive')).resolves.toMatchObject({
-      state: 'connected',
-      message: 'Connected as person@example.com.'
-    })
+    await expect(manager.verify('google-drive')).resolves.toMatchObject({ state: 'permission-missing' })
   })
 
   it('remains honestly disconnected when no OAuth client or Keychain token exists', async () => {
@@ -195,7 +193,7 @@ describe('GoogleOAuthManager', () => {
         tokenCalls += 1
         if (tokenCalls === 1) return new Response(JSON.stringify({
           access_token: 'initial-access', refresh_token: 'refresh-value', expires_in: 61,
-          token_type: 'Bearer', scope: `openid email profile ${GOOGLE_GMAIL_SCOPES[0]}`
+          token_type: 'Bearer', scope: `openid email ${GOOGLE_GMAIL_SCOPES[0]}`
         }), { status: 200, headers: { 'Content-Type': 'application/json' } })
         expect(new URLSearchParams(String(init?.body)).get('refresh_token')).toBe('refresh-value')
         expect(new URLSearchParams(String(init?.body)).get('client_secret')).toBe('desktop-public-value')
@@ -236,6 +234,39 @@ describe('GoogleOAuthManager', () => {
 
     expect(revokedToken).toBe('refresh-value')
     await expect(store.has('google-workspace')).resolves.toBe(false)
+  })
+
+  it('always removes the local Keychain grant when Google revocation is unreachable', async () => {
+    let revokeFails = false
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url === 'https://oauth2.googleapis.com/token') return new Response(JSON.stringify({
+        access_token: 'access-token', refresh_token: 'refresh-token', expires_in: 3_600,
+        token_type: 'Bearer', scope: `openid email ${GOOGLE_GMAIL_SCOPES[0]}`
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      if (url === 'https://openidconnect.googleapis.com/v1/userinfo') return new Response(JSON.stringify({
+        sub: 'account-1', email: 'person@example.com'
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      if (url === 'https://oauth2.googleapis.com/revoke' && revokeFails) throw new TypeError('network unavailable')
+      throw new Error(`Unexpected URL: ${url}`)
+    }) as unknown as typeof fetch
+    const store = memoryStore()
+    const manager = new GoogleOAuthManager(config, store, {
+      fetch: fetchMock,
+      authorizationTimeoutMs: 2_000,
+      openExternal: async (url) => {
+        const parsed = new URL(url)
+        const callback = parsed.searchParams.get('redirect_uri') as string
+        const state = parsed.searchParams.get('state') as string
+        queueMicrotask(() => { void globalThis.fetch(`${callback}?code=authorization-code&state=${encodeURIComponent(state)}`) })
+      }
+    })
+    await manager.connect('gmail')
+    revokeFails = true
+
+    await expect(manager.disconnect()).resolves.toBeUndefined()
+    await expect(store.has('google-workspace')).resolves.toBe(false)
+    await expect(manager.verify('gmail')).resolves.toMatchObject({ state: 'not-connected' })
   })
 })
 

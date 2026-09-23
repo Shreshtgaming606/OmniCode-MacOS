@@ -196,7 +196,9 @@ export class GoogleDriveConnector implements ConnectorAdapter {
     const name = nameValue === undefined ? transfer.record.filename : cleanText(nameValue, 1_000)
     if (!name || /[\r\n\0]/u.test(name)) throw new Error('Google Drive file name is invalid.')
     const parentId = parentIdValue ? requireId(parentIdValue, 'Google Drive parent folder ID') : undefined
-    return this.#multipartUpload(name, transfer.record.mimeType, transfer.data, parentId, signal)
+    const uploaded = await this.#multipartUpload(name, transfer.record.mimeType, transfer.data, parentId, signal)
+    await this.transfers.remove(transferId).catch(() => undefined)
+    return uploaded
   }
 
   async download(fileId: string, signal?: AbortSignal): Promise<Record<string, JsonValue>> {
