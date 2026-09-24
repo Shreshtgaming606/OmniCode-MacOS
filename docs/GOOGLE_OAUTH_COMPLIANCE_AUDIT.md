@@ -44,8 +44,9 @@ User request
   → relevant result selected
   → content retrieved only when needed
   → ProviderPolicyManager checks the selected provider/model
-      → allowed: minimum relevant context is sent
-      → blocked: Google tool is not executed and the user receives an explanation
+      → eligible + consented: minimum relevant context is sent
+      → eligible + no consent: Google tool is withheld pending disclosure/consent
+      → ineligible/unknown: Google tool is not exposed and the user receives an explanation
   → bounded result card and assistant summary may be stored locally
 ```
 
@@ -58,13 +59,22 @@ stops the request before that history can be sent.
 | Route | Workspace content | Automatic? | Provider retention/training basis |
 | --- | --- | --- | --- |
 | Local Ollama model | Allowed | Only when needed for the user's task | Loopback inference on the Mac. No provider-side prompt store created by OmniCode. Google API traffic remains online. |
-| OpenAI Chat Completions API | Allowed | Only after a user request causes a relevant tool result | `store=false`; API data not used for training by default; default abuse-monitoring logs up to 30 days. |
-| Anthropic commercial Messages API | Allowed | Only after a user request causes a relevant tool result | Commercial/API data not used for training by default; automatic deletion within 30 days by default, subject to documented exceptions. |
-| Gemini Developer API | Blocked | No | Paid and unpaid tiers differ and the desktop app cannot verify tier from an API key. |
+| OpenAI Chat Completions API | Eligible after consent | Only after a user request causes a relevant tool result | `store=false`; API data not used for training by default; default abuse-monitoring logs up to 30 days. |
+| Anthropic commercial Messages API | Eligible after consent | Only after a user request causes a relevant tool result | Commercial/API data not used for training by default; automatic deletion within 30 days by default, subject to documented exceptions. |
+| Gemini Developer API — verified Paid configuration | Eligible after consent | Only while the credential-bound seven-day verification and separate consent remain current | Google states Paid Services prompts/responses are not used to improve products. OmniCode sends `store=false`; limited abuse-monitoring retention can still apply and zero data retention is not claimed. |
+| Gemini Developer API — Free/unknown/expired | Blocked | No | Google states Unpaid Services content may be used for improvement. A normal Gemini key does not expose its billing tier, so OmniCode fails closed until the user confirms the matching AI Studio project is Paid. |
 | Ollama cloud model | Blocked | No | Not treated as local; hosted configuration is not independently verified. |
 
 Policy sources are recorded in `ProviderPolicyManager` with a review date and
 are linked from the public Privacy Policy.
+
+Google documents a Cloud Billing API, but it requires a separately authorized
+Google Cloud identity and project IAM permission. The normal Gemini key cannot
+call that API or prove its own plan. OmniCode therefore does not fake automatic
+detection or infer eligibility from a model name or successful model request.
+The explicit AI Studio confirmation is hashed to the saved credential, expires
+after seven days, clears consent on re-verification, and becomes invalid when
+the key changes.
 
 ## Storage and retention findings
 

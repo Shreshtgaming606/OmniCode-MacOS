@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 
-import type { AIModel } from '../../shared/contracts'
+import type { AIModel, ProviderDataPolicy } from '../../shared/contracts'
 import type { JsonValue, ToolDescriptor, ToolExecutionRequest, ToolExecutionResult } from '../../shared/tool-contracts'
 import type {
   WorkAgentChatRequest,
@@ -41,6 +41,8 @@ export interface WorkAgentRunOptions {
   beforeAction?(): Promise<void>
   takeIntervention?(): string | undefined
   onToolActivity?(activity: WorkToolActivity): void
+  providerPolicy?: ProviderDataPolicy
+  connectedGoogleWorkspace?: { gmail: boolean; drive: boolean }
 }
 
 /**
@@ -94,6 +96,24 @@ function validateRequest(request: WorkAgentChatRequest): void {
     bytes += Buffer.byteLength(message.content, 'utf8')
   }
   if (bytes > 512 * 1024) throw new Error('The Work conversation exceeds the 512 KB request limit.')
+}
+
+function googleWorkspaceAvailabilityContext(
+  connected: WorkAgentRunOptions['connectedGoogleWorkspace'],
+  policy: ProviderDataPolicy
+): string {
+  if (!connected) return ''
+  const state = (isConnected: boolean): string => {
+    if (!isConnected) return 'DISCONNECTED'
+    if (!policy.workspaceDataEligible) return 'CONNECTED_BUT_UNAVAILABLE_TO_CURRENT_MODEL_DATA_POLICY'
+    if (!policy.consentGranted) return 'CONNECTED_BUT_WAITING_FOR_CLOUD_DATA_CONSENT'
+    return 'CONNECTED_AND_AVAILABLE'
+  }
+  return `\n\nOmniCode connected-app availability (authoritative; do not contradict it):\n` +
+    `- Gmail: ${state(connected.gmail)}\n` +
+    `- Google Drive: ${state(connected.drive)}\n` +
+    `- Selected provider policy: ${policy.verificationState}; ${policy.rationale}\n` +
+    'If a connected service is unavailable to the current model, explain the provider-policy or consent reason. Never claim the Google account is disconnected.'
 }
 
 function safeToolError(error: unknown): string {
@@ -256,11 +276,11 @@ export class WorkAgentManager {
     validateRequest(request)
     assertNotAborted(options.signal)
     const mode = options.mode ?? 'work'
-    const systemPrompt = options.systemPrompt ?? WORK_AGENT_SYSTEM
-    const providerPolicy = this.providerPolicies.policyFor(request.provider, request.model)
+    const providerPolicy = options.providerPolicy ?? await this.providerPolicies.policyFor(request.provider, request.model)
+    const systemPrompt = `${options.systemPrompt ?? WORK_AGENT_SYSTEM}${googleWorkspaceAvailabilityContext(options.connectedGoogleWorkspace, providerPolicy)}`
     let usedGoogleWorkspaceData = request.messages.some((message) => message.dataSources?.includes('google-workspace'))
     if (usedGoogleWorkspaceData) {
-      this.providerPolicies.assertGoogleWorkspaceTransferAllowed(request.provider, request.model)
+      await this.providerPolicies.assertGoogleWorkspaceTransferAllowed(request.provider, request.model)
     }
     if (mode !== 'work' && mode !== 'code' && mode !== 'omni') throw new Error('Choose a supported tool-agent mode.')
     if (!systemPrompt.trim() || systemPrompt.length > 32 * 1024 || systemPrompt.includes('\0')) throw new Error('The tool-agent instructions are invalid.')
@@ -273,7 +293,9 @@ export class WorkAgentManager {
       const chatRequest = {
         provider: request.provider,
         model: request.model.trim(),
-        messages: request.messages
+        messages: systemPrompt === WORK_AGENT_SYSTEM
+          ? request.messages
+          : [{ role: 'system' as const, content: systemPrompt }, ...request.messages]
       }
       const response = options.onDelta
         ? await this.ai.streamChat(chatRequest, options.onDelta, options.signal)
@@ -370,7 +392,9 @@ export class WorkAgentManager {
         activities.push(activity)
         options.onToolActivity?.({ ...activity })
         if (isGoogleWorkspaceConnector(descriptor.connectorId) && !providerPolicy.allowsGoogleWorkspaceData) {
-          const detail = `${providerPolicy.displayName} is not approved for Google Workspace content in this OmniCode configuration. Choose a local Ollama model, OpenAI API, or Anthropic API.`
+          const detail = providerPolicy.workspaceDataEligible
+            ? `${providerPolicy.displayName} is eligible, but Google Workspace transfer consent has not been granted.`
+            : `${providerPolicy.displayName} cannot process Google Workspace content in this configuration. Gmail or Drive may still be connected; verify an eligible provider configuration.`
           activity.status = 'failed'
           activity.completedAt = Date.now()
           activity.summary = `${descriptor.name} was blocked: ${detail}`

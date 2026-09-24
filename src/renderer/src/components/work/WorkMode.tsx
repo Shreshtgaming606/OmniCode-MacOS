@@ -351,6 +351,13 @@ export function WorkMode({ active, onOpenSettings, onError, onRequireAttention, 
     return () => { current = false }
   }, [selectedProvider, selectedModelId, onError])
 
+  const setWorkspaceConsent = async (granted: boolean): Promise<void> => {
+    try {
+      const policy = await window.omnicode.work.setGoogleWorkspaceConsent(selectedProvider, granted)
+      if (mounted.current) setProviderPolicy(policy)
+    } catch (cause) { onError(cause) }
+  }
+
   const selectConversation = async (id: string): Promise<void> => {
     try {
       const conversation = await window.omnicode.work.conversations.get(id)
@@ -734,6 +741,8 @@ export function WorkMode({ active, onOpenSettings, onError, onRequireAttention, 
       onOpenSettings={onOpenSettings}
       onOpenConnectedApps={() => setShowConnectedApps(true)}
       onOpenConnectedApp={() => setShowConnectedApps(true)}
+      onVerifyGeminiConfiguration={onOpenSettings}
+      onSetWorkspaceConsent={(granted) => setWorkspaceConsent(granted)}
       onApprovalModeChange={(mode) => void changeApprovalMode(mode)}
       onOpenActivity={() => setShowActivity(true)}
       onLinkError={(message) => onError(new Error(message))}

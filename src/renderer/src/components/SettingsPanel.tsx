@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { AudioWaveform, CheckCircle2, ExternalLink, FolderClosed, Globe2, KeyRound, LoaderCircle, Mail, Mic, MousePointer2, Plug, RefreshCw, Shield, Trash2, Unplug, X, Zap } from 'lucide-react'
-import type { AIModel, AIProviderConnectionStatus, AIProviderId, ThemePreference, WorkspaceSettings } from '../../../shared/contracts'
+import type { AIModel, AIProviderConnectionStatus, AIProviderId, ProviderDataPolicy, ThemePreference, WorkspaceSettings } from '../../../shared/contracts'
 import type { AIModelDescriptor, CloudAIProviderId } from '../../../shared/model-contracts'
 import type { OmniPermissionId, OmniPermissionsSnapshot, OmniSettings } from '../../../shared/omni-contracts'
 import type { ConnectorDescriptor, WorkApprovalMode, WorkPermissionSettings } from '../../../shared/tool-contracts'
@@ -85,6 +85,10 @@ export function SettingsPanel({
   const [connections, setConnections] = useState<Partial<Record<CloudProvider, AIProviderConnectionStatus>>>({})
   const [credentialBusy, setCredentialBusy] = useState<Partial<Record<CloudProvider, 'saving' | 'testing' | 'removing'>>>({})
   const [credentialErrors, setCredentialErrors] = useState<Partial<Record<CloudProvider, string>>>({})
+  const [providerPolicies, setProviderPolicies] = useState<Partial<Record<AIProviderId, ProviderDataPolicy>>>({})
+  const [policyBusy, setPolicyBusy] = useState(false)
+  const [confirmedGeminiPaid, setConfirmedGeminiPaid] = useState(false)
+  const [confirmedGeminiProject, setConfirmedGeminiProject] = useState(false)
   const [status, setStatus] = useState('')
   const [statusError, setStatusError] = useState(false)
   const [workspaceJson, setWorkspaceJson] = useState('{}')
@@ -144,6 +148,12 @@ export function SettingsPanel({
       setConnectorError(cause instanceof Error ? cause.message : String(cause))
     }
   }
+  const refreshProviderPolicies = async (): Promise<void> => {
+    const entries = await Promise.all((['ollama', 'openai', 'anthropic', 'google'] as const).map(async (provider) =>
+      [provider, await window.omnicode.work.providerPolicy(provider)] as const
+    ))
+    setProviderPolicies(Object.fromEntries(entries) as Partial<Record<AIProviderId, ProviderDataPolicy>>)
+  }
   useEffect(() => {
     let active = true
     for (const { id } of PROVIDERS) {
@@ -170,6 +180,7 @@ export function SettingsPanel({
   }, [])
   useEffect(() => {
     void refreshConnectors(true)
+    void refreshProviderPolicies().catch((cause) => { setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause)) })
   }, [])
   useEffect(() => {
     void window.omnicode.work.permissions.get().then(setWorkPermissions).catch((cause) => {
@@ -244,6 +255,7 @@ export function SettingsPanel({
       setKeys((current) => ({ ...current, [provider]: '' }))
       const result = await testConnection(provider, true)
       if (result) setStatus(`${PROVIDERS.find((item) => item.id === provider)!.name} API key saved securely. ${result.message}`)
+      await refreshProviderPolicies()
     } catch (cause) {
       setStored((current) => ({ ...current, [provider]: saved ? true : null }))
       setCredentialErrors((current) => ({ ...current, [provider]: cause instanceof Error ? cause.message : String(cause) }))
@@ -260,9 +272,52 @@ export function SettingsPanel({
       setConnections((current) => ({ ...current, [provider]: { provider, state: 'not-configured', stored: false, message: 'No API key is stored in macOS Keychain.' } }))
       setStatusError(false)
       setStatus(`${PROVIDERS.find((item) => item.id === provider)!.name} API key removed.`)
+      await refreshProviderPolicies()
     } catch (cause) {
       setCredentialErrors((current) => ({ ...current, [provider]: cause instanceof Error ? cause.message : String(cause) }))
     } finally { setCredentialBusy((current) => ({ ...current, [provider]: undefined })) }
+  }
+  const configureGeminiWorkspace = async (plan: 'paid' | 'free'): Promise<void> => {
+    if (policyBusy) return
+    setPolicyBusy(true); setStatus('')
+    try {
+      const policy = await window.omnicode.work.configureGeminiWorkspace({
+        plan,
+        ...(plan === 'paid' ? {
+          confirmedAiStudioPlan: confirmedGeminiPaid,
+          confirmedMatchingCredential: confirmedGeminiProject
+        } : {})
+      })
+      setProviderPolicies((current) => ({ ...current, google: policy }))
+      setConfirmedGeminiPaid(false); setConfirmedGeminiProject(false)
+      setStatusError(false)
+      setStatus(plan === 'paid'
+        ? 'Gemini Paid Services eligibility recorded for this saved credential. Grant connected-data consent separately to enable Gmail and Drive.'
+        : 'This Gemini credential is recorded as Free/Unpaid. Normal chat remains available; Gmail and Drive data stays blocked.')
+    } catch (cause) {
+      setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause))
+    } finally { setPolicyBusy(false) }
+  }
+  const clearGeminiWorkspace = async (): Promise<void> => {
+    if (policyBusy) return
+    setPolicyBusy(true)
+    try {
+      const policy = await window.omnicode.work.clearGeminiWorkspaceVerification()
+      setProviderPolicies((current) => ({ ...current, google: policy }))
+      setStatusError(false); setStatus('Gemini Workspace compatibility reset to Unknown.')
+    } catch (cause) { setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause)) }
+    finally { setPolicyBusy(false) }
+  }
+  const setWorkspaceConsent = async (provider: AIProviderId, granted: boolean): Promise<void> => {
+    if (policyBusy) return
+    setPolicyBusy(true)
+    try {
+      const policy = await window.omnicode.work.setGoogleWorkspaceConsent(provider, granted)
+      setProviderPolicies((current) => ({ ...current, [provider]: policy }))
+      setStatusError(false)
+      setStatus(granted ? `Connected-data consent enabled for ${policy.displayName}.` : `Connected-data consent removed for ${policy.displayName}.`)
+    } catch (cause) { setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause)) }
+    finally { setPolicyBusy(false) }
   }
   const toggleConnector = async (connector: ConnectorDescriptor): Promise<void> => {
     if (connectorBusy) return
@@ -326,14 +381,29 @@ export function SettingsPanel({
           </section>
           <section id="files"><h2>Files & Autosave</h2><label className="setting-toggle"><span><strong>Autosave</strong><small>Save changed files after a short delay.</small></span><input type="checkbox" checked={autosave} onChange={(event) => onAutosave(event.target.checked)} /></label></section>
           <section id="providers"><h2>AI Providers</h2><p>Credentials are written to macOS Keychain and never to a workspace or log.</p>
-            {PROVIDERS.map((provider) => <div className="provider-setting" key={provider.id} aria-busy={!!credentialBusy[provider.id]}>
+            {PROVIDERS.map((provider) => <Fragment key={provider.id}><div className="provider-setting" aria-busy={!!credentialBusy[provider.id]}>
               <div><KeyRound /><span><strong>{provider.name}</strong><small>{credentialBusy[provider.id] ? <><LoaderCircle className="spin" />{credentialBusy[provider.id] === 'saving' ? 'Saving and testing…' : credentialBusy[provider.id] === 'testing' ? 'Testing connection…' : 'Removing…'}</> : credentialErrors[provider.id] ? 'Keychain needs attention' : stored[provider.id] === null ? 'Checking Keychain…' : connections[provider.id]?.state === 'connected' ? <><CheckCircle2 /> Connected</> : connections[provider.id]?.state === 'authentication-failed' ? 'Authentication failed' : connections[provider.id]?.state === 'unavailable' ? 'Stored · Connection unavailable' : stored[provider.id] ? 'Credential stored · Not tested' : 'Not configured'}</small></span></div>
               <input aria-label={`${provider.name} API key`} type="password" autoComplete="off" disabled={!!credentialBusy[provider.id]} value={keys[provider.id]} placeholder={stored[provider.id] ? 'Replace saved credential' : provider.placeholder} onChange={(event) => setKeys((current) => ({ ...current, [provider.id]: event.target.value }))} onKeyDown={(event) => { if (event.key === 'Enter' && keys[provider.id].trim()) void saveKey(provider.id) }} />
               <button aria-label={`Save ${provider.name} API key`} disabled={!keys[provider.id].trim() || !!credentialBusy[provider.id]} onClick={() => void saveKey(provider.id)}>{credentialBusy[provider.id] === 'saving' ? 'Saving…' : 'Save'}</button>
               {stored[provider.id] && <button aria-label={`Test ${provider.name} connection`} disabled={!!credentialBusy[provider.id]} onClick={() => void testConnection(provider.id)}>{credentialBusy[provider.id] === 'testing' ? 'Testing…' : 'Test'}</button>}
               {stored[provider.id] && <button className="icon-button danger" title={`Delete ${provider.name} credential`} disabled={!!credentialBusy[provider.id]} onClick={() => void deleteKey(provider.id)}><Trash2 /></button>}
               {credentialErrors[provider.id] && <p className="provider-error" role="alert">{credentialErrors[provider.id]}</p>}
-            </div>)}
+            </div>{provider.id === 'google' && <div className="provider-policy-setting" aria-label="Gemini Workspace data compatibility">
+              <div><strong>Workspace Data Compatibility</strong><span className={`policy-state state-${providerPolicies.google?.verificationState.toLowerCase() ?? 'unknown'}`}>{providerPolicies.google?.verificationState === 'VERIFIED_ELIGIBLE' ? 'Paid · Eligible' : providerPolicies.google?.verificationState === 'INELIGIBLE' ? 'Free · Ineligible' : providerPolicies.google?.verificationState === 'UNVERIFIED' ? 'Verification expired' : 'Unknown'}</span></div>
+              <p>{providerPolicies.google?.rationale ?? 'Checking the saved Gemini configuration…'}</p>
+              {providerPolicies.google?.verificationState === 'VERIFIED_ELIGIBLE' && <dl><div><dt>Data training</dt><dd>{providerPolicies.google.training}</dd></div><div><dt>Retention</dt><dd>{providerPolicies.google.retention}</dd></div><div><dt>Zero Data Retention</dt><dd>Not configured; Paid Services and zero data retention are separate.</dd></div></dl>}
+              {providerPolicies.google?.verificationState !== 'VERIFIED_ELIGIBLE' && <div className="provider-policy-confirmations">
+                <label><input type="checkbox" checked={confirmedGeminiPaid} onChange={(event) => setConfirmedGeminiPaid(event.target.checked)} />I confirmed the project used by this saved key shows <strong>Paid</strong> under Plan in Google AI Studio.</label>
+                <label><input type="checkbox" checked={confirmedGeminiProject} onChange={(event) => setConfirmedGeminiProject(event.target.checked)} />I confirmed that Paid project is the project associated with this saved credential.</label>
+              </div>}
+              <div className="provider-policy-actions">
+                <button type="button" disabled={policyBusy} onClick={() => void window.omnicode.app.openExternal('https://aistudio.google.com/apikey').catch((cause) => { setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause)) })}><ExternalLink />Open AI Studio API Keys</button>
+                {providerPolicies.google?.verificationState !== 'VERIFIED_ELIGIBLE' && <button type="button" disabled={policyBusy || !stored.google || !confirmedGeminiPaid || !confirmedGeminiProject} onClick={() => void configureGeminiWorkspace('paid')}>Verify Paid Configuration</button>}
+                {providerPolicies.google?.verificationState !== 'INELIGIBLE' && <button type="button" disabled={policyBusy || !stored.google} onClick={() => void configureGeminiWorkspace('free')}>Mark as Free / Unpaid</button>}
+                {(providerPolicies.google?.verificationState === 'VERIFIED_ELIGIBLE' || providerPolicies.google?.verificationState === 'INELIGIBLE') && <button type="button" disabled={policyBusy} onClick={() => void clearGeminiWorkspace()}>Reset Verification</button>}
+              </div>
+              <small>OmniCode cannot infer billing from a Gemini key. Paid confirmation is credential-bound, expires after seven days, and is cleared when the saved key changes.</small>
+            </div>}</Fragment>)}
             {status && <div className={`settings-status${statusError ? ' error' : ''}`} role={statusError ? 'alert' : 'status'}>{status}</div>}
           </section>
           <section id="autocomplete"><h2>AI Autocomplete</h2><p>Use a separate model for editor suggestions. This is disabled by default; cloud providers receive the nearby code shown to the completion model.</p>
@@ -459,6 +529,17 @@ export function SettingsPanel({
               ['workspace', 'Workspace Access', 'Allow chosen Chat context; Agent context still confirms each task.'],
               ['agent', 'Agent Mode', 'Allow chosen Chat and Agent context; edits and commands still require review.']
             ].map(([id, name, detail]) => <button key={id} className={permission === id ? 'active' : ''} onClick={() => onPermission(id as typeof permission)}><Shield /><span><strong>{name}</strong><small>{detail}</small></span>{permission === id && <CheckCircle2 />}</button>)}</div>
+            <h3 className="work-permission-heading">Cloud AI & Connected Data</h3>
+            <p>Google Workspace content is sent only when the provider is eligible and you separately allow minimum necessary Gmail or Drive data. OAuth tokens, API keys, authorization headers, and Keychain data are never included.</p>
+            <div className="connected-data-policies">{(['openai', 'anthropic', 'google'] as const).map((provider) => {
+              const policy = providerPolicies[provider]
+              const providerName = PROVIDERS.find((item) => item.id === provider)?.name ?? provider
+              return <article key={provider} data-enabled={policy?.allowsGoogleWorkspaceData === true}>
+                <div><Shield /><span><strong>{providerName}</strong><small>{!policy ? 'Checking policy…' : !policy.workspaceDataEligible ? 'Not eligible with current configuration' : policy.consentGranted ? 'Minimum connected data allowed' : 'Eligible · consent not granted'}</small></span></div>
+                <p>{policy?.rationale}</p>
+                {policy?.workspaceDataEligible && <button type="button" disabled={policyBusy || !stored[provider]} onClick={() => void setWorkspaceConsent(provider, !policy.consentGranted)}>{policy.consentGranted ? 'Remove Consent' : 'Allow Minimum Connected Data'}</button>}
+              </article>
+            })}</div>
             <div className="settings-connector-actions">
               <button type="button" onClick={() => void window.omnicode.app.openExternal('https://omnicode.steampirate.life/privacy/').catch((cause) => { setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause)) })}><ExternalLink />Privacy Policy</button>
               <button type="button" onClick={() => void window.omnicode.app.openExternal('https://omnicode.steampirate.life/terms/').catch((cause) => { setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause)) })}><ExternalLink />Terms of Service</button>

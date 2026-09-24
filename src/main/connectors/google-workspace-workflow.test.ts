@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { AIManager } from '../services/ai-manager'
 import type { GoogleOAuthManager } from '../services/google-oauth-manager'
+import { ProviderPolicyManager } from '../services/provider-policy-manager'
 import { ToolRegistry } from '../services/tool-registry'
 import { WorkAgentManager } from '../services/work-agent-manager'
 import { WorkTransferStore } from '../services/work-transfer-store'
@@ -29,6 +30,14 @@ async function transferStore(): Promise<WorkTransferStore> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'omnicode-google-workflow-'))
   roots.push(root)
   return new WorkTransferStore(root)
+}
+
+async function approvedProviderPolicies(): Promise<ProviderPolicyManager> {
+  const policies = new ProviderPolicyManager({
+    getCredential: async (provider) => provider === 'openai' ? 'test-openai-key' : undefined
+  })
+  await policies.setGoogleWorkspaceConsent('openai', true)
+  return policies
 }
 
 function gmailMessage() {
@@ -93,7 +102,10 @@ describe('Google Workspace cross-connector workflows', () => {
       }
       return { content: 'The attachment was uploaded to Google Drive.', calls: [] }
     })
-    const manager = new WorkAgentManager({ toolTurn } as unknown as AIManager)
+    const manager = new WorkAgentManager(
+      { toolTurn } as unknown as AIManager,
+      await approvedProviderPolicies()
+    )
     const confirm = vi.fn(async () => true)
     const tools = registry.list('work')
 
@@ -147,7 +159,10 @@ describe('Google Workspace cross-connector workflows', () => {
       }
       return { content: 'The Gmail draft is ready with your latest resume attached.', calls: [] }
     })
-    const manager = new WorkAgentManager({ toolTurn } as unknown as AIManager)
+    const manager = new WorkAgentManager(
+      { toolTurn } as unknown as AIManager,
+      await approvedProviderPolicies()
+    )
     const confirm = vi.fn(async () => true)
 
     const response = await manager.chat({
@@ -187,7 +202,10 @@ describe('Google Workspace cross-connector workflows', () => {
       expect(request.messages.at(-1)!.content).toContain('"untrustedContent":true')
       return { content: 'Your unread email says the release meeting is Friday at 2 PM.', calls: [] }
     })
-    const response = await new WorkAgentManager({ toolTurn } as unknown as AIManager).chat({
+    const response = await new WorkAgentManager(
+      { toolTurn } as unknown as AIManager,
+      await approvedProviderPolicies()
+    ).chat({
       provider: 'openai', model: 'gpt-test', messages: [{ role: 'user', content: 'Summarize my unread email.' }]
     }, registry.list('work', 'gmail'), (request) => registry.execute(request, { accessLevel: 'ask-before-changes', approvalMode: 'ask', confirm: vi.fn() }))
 
@@ -213,7 +231,10 @@ describe('Google Workspace cross-connector workflows', () => {
       expect(request.messages.at(-1)!.content).toContain('"untrustedContent":true')
       return { content: 'Add measurable outcomes to strengthen the resume.', calls: [] }
     })
-    const response = await new WorkAgentManager({ toolTurn } as unknown as AIManager).chat({
+    const response = await new WorkAgentManager(
+      { toolTurn } as unknown as AIManager,
+      await approvedProviderPolicies()
+    ).chat({
       provider: 'openai', model: 'gpt-test', messages: [{ role: 'user', content: 'Find my resume and tell me what to improve.' }]
     }, registry.list('work', 'google-drive'), (request) => registry.execute(request, { accessLevel: 'ask-before-changes', approvalMode: 'ask', confirm: vi.fn() }))
 

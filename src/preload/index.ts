@@ -138,6 +138,9 @@ const api: OmniCodeAPI = {
       disconnect: (id) => ipcRenderer.invoke('work:connectors:disconnect', id)
     },
     providerPolicy: (provider, model) => ipcRenderer.invoke('work:provider-policy', provider, model),
+    configureGeminiWorkspace: (request) => ipcRenderer.invoke('work:configure-gemini-workspace', request),
+    clearGeminiWorkspaceVerification: () => ipcRenderer.invoke('work:clear-gemini-workspace-verification'),
+    setGoogleWorkspaceConsent: (provider, granted) => ipcRenderer.invoke('work:set-google-workspace-consent', provider, granted),
     permissions: {
       get: () => ipcRenderer.invoke('work:permissions:get'),
       setGlobal: (mode, acknowledgeFullAccess) => ipcRenderer.invoke('work:permissions:set-global', mode, acknowledgeFullAccess),

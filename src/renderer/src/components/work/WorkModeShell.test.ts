@@ -36,6 +36,8 @@ const props: WorkModeShellProps = {
   onOpenSettings: () => undefined,
   onOpenConnectedApps: () => undefined,
   onOpenConnectedApp: () => undefined,
+  onVerifyGeminiConfiguration: () => undefined,
+  onSetWorkspaceConsent: () => undefined,
   onApprovalModeChange: () => undefined,
   onOpenActivity: () => undefined,
   onLinkError: () => undefined
@@ -172,5 +174,35 @@ describe('WorkModeShell', () => {
     expect(html).toContain('aria-label="Google Drive results"')
     expect(html).toContain('Resume.pdf')
     expect(html).not.toContain('private-drive-id')
+  })
+
+  it('keeps Gmail visibly connected while an unknown Gemini configuration blocks model access', () => {
+    const html = renderToStaticMarkup(createElement(WorkModeShell, {
+      ...props,
+      selectedProvider: 'google', selectedModelId: 'gemini-test',
+      modelCatalog: [{
+        id: 'gemini-test', provider: 'google', displayName: 'Gemini Test', local: false,
+        availability: 'available', capabilities: {
+          chat: { support: 'supported', evidence: 'provider-api' }, streaming: { support: 'supported', evidence: 'provider-api' },
+          'tool-calling': { support: 'supported', evidence: 'provider-api' }, vision: { support: 'unknown', evidence: 'unknown' },
+          coding: { support: 'unknown', evidence: 'unknown' }, 'large-context': { support: 'unknown', evidence: 'unknown' },
+          'structured-output': { support: 'unknown', evidence: 'unknown' }
+        }, metadataSource: 'provider-api'
+      }],
+      connectedApps: [{ id: 'gmail', name: 'Gmail', state: 'connected', detail: 'Connected and verified' }],
+      providerPolicy: {
+        provider: 'google', model: 'gemini-test', displayName: 'Google Gemini Developer API',
+        verificationState: 'UNKNOWN', verificationMethod: 'none', workspaceDataEligible: false,
+        allowsGoogleWorkspaceData: false, consentRequired: true, consentGranted: false, plan: 'unknown',
+        zeroDataRetention: 'unknown', cloud: true, endpointType: 'Gemini API', retention: 'Unknown', training: 'Unknown',
+        dataRegion: 'Unknown', rationale: 'Paid status cannot be verified.', lastReviewed: '2026-09-23', documentationUrls: ['https://ai.google.dev/']
+      }
+    }))
+
+    expect(html).toContain('<strong>Gmail</strong>')
+    expect(html).toContain('Connected and verified')
+    expect(html).toContain('AI access: Unavailable with current Google configuration')
+    expect(html).toContain('Verify Gemini Configuration')
+    expect(html).not.toContain('Gmail is not connected')
   })
 })

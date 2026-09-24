@@ -3,6 +3,40 @@
 This log records repairs and audit milestones made during the no-new-features
 stabilization phase.
 
+## OmniCode 0.8.0 conditional Google Workspace AI access — 2026-09-23
+
+- Replaced the blanket Gemini/Gmail/Drive restriction with a fail-closed,
+  provider-specific Workspace data policy. Free, unpaid, unknown, or expired
+  Gemini configurations remain blocked; verified Paid configurations can become
+  eligible without weakening the Gmail/Drive connector boundary.
+- Added explicit Gemini Paid verification in Settings. Verification requires a
+  live saved-key connection plus user confirmation of the matching AI Studio
+  project and Paid status, is bound to a one-way key fingerprint, and expires
+  after seven days. Google does not expose billing tier through an ordinary
+  Gemini key, so the UI never labels this as automatic billing verification.
+- Added separate, revocable connected-data consent for OpenAI, Anthropic, and
+  eligible Gemini configurations. Provider switches and credential changes
+  re-evaluate the gate before any Workspace-derived message or tool result is
+  sent.
+- Kept Gmail and Drive connection status accurate when AI access is blocked.
+  Work Mode now distinguishes connected-but-policy-unavailable,
+  connected-but-awaiting-consent, and connected-and-available.
+- Added bounded main-process policy persistence with atomic mode-`0600` writes;
+  no API key, OAuth token, authorization header, or raw Workspace content is
+  stored there.
+- Added `store: false` to all Gemini chat, streaming, and tool-turn requests and
+  updated the privacy/terms/about pages to explain minimum-context transfer,
+  conditional eligibility, separate consent, verification expiry, and that
+  Paid service does not itself guarantee zero retention.
+- Added provider-policy, IPC, Work-agent, Settings, renderer, history-switch,
+  credential-rotation, expiry, and store-leak regression coverage. The legacy
+  four-workflow Gmail/Drive integration now grants consent explicitly rather
+  than bypassing the new security boundary.
+- Fixed packaged login-item synchronization to avoid reapplying an already-
+  matching disabled state. The final isolated-profile Intel smoke now completes
+  workspace IPC, PTY, localhost, Omni, and navigation gates with no renderer
+  errors and no repeated login-item stderr.
+
 ## OmniCode 0.7.0 global voice overlay and macOS permissions — 2026-09-22
 
 - Replaced the 720×520 global mini-dashboard with one 320×248 top-right,

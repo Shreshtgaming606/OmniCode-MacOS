@@ -105,6 +105,8 @@ export interface WorkModeShellProps {
   onOpenSettings(): void
   onOpenConnectedApps(): void
   onOpenConnectedApp(id: string): void
+  onVerifyGeminiConfiguration(): void
+  onSetWorkspaceConsent(granted: boolean): void | Promise<void>
   onApprovalModeChange(mode: WorkApprovalMode): void
   onOpenActivity(): void
   onLinkError(message: string): void
@@ -341,6 +343,8 @@ export function WorkModeShell({
   onOpenSettings,
   onOpenConnectedApps,
   onOpenConnectedApp,
+  onVerifyGeminiConfiguration,
+  onSetWorkspaceConsent,
   onApprovalModeChange,
   onOpenActivity,
   onLinkError
@@ -396,7 +400,7 @@ export function WorkModeShell({
             const AppIcon = app.id === 'gmail' ? Mail : app.id === 'google-drive' ? FolderClosed : app.id === 'browser' ? Globe2 : Plug
             return <button type="button" className={`work-app-row state-${app.state}`} key={app.id} onClick={() => onOpenConnectedApp(app.id)}>
             <span className="work-app-icon">{app.state === 'connecting' ? <LoaderCircle className="spin" /> : <AppIcon />}</span>
-            <span><strong>{app.name}</strong><small>{app.detail ?? connectionLabel(app.state)}</small></span>
+            <span><strong>{app.name}</strong><small>{app.detail ?? connectionLabel(app.state)}</small>{app.state === 'connected' && (app.id === 'gmail' || app.id === 'google-drive') && <small className="work-app-ai-access">AI access: {!providerPolicy ? 'Checking current model policy' : !providerPolicy.workspaceDataEligible ? `Unavailable with current ${PROVIDER_NAMES[selectedProvider]} configuration` : !providerPolicy.consentGranted ? 'Waiting for connected-data consent' : 'Available with current model'}</small>}</span>
           </button>})
           : <button type="button" className="work-app-empty" onClick={onOpenConnectedApps}>No apps configured</button>}
       </section>
@@ -426,8 +430,12 @@ export function WorkModeShell({
       <div className="work-model-status" role={modelError ? 'alert' : 'status'}>
         {!selectedModel
           ? <><CircleAlert /><span>Choose an available model to start a Work conversation.</span></>
-          : providerPolicy?.allowsGoogleWorkspaceData === false
-            ? <><CircleAlert /><span><strong>Google Workspace blocked</strong> — Gmail and Drive content will not be sent to {providerPolicy.displayName}. Choose a local Ollama model, OpenAI, or Anthropic for those tools.</span></>
+          : providerPolicy && !providerPolicy.workspaceDataEligible
+            ? <><CircleAlert /><span><strong>Google Workspace tools unavailable with this {PROVIDER_NAMES[selectedProvider]} configuration</strong> — Gmail and Drive can remain connected, but OmniCode cannot confirm the required data-use protections.</span>{selectedProvider === 'google' && <span className="work-policy-actions"><button type="button" onClick={onVerifyGeminiConfiguration}>Verify Gemini Configuration</button><button type="button" onClick={() => document.querySelector<HTMLSelectElement>('[aria-label="Work AI provider"]')?.focus()}>Choose Another Model</button></span>}</>
+          : providerPolicy?.consentRequired && !providerPolicy.consentGranted
+            ? <><Shield /><span><strong>Use Google Workspace data with {PROVIDER_NAMES[selectedProvider]}?</strong> — OmniCode will send only the minimum relevant Gmail or Drive content. OAuth tokens and credentials are never sent.</span><span className="work-policy-actions"><button type="button" onClick={() => void onSetWorkspaceConsent(true)}>Allow</button><button type="button" onClick={() => void onSetWorkspaceConsent(false)}>Cancel</button></span></>
+          : providerPolicy?.provider === 'google' && providerPolicy.allowsGoogleWorkspaceData
+            ? <><Shield /><span><strong>Google Workspace tools enabled</strong> — this verified Paid Gemini configuration can process minimum necessary Gmail and Drive content with your consent.</span></>
           : local
             ? <><Cpu /><span><strong>Local AI</strong> — relevant Gmail or Drive content can be processed on this Mac. Google API requests still use the network.</span></>
             : <><Cloud /><span><strong>Cloud AI: {PROVIDER_NAMES[selectedProvider]}</strong> — when needed for your request, the minimum relevant Gmail or Drive content will be sent to this provider.</span></>}

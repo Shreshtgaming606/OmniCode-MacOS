@@ -20,7 +20,6 @@ const DEFAULT_AUTHORIZATION_TIMEOUT_MS = 5 * 60_000
 export const GOOGLE_IDENTITY_SCOPES = ['openid', 'email'] as const
 export const GOOGLE_GMAIL_SCOPES = ['https://www.googleapis.com/auth/gmail.modify'] as const
 export const GOOGLE_DRIVE_SCOPES = ['https://www.googleapis.com/auth/drive'] as const
-export const GOOGLE_WORKSPACE_SCOPES = [...GOOGLE_IDENTITY_SCOPES, ...GOOGLE_GMAIL_SCOPES, ...GOOGLE_DRIVE_SCOPES] as const
 
 export type GoogleWorkspaceService = 'gmail' | 'google-drive'
 

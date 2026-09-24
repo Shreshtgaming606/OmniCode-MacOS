@@ -1,9 +1,70 @@
 # OmniCode Known Issues
 
-Last updated: 2026-09-23
+Last updated: 2026-09-24
 
 Resolved issues remain in this file with a resolution so audit history is not
 lost. Secrets, tokens, and authorization headers must never be included here.
+
+## OMI-057 — Packaged settings repeatedly rewrote an unchanged login item — Resolved
+
+- Severity: Low
+- Reproduction: Launch an unsigned packaged app with an isolated profile and
+  let Omni setup/settings synchronize while Launch at Login is already off.
+- Expected: The existing disabled OS state is accepted without another write.
+- Actual: The final smoke initially logged repeated macOS login-item failures
+  because each settings synchronization called the OS setter even though the
+  requested state already matched.
+- Suspected cause: The sync path did not compare the desired and actual
+  `openAtLogin` values.
+- Relevant files: `src/main/index.ts`,
+  `src/main/services/omni-background-launch.ts`, and its tests.
+- Current status: ✅ Resolved — matching states are now idempotent; real changes
+  still use Electron's supported login-item API. Unit coverage and a final
+  isolated-profile packaged smoke pass without the repeated stderr.
+
+## OMI-056 — Live Paid Gemini Workspace workflow requires user configuration
+
+- Severity: Medium; blocks only the final live cloud-data E2E claim
+- Reproduction: Configure a verified Paid Gemini Developer API project and key,
+  connect a disposable Gmail/Drive account, grant OmniCode connected-data
+  consent, and ask Work Mode to process disposable Workspace content.
+- Expected: The eligible path sends only bounded selected content, returns the
+  result, records Google Workspace provenance, and keeps credentials/tokens out
+  of logs and model context.
+- Actual: Controlled end-to-end integrations pass, but this host does not have
+  a safely verified Paid Gemini project plus disposable service data. The
+  previously supplied key was described as likely unpaid/no-balance and is not
+  being falsely attested as Paid.
+- Suspected cause: External account/billing and safe-test-data requirement, not
+  an application defect. Google does not expose billing tier through a normal
+  Gemini API key.
+- Relevant files: `src/main/services/provider-policy-manager.ts`,
+  `src/main/services/work-agent-manager.ts`, `src/main/index.ts`,
+  `src/renderer/src/components/SettingsPanel.tsx`,
+  `src/renderer/src/components/work/WorkModeShell.tsx`.
+- Current status: 🔵 **BLOCKED — USER CONFIGURATION REQUIRED**. All surrounding
+  authentication, fail-closed policy, consent, tool, redaction, and UI paths are
+  automated-test verified.
+
+## OMI-055 — Blanket Gemini policy conflated connection with data eligibility — Resolved
+
+- Severity: High
+- Reproduction: Connect Gmail/Drive and select Gemini in Work Mode.
+- Expected: OmniCode should keep the Google account connected, block Free or
+  unknown Gemini configurations, allow a verified eligible Paid configuration
+  only after separate consent, and recheck the decision on provider/key change.
+- Actual: The former policy categorically blocked Gemini Workspace data and the
+  UI could imply that a connected service was unavailable or disconnected.
+- Suspected cause: An intentionally conservative first policy lacked a trusted
+  eligibility lifecycle and independent consent state.
+- Relevant files: `src/main/services/provider-policy-manager.ts`,
+  `src/main/services/work-agent-manager.ts`, `src/shared/contracts.ts`,
+  `src/renderer/src/components/SettingsPanel.tsx`,
+  `src/renderer/src/components/work/WorkModeShell.tsx`.
+- Current status: ✅ Resolved — eligibility, connection, and consent are now
+  separate. Verification is live-key checked, credential-bound, expiring, and
+  fail-closed; controlled Workspace workflows and provider-switch/history
+  protections pass regression coverage.
 
 ## OMI-054 — Global Omni was a focus-stealing miniature dashboard — Resolved
 

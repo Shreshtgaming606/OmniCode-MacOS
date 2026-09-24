@@ -803,6 +803,30 @@ kbd { min-width: 23px; padding: 2px 5px; border: 1px solid var(--border); border
 .provider-setting input { height: 29px; padding: 0 7px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-input); }
 .provider-setting > button:not(.icon-button) { height: 29px; padding: 0 10px; border-radius: 4px; background: var(--accent); color: white; }
 .provider-setting .provider-error { grid-column: 1 / -1; margin: 0 0 7px; color: var(--danger); font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
+.provider-policy-setting { margin: 6px 0 14px; padding: 12px; border: 1px solid var(--border); border-radius: 9px; background: color-mix(in srgb, var(--bg-elevated) 78%, transparent); display: grid; gap: 8px; }
+.provider-policy-setting > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.provider-policy-setting p, .provider-policy-setting small { margin: 0; color: var(--text-muted); font-size: 11px; line-height: 1.45; }
+.provider-policy-setting .policy-state { padding: 3px 7px; border-radius: 999px; border: 1px solid var(--border); font-size: 10px; }
+.provider-policy-setting .policy-state.state-verified_eligible { color: var(--success); border-color: color-mix(in srgb, var(--success) 45%, var(--border)); }
+.provider-policy-setting .policy-state.state-ineligible { color: var(--danger); }
+.provider-policy-setting dl { margin: 0; display: grid; gap: 6px; }
+.provider-policy-setting dl > div { display: grid; grid-template-columns: 120px 1fr; gap: 8px; font-size: 10px; }
+.provider-policy-setting dt { color: var(--text-muted); }
+.provider-policy-setting dd { margin: 0; color: var(--text-secondary); }
+.provider-policy-confirmations { display: grid; gap: 7px; }
+.provider-policy-confirmations label { display: flex; align-items: flex-start; gap: 7px; color: var(--text-secondary); font-size: 11px; line-height: 1.4; }
+.provider-policy-confirmations input { margin-top: 2px; }
+.provider-policy-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.provider-policy-actions button, .connected-data-policies button { min-height: 29px; padding: 0 10px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg-input); color: var(--text-secondary); display: inline-flex; align-items: center; gap: 5px; }
+.provider-policy-actions button:hover:not(:disabled), .connected-data-policies button:hover:not(:disabled) { color: var(--text); border-color: var(--accent); }
+.provider-policy-actions svg { width: 13px; }
+.connected-data-policies { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 8px 0 14px; }
+.connected-data-policies article { padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elevated); display: grid; align-content: start; gap: 8px; }
+.connected-data-policies article[data-enabled="true"] { border-color: color-mix(in srgb, var(--success) 42%, var(--border)); }
+.connected-data-policies article > div { display: flex; gap: 7px; align-items: center; }
+.connected-data-policies article svg { width: 15px; color: var(--accent); }
+.connected-data-policies article span { display: grid; }
+.connected-data-policies article small, .connected-data-policies article p { margin: 0; color: var(--text-muted); font-size: 10px; line-height: 1.4; }
 .autocomplete-setting { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 12px; }
 .autocomplete-setting > label { display: grid; gap: 5px; color: var(--text-secondary); font-size: 11px; }
 .autocomplete-setting select, .autocomplete-setting input { min-width: 0; width: 100%; height: 30px; padding: 0 7px; border: 1px solid var(--border); border-radius: 4px; color: var(--text); background: var(--bg-input); }

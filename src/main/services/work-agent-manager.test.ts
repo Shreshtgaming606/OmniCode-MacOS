@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ToolDescriptor } from '../../shared/tool-contracts'
 import type { AIManager } from './ai-manager'
 import { modelCanUseWorkTools, WorkAgentManager } from './work-agent-manager'
+import { ProviderPolicyManager } from './provider-policy-manager'
 import { ToolRegistry } from './tool-registry'
 
 const browserTool: ToolDescriptor = {
@@ -76,7 +77,7 @@ describe('WorkAgentManager', () => {
     await expect(manager.chat({
       provider: 'google', model: 'gemini-test',
       messages: [{ role: 'assistant', content: 'Earlier Gmail-derived summary.', dataSources: ['google-workspace'] }]
-    }, [], vi.fn())).rejects.toThrow(/not approved for Google Workspace content/i)
+    }, [], vi.fn())).rejects.toThrow(/cannot process Google Workspace data/i)
 
     expect(chat).not.toHaveBeenCalled()
     expect(toolTurn).not.toHaveBeenCalled()
@@ -107,8 +108,53 @@ describe('WorkAgentManager', () => {
       result: { messages: [{ subject: 'Launch', snippet: 'Ready' }] }, authorization: automaticAuthorization
     }))
 
-    const response = await new WorkAgentManager({ toolTurn } as unknown as AIManager).chat({
+    const policies = new ProviderPolicyManager({ getCredential: async () => 'openai-test-key' })
+    await policies.setGoogleWorkspaceConsent('openai', true)
+    const response = await new WorkAgentManager({ toolTurn } as unknown as AIManager, policies).chat({
       provider: 'openai', model: 'gpt-test', messages: [{ role: 'user', content: 'Find my launch email.' }]
+    }, [gmailSearchTool], execute)
+
+    expect(execute).toHaveBeenCalledOnce()
+    expect(response.dataSources).toEqual(['google-workspace'])
+  })
+
+  it('tells a model that Gmail is connected but blocked by provider policy', async () => {
+    let receivedRequest: Parameters<AIManager['chat']>[0] | undefined
+    const chat = vi.fn(async (request: Parameters<AIManager['chat']>[0]) => {
+      receivedRequest = request
+      return { content: 'Your Gmail account is connected, but this Gemini configuration cannot process its data.', contextFiles: [] }
+    })
+    await new WorkAgentManager({ chat } as unknown as AIManager).chat({
+      provider: 'google', model: 'gemini-test', messages: [{ role: 'user', content: 'List my recent emails.' }]
+    }, [], vi.fn(), { connectedGoogleWorkspace: { gmail: true, drive: false } })
+
+    expect(receivedRequest?.messages[0]?.content).toContain('Gmail: CONNECTED_BUT_UNAVAILABLE_TO_CURRENT_MODEL_DATA_POLICY')
+    expect(receivedRequest?.messages[0]?.content).toContain('Never claim the Google account is disconnected')
+  })
+
+  it('keeps verified Paid Gemini closed until consent, then executes the same Gmail tool path', async () => {
+    const policies = new ProviderPolicyManager({
+      getCredential: async () => 'paid-gemini-key',
+      testProviderConnection: async () => ({ state: 'connected' })
+    })
+    await policies.configureGeminiWorkspace({
+      plan: 'paid', confirmedAiStudioPlan: true, confirmedMatchingCredential: true
+    })
+    await expect(new WorkAgentManager({ chat: vi.fn() } as unknown as AIManager, policies).chat({
+      provider: 'google', model: 'gemini-test',
+      messages: [{ role: 'assistant', content: 'A prior Gmail summary.', dataSources: ['google-workspace'] }]
+    }, [], vi.fn())).rejects.toThrow(/consent has not been granted/u)
+
+    await policies.setGoogleWorkspaceConsent('google', true)
+    const toolTurn = vi.fn()
+      .mockResolvedValueOnce({ content: '', calls: [{ callId: 'gmail-paid', name: 'gmail_search', toolId: 'gmail.search', input: { query: 'robotics' } }] })
+      .mockResolvedValueOnce({ content: 'I found the relevant message.', calls: [] })
+    const execute = vi.fn(async () => ({
+      toolId: 'gmail.search', startedAt: '2026-01-01T00:00:00Z', completedAt: '2026-01-01T00:00:01Z',
+      result: { messages: [{ subject: 'Robotics', snippet: 'Project update' }] }, authorization: automaticAuthorization
+    }))
+    const response = await new WorkAgentManager({ toolTurn } as unknown as AIManager, policies).chat({
+      provider: 'google', model: 'gemini-test', messages: [{ role: 'user', content: 'Find my robotics email.' }]
     }, [gmailSearchTool], execute)
 
     expect(execute).toHaveBeenCalledOnce()
@@ -225,7 +271,9 @@ describe('WorkAgentManager', () => {
     const toolTurn = vi.fn()
       .mockResolvedValueOnce({ content: '', calls: [{ callId: 'call-1', name: 'tool_0_gmail_search', toolId: 'gmail.search', input: { query: 'launch', maximum: 10 } }] })
       .mockResolvedValueOnce({ content: 'I found the launch message.', calls: [] })
-    const manager = new WorkAgentManager({ toolTurn } as unknown as AIManager)
+    const policies = new ProviderPolicyManager({ getCredential: async () => 'openai-test-key' })
+    await policies.setGoogleWorkspaceConsent('openai', true)
+    const manager = new WorkAgentManager({ toolTurn } as unknown as AIManager, policies)
 
     const response = await manager.chat({
       provider: 'openai', model: 'gpt-test', messages: [{ role: 'user', content: 'Find the launch email.' }]
@@ -252,7 +300,9 @@ describe('WorkAgentManager', () => {
     const toolTurn = vi.fn()
       .mockResolvedValueOnce({ content: '', calls: [{ callId: 'call-1', name: 'tool_0_drive_search', toolId: 'drive.search', input: { query: 'resume', maximum: 5 } }] })
       .mockResolvedValueOnce({ content: 'I found your resume.', calls: [] })
-    const manager = new WorkAgentManager({ toolTurn } as unknown as AIManager)
+    const policies = new ProviderPolicyManager({ getCredential: async () => 'openai-test-key' })
+    await policies.setGoogleWorkspaceConsent('openai', true)
+    const manager = new WorkAgentManager({ toolTurn } as unknown as AIManager, policies)
 
     const response = await manager.chat({
       provider: 'openai', model: 'gpt-test', messages: [{ role: 'user', content: 'Find my resume.' }]

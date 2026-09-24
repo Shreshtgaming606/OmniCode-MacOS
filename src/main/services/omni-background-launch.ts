@@ -33,3 +33,13 @@ export function createOmniLoginItemSettings(enabled: boolean, launchHelperAtLogi
     args: openAtLogin ? [OMNI_BACKGROUND_LAUNCH_ARGUMENT] : []
   }
 }
+
+/** Avoid asking macOS to rewrite an already-matching login item. Besides being
+ * unnecessary, unsigned/internal builds can emit an OS error even when the
+ * desired disabled state is already in effect. */
+export function shouldApplyOmniLoginItemSettings(
+  currentOpenAtLogin: boolean,
+  desired: OmniLoginItemSettings
+): boolean {
+  return currentOpenAtLogin !== desired.openAtLogin
+}

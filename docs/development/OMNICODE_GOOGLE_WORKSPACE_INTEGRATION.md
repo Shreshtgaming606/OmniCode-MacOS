@@ -22,6 +22,35 @@ Drive downloads use an app-private, integrity-checked transfer store so the same
 Work conversation can move exact bytes between services without routing them
 through the reasoning model.
 
+## AI provider data policy
+
+Google OAuth connection state and AI-provider eligibility are independent. A
+Gmail or Drive connector stays visibly Connected when the selected model is not
+permitted to receive its data. The main process supplies the model with an
+authoritative availability record such as `CONNECTED_BUT_UNAVAILABLE_TO_CURRENT_MODEL_DATA_POLICY`,
+so it cannot falsely tell the user that Gmail is disconnected.
+
+Gemini is no longer blocked solely because its provider ID is `google`.
+`ProviderPolicyManager` evaluates the selected service configuration:
+
+- an unknown, Free, expired, or changed-key Gemini configuration is blocked;
+- a Paid configuration becomes eligible only after the saved key passes Test
+  Connection and the user confirms that the matching Google AI Studio project
+  shows Paid;
+- the manual verification is stored only as a one-way key fingerprint, expires
+  after seven days, and never stores or exposes the API key;
+- eligible cloud providers still require separate connected-data consent;
+- consent is also credential-bound and is invalidated by credential rotation;
+- historical `google-workspace` provenance is checked again before every
+  provider request, so switching to an ineligible configuration cannot leak
+  prior Gmail/Drive content.
+
+Google's normal Gemini API key does not expose Paid/Free status. The supported
+Cloud Billing API requires a separately authorized Cloud identity and project
+IAM permission, so OmniCode does not pretend that a successful model request or
+a model ID proves Paid eligibility. Paid Services and zero data retention are
+also represented separately; the Gemini path does not claim zero retention.
+
 ## Authentication architecture
 
 OmniCode uses Google's OAuth 2.0 installed-application flow:
@@ -54,14 +83,14 @@ Official references:
 
 ## Scope policy
 
-Google's installed-app documentation explicitly states that incremental
-authorization is not supported for installed apps. OmniCode therefore requests
-the complete currently implemented Google Workspace permission set when the
-user connects either Gmail or Drive. One verified account grant serves both
-services. It follows this policy:
+OmniCode requests identity plus the service the user is connecting. Google may
+include previously granted scopes during a later connection so one verified
+account grant can continue to serve both services after the user chooses to
+connect both. It follows this policy:
 
-- Identity: `openid`, `email`, and `profile`, used to display the connected
-  account and verify the token belongs to a real Google user.
+- Identity: `openid` and `email`, used to display the connected account and
+  verify the token belongs to a real Google user. The unused `profile` scope is
+  not requested.
 - Gmail: `https://www.googleapis.com/auth/gmail.modify`. The requested product
   behavior includes reading, composing, sending, labels, read state, and
   archiving. Google's narrower send-only scope cannot satisfy the read tools.
@@ -69,6 +98,9 @@ services. It follows this policy:
   renaming, trashing, and restoring arbitrary user-selected Drive files cannot
   be implemented with `drive.file`, which is limited to files the app creates
   or the user explicitly shares with it through a picker.
+
+Connecting Gmail does not request Drive access, and connecting Drive does not
+request Gmail access.
 
 Both service scopes are classified as restricted by Google and require the
 appropriate OAuth consent configuration, public-app verification, and possibly

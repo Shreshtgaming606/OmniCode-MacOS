@@ -245,11 +245,33 @@ export interface PackageScript {
 
 export type AIProviderId = 'ollama' | 'openai' | 'anthropic' | 'google'
 
+export type ProviderPolicyVerificationState =
+  | 'VERIFIED_ELIGIBLE'
+  | 'UNVERIFIED'
+  | 'INELIGIBLE'
+  | 'UNKNOWN'
+
+export type ProviderPolicyVerificationMethod =
+  | 'local-runtime'
+  | 'documented-api-terms'
+  | 'manual-ai-studio-paid-plan'
+  | 'manual-ai-studio-free-plan'
+  | 'none'
+
 export interface ProviderDataPolicy {
   provider: AIProviderId
   model?: string
   displayName: string
+  verificationState: ProviderPolicyVerificationState
+  verificationMethod: ProviderPolicyVerificationMethod
+  workspaceDataEligible: boolean
   allowsGoogleWorkspaceData: boolean
+  consentRequired: boolean
+  consentGranted: boolean
+  plan: 'local' | 'paid' | 'free' | 'unknown'
+  zeroDataRetention: 'not-applicable' | 'not-configured' | 'unknown'
+  verifiedAt?: string
+  verificationExpiresAt?: string
   cloud: boolean
   endpointType: string
   retention: string
@@ -532,6 +554,13 @@ export interface WorkAPI {
     disconnect(id: string): Promise<ConnectorDescriptor['status']>
   }
   providerPolicy(provider: AIProviderId, model?: string): Promise<ProviderDataPolicy>
+  configureGeminiWorkspace(request: {
+    plan: 'paid' | 'free'
+    confirmedAiStudioPlan?: boolean
+    confirmedMatchingCredential?: boolean
+  }): Promise<ProviderDataPolicy>
+  clearGeminiWorkspaceVerification(): Promise<ProviderDataPolicy>
+  setGoogleWorkspaceConsent(provider: AIProviderId, granted: boolean): Promise<ProviderDataPolicy>
   permissions: {
     get(): Promise<WorkPermissionSettings>
     setGlobal(mode: WorkApprovalMode, acknowledgeFullAccess?: boolean): Promise<WorkPermissionSettings>

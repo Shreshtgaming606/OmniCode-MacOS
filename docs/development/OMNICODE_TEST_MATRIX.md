@@ -1,6 +1,22 @@
 # OmniCode Stabilization Test Matrix
 
-Last updated: 2026-09-23
+Last updated: 2026-09-24
+
+## Google Workspace model-data policy (0.8.0)
+
+| System | Feature | Test | Result | Automated/Manual | Notes |
+| --- | --- | --- | --- | --- | --- |
+| Provider policy | Unknown and Free Gemini | Resolve Workspace eligibility before exposing Gmail/Drive tools or data | Pass | Unit + integration | Unknown, expired, and explicitly Free/unpaid Gemini configurations fail closed without changing the connector's real connected state |
+| Provider policy | Paid Gemini verification | Require a live saved-key connection plus matching AI Studio Paid/project confirmations | Pass | Unit | Missing confirmation or failed authentication is rejected; a normal Gemini key is never misrepresented as an automatic billing lookup |
+| Provider policy | Separate data consent | Keep eligible providers blocked until the user grants connected-data consent | Pass | Unit + Work-agent integration | OpenAI, Anthropic, and verified Paid Gemini require distinct consent; local Ollama remains local and Ollama Cloud stays blocked |
+| Provider policy | Credential change | Replace the configured key after verification | Pass | Unit | The SHA-256 credential fingerprint changes, immediately invalidating verification and consent without storing the key |
+| Provider policy | Verification expiry | Advance past the seven-day Paid-attestation lifetime | Pass | Unit | Expired Gemini verification returns to an unverified blocked state and requires re-verification |
+| Provider policy | Provider switching/history | Switch to a provider that is not eligible or has no consent after Workspace-derived history exists | Pass | Integration | Historical provenance is rechecked and the follow-up is blocked before provider transmission |
+| Provider policy | Private persistence | Inspect the policy file after verification and consent | Pass | Unit + inspection | Atomic mode-`0600` JSON contains policy metadata/fingerprint only; no raw API key, OAuth token, or authorization header |
+| Work Mode | Connected versus usable | Render connected Gmail/Drive under unknown Gemini policy | Pass | Renderer unit | Cards remain Connected and separately say AI access is unavailable; verification and provider-change actions are offered |
+| Gemini adapter | Request storage preference | Inspect chat, stream, and tool-turn request bodies | Pass | Unit | Every Gemini `generateContent` path includes `store: false`; Paid is still documented as not equivalent to ZDR |
+| macOS integration | Login-item idempotency | Reapply an already-disabled launch-at-login state in an unsigned isolated profile | Pass | Unit + packaged E2E | Matching state is not rewritten; the final 0.8.0 smoke produced no repeated macOS login-item stderr while a real state change still invokes the supported API |
+| Google Workspace | Live Paid Gemini data workflow | Read disposable Gmail/Drive data and process it with verified Paid Gemini after consent | Blocked | Manual/packaged E2E | **BLOCKED — USER CONFIGURATION REQUIRED:** verified Paid AI Studio project, matching saved key, explicit consent, and disposable data are unavailable for a safe live run |
 
 ## Omni 0.7.0 additions
 

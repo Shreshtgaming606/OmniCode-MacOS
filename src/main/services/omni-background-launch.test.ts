@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   createOmniLoginItemSettings,
   OMNI_BACKGROUND_LAUNCH_ARGUMENT,
+  shouldApplyOmniLoginItemSettings,
   shouldStartOmniInBackground
 } from './omni-background-launch'
 
@@ -41,5 +42,12 @@ describe('Omni background launch policy', () => {
     })
     expect(createOmniLoginItemSettings(false, true)).toEqual({ openAtLogin: false, args: [] })
     expect(createOmniLoginItemSettings(true, false)).toEqual({ openAtLogin: false, args: [] })
+  })
+
+  it('does not rewrite an already-matching macOS login-item state', () => {
+    expect(shouldApplyOmniLoginItemSettings(false, createOmniLoginItemSettings(false, false))).toBe(false)
+    expect(shouldApplyOmniLoginItemSettings(false, createOmniLoginItemSettings(true, true))).toBe(true)
+    expect(shouldApplyOmniLoginItemSettings(true, createOmniLoginItemSettings(true, true))).toBe(false)
+    expect(shouldApplyOmniLoginItemSettings(true, createOmniLoginItemSettings(false, false))).toBe(true)
   })
 })

@@ -110,6 +110,10 @@
 .work-sidebar-footer { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--border); }
 .work-sidebar-footer .work-settings-link { justify-content: center; border-top: 0; padding: 0 8px; }
 .work-sidebar-footer .work-settings-link + .work-settings-link { border-left: 1px solid var(--border); }
+.work-app-ai-access { color: var(--text-secondary) !important; }
+.work-model-status .work-policy-actions { margin-left: auto; display: inline-flex; gap: 6px; flex: 0 0 auto; }
+.work-model-status .work-policy-actions button { min-height: 27px; padding: 0 9px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg-input); color: var(--text-secondary); white-space: nowrap; }
+.work-model-status .work-policy-actions button:hover { border-color: var(--accent); color: var(--text); }
 
 .work-chat-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-editor); }
 .work-chat-header { min-height: 62px; padding: 7px var(--space-4) 7px var(--space-5); display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--bg-editor) 94%, transparent); }

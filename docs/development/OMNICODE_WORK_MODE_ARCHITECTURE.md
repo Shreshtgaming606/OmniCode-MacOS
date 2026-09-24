@@ -1,9 +1,9 @@
 # OmniCode Work Mode Architecture
 
-Last updated: 2026-09-09
+Last updated: 2026-09-24
 
-Status: **Core 0.2.0 implementation verified; external OAuth and rich-document
-formats remain blocked/not implemented**
+Status: **Core implementation and Google OAuth verified; conditional
+Google Workspace AI-data policy verified; rich-document formats remain partial**
 
 This document describes the expansion phase that follows the completed 0.1.1
 stabilization audit. Work Mode is a separate application mode alongside the
@@ -119,6 +119,33 @@ Model output is untrusted input. It cannot register executors, pass arbitrary
 JavaScript, access Keychain, alter confirmation arguments, or directly execute
 privileged application code. Destructive and sensitive actions always require
 confirmation regardless of a connector's general trust level.
+
+Before any Gmail/Drive descriptor or Workspace-derived content reaches a model,
+the trusted main process also evaluates a separate provider-data policy:
+
+```text
+Real Gmail/Drive connection
+  → provider eligibility (fail closed)
+  → credential-bound verification where required
+  → explicit connected-data consent for that provider
+  → minimum bounded/redacted context with provenance
+  → provider request
+```
+
+For Gemini Developer API, Free/unpaid, unknown, and expired configurations are
+ineligible. A user can verify a Paid configuration only after the saved key
+passes a real provider connection test and they confirm that the matching AI
+Studio project/key is on Paid service. A normal Gemini API key does not expose
+billing tier, so OmniCode does not pretend this is an automatic billing lookup.
+Verification is bound to a one-way key fingerprint, expires after seven days,
+and is invalidated by a key change. Paid eligibility still requires separate
+consent and is explicitly not described as zero data retention.
+
+OpenAI and Anthropic API paths are eligible under their documented API-data
+terms but likewise require provider-specific consent. Local Ollama stays local;
+Ollama Cloud is not treated as the local path. Conversation messages derived
+from Google Workspace carry provenance and are rechecked on every provider
+switch before reuse.
 
 ## Connector order
 

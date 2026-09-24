@@ -83,6 +83,7 @@ describe('GoogleOAuthManager', () => {
     expect(authorizationUrl?.searchParams.get('redirect_uri')).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/oauth2\/callback$/u)
     expect(authorizationUrl?.searchParams.get('scope')).toContain(GOOGLE_GMAIL_SCOPES[0])
     expect(authorizationUrl?.searchParams.get('scope')).not.toContain(GOOGLE_DRIVE_SCOPES[0])
+    expect(authorizationUrl?.searchParams.get('scope')?.split(' ')).not.toContain('profile')
     expect(authorizationUrl?.searchParams.get('include_granted_scopes')).toBe('true')
     expect(authorizationUrl?.toString()).not.toContain('desktop-public-value')
     expect(new URLSearchParams(tokenBody).get('code_verifier')).toMatch(/^[A-Za-z0-9_-]{43,128}$/u)

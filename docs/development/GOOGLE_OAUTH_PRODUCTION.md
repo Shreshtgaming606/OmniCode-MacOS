@@ -48,13 +48,15 @@ Official protocol reference: [OAuth 2.0 for Desktop Apps](https://developers.goo
 10. Expired access tokens refresh in the main process. Revoked or insufficient
     grants become explicit reconnect or permission states.
 
-Google's installed-app guidance says incremental authorization is unsupported
-for installed applications. The current connection therefore requests the
-complete existing Google Workspace scope set in one consent flow:
+OmniCode requests only identity plus the service being connected:
 
-- `openid`, `email`, `profile`
-- `https://www.googleapis.com/auth/gmail.modify`
-- `https://www.googleapis.com/auth/drive`
+- `openid` and `email` for account identity
+- `https://www.googleapis.com/auth/gmail.modify` when the user connects Gmail
+- `https://www.googleapis.com/auth/drive` when the user connects Google Drive
+
+Google may include previously granted scopes during a later connection so one
+stored grant continues to support every service the user chose. The unused
+`profile` scope is not requested.
 
 The Gmail and Drive scopes are currently classified as Restricted. Scope
 classifications and descriptions are maintained in Google's

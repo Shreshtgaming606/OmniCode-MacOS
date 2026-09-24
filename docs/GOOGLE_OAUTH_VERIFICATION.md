@@ -94,10 +94,16 @@ arbitrary pre-existing Drive content discoverable.
 - Disconnect attempts Google revocation and always removes the local Keychain
   grant, even if revocation is temporarily unreachable.
 - Google-derived content is marked in local conversation provenance.
-- Local Ollama, the OpenAI API, and the Anthropic API are approved routes under
-  the current provider policy.
-- Gemini Developer API and Ollama cloud-model routes are blocked for Gmail and
-  Drive content in the current build.
+- Local Ollama is eligible without cloud-transfer consent. OpenAI and Anthropic
+  are eligible only after the user grants connected-data consent.
+- Gemini Developer API is conditionally eligible only when the saved credential
+  passes Test Connection, the user confirms that its matching Google AI Studio
+  project shows Paid, the credential-bound seven-day verification is current,
+  and the user separately grants connected-data consent. Free, unknown, expired,
+  and changed-key configurations fail closed.
+- Ollama cloud-model routes remain blocked for Gmail and Drive content.
+- A connected Gmail or Drive service remains shown as connected even when the
+  selected model is not permitted to process its data.
 - Cloud routes receive the minimum relevant context for the user's request.
 - The application links directly to Privacy, Terms, and About in Settings and
   links to Privacy from the Google connector UI.

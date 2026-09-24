@@ -8,8 +8,10 @@ browser tabs.
 ## Before recording
 
 - Use the exact production candidate that will be submitted.
-- Configure an approved AI route for the test, such as a local Ollama model or
-  an API provider permitted by OmniCode's current provider policy.
+- Configure an eligible AI route for the test. If using Gemini, confirm that the
+  saved key's exact project shows Paid in Google AI Studio, complete OmniCode's
+  credential-bound verification, and grant connected-data consent. Do not use
+  an unknown or Free Gemini project for the live-data portion.
 - Put one synthetic email named “OAuth Review Project Update” in the test inbox.
 - Put one synthetic file named “OAuth Review Plan.txt” in the test Drive.
 - Confirm the account is an authorized test user while the OAuth app is in
@@ -37,8 +39,10 @@ browser tabs.
    files.
 8. Ask OmniCode to find “OAuth Review Plan.txt,” then read only that selected
    file. Point out that search happens before content retrieval.
-9. Optionally select Gemini and show that Gmail and Drive tools are blocked by
-   the provider policy. Do not include real user data in this blocked test.
+9. Demonstrate both Gemini states without exposing personal data: an unknown or
+   Free configuration keeps Gmail/Drive connected but marks AI access
+   unavailable; a verified Paid configuration shows Workspace compatibility as
+   eligible and requires the separate minimum-data consent before tools appear.
 10. Open Settings → Privacy & Security and show the Privacy Policy, Terms of
     Service, and About OmniCode links.
 11. Return to Connected Apps and click Manage Google Connection, then
@@ -53,9 +57,11 @@ State that OmniCode:
 - uses Google OAuth and never asks for the user's Google password;
 - requests Gmail and Drive incrementally;
 - uses the requested scopes only for visible user-facing features;
-- sends only task-relevant Google data to an approved provider route;
-- blocks Gemini Developer API and Ollama cloud-model routes for Google
-  Workspace content in the current build;
+- sends only task-relevant Google data to an eligible, user-consented route;
+- conditionally supports a current, credential-bound Paid Gemini configuration
+  and blocks Free, unknown, expired, or changed-key Gemini configurations;
+- does not equate Paid Services with zero data retention; and
+- keeps Ollama cloud-model routes blocked for Google Workspace content;
 - stores Google tokens in macOS Keychain; and
 - attempts revocation and deletes the local grant when the user disconnects.
 

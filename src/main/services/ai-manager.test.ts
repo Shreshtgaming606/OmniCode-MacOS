@@ -398,6 +398,7 @@ describe('AIManager cloud providers', () => {
     expect(requests[0]?.headers.get('content-type')).toBe('application/json')
     expect(requests[0]?.headers.get('x-goog-api-key')).toBe('secret-google-key')
     expect(requests[0]?.body).toEqual({
+      store: false,
       systemInstruction: { parts: [{ text: 'Be concise.' }] },
       contents: [
         { role: 'user', parts: [{ text: 'Explain this function.' }] },

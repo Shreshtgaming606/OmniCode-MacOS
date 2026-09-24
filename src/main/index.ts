@@ -63,7 +63,11 @@ import { OmniController } from './services/omni-controller'
 import { OmniVoiceService } from './services/omni-voice-service'
 import { OmniCursorService } from './services/omni-cursor-service'
 import { OmniComputerToolService } from './services/omni-computer-tool-service'
-import { createOmniLoginItemSettings, shouldStartOmniInBackground } from './services/omni-background-launch'
+import {
+  createOmniLoginItemSettings,
+  shouldApplyOmniLoginItemSettings,
+  shouldStartOmniInBackground
+} from './services/omni-background-launch'
 import { MacOSPermissionManager } from './services/macos-permission-manager'
 import { isOmniOverlayInvokeChannel } from './services/omni-overlay-channel-policy'
 import { isGoogleWorkspaceConnector, ProviderPolicyManager } from './services/provider-policy-manager'
@@ -119,6 +123,13 @@ const omniSettings = new OmniSettingsManager(path.join(app.getPath('userData'), 
 const omniTasks = new OmniTaskStore(path.join(app.getPath('userData'), 'omni-tasks.json'))
 const omniVoice = new OmniVoiceService()
 omniVoice.onInputEvent((event) => broadcastOmni('omni:voice-input-event', event))
+
+function setOmniLaunchAtLogin(enabled: boolean): void {
+  const desired = createOmniLoginItemSettings(true, enabled)
+  if (!shouldApplyOmniLoginItemSettings(app.getLoginItemSettings().openAtLogin, desired)) return
+  app.setLoginItemSettings(desired)
+}
+
 const macosPermissions = new MacOSPermissionManager({
   platform: process.platform,
   mediaStatus: (kind) => mediaPermissionState(kind),
@@ -137,7 +148,7 @@ const macosPermissions = new MacOSPermissionManager({
   notificationsSupported: () => Notification.isSupported(),
   requestNotification: () => requestOmniNotificationAuthorization(),
   launchAtLoginEnabled: () => app.getLoginItemSettings().openAtLogin,
-  setLaunchAtLogin: (enabled) => app.setLoginItemSettings(createOmniLoginItemSettings(true, enabled)),
+  setLaunchAtLogin: (enabled) => setOmniLaunchAtLogin(enabled),
   openExternal: (url) => shell.openExternal(url),
   now: () => Date.now()
 })
@@ -191,7 +202,18 @@ const googleOAuth = new GoogleOAuthManager(
 )
 const gmailConnector = new GmailConnector(googleOAuth, fetch, workTransfers, saveWorkTransfer)
 const googleDriveConnector = new GoogleDriveConnector(googleOAuth, fetch, workTransfers, saveWorkTransfer)
-const providerPolicies = new ProviderPolicyManager()
+const providerPolicies = new ProviderPolicyManager({
+  settingsPath: path.join(app.getPath('userData'), 'provider-data-policy.json'),
+  getCredential: async (provider) => {
+    try {
+      return await credentials.get(provider)
+    } catch (error) {
+      if (error instanceof CredentialNotFoundError) return undefined
+      throw error
+    }
+  },
+  testProviderConnection: (provider) => ai.testProviderConnection(provider)
+})
 const workAgent = new WorkAgentManager(ai, providerPolicies)
 const codeTools = new ToolRegistry(permissionManager)
 const codeToolService = new CodeAgentToolService({
@@ -734,7 +756,7 @@ async function createOmniToolRouter(taskId: string, provider: WorkAgentChatReque
     })
   }
   const connectorStatuses = new Map((await workConnectors.list(true)).map((connector) => [connector.id, connector]))
-  const providerPolicy = providerPolicies.policyFor(provider, model)
+  const providerPolicy = await providerPolicies.policyFor(provider, model)
   for (const descriptor of workTools.list('work').filter((tool) => {
     if (tool.connectorId === 'browser') return false
     if (isGoogleWorkspaceConnector(tool.connectorId) && !providerPolicy.allowsGoogleWorkspaceData) return false
@@ -963,7 +985,10 @@ async function applyOmniRuntimeSettings(value: OmniSettings): Promise<void> {
   updateOmniTray(value.enabled && value.menuBarItem)
   if (!value.enabled) omniOverlayWindow?.hide()
   if (app.isPackaged) {
-    app.setLoginItemSettings(createOmniLoginItemSettings(value.enabled, value.launchHelperAtLogin))
+    const desired = createOmniLoginItemSettings(value.enabled, value.launchHelperAtLogin)
+    if (shouldApplyOmniLoginItemSettings(app.getLoginItemSettings().openAtLogin, desired)) {
+      app.setLoginItemSettings(desired)
+    }
   }
 }
 
@@ -1479,6 +1504,9 @@ function registerIpc(): void {
   handle('work:connectors:connect', (_event, id: string) => connectWorkConnector(id))
   handle('work:connectors:disconnect', (_event, id: string) => disconnectWorkConnector(id))
   handle('work:provider-policy', (_event, provider, model?: string) => providerPolicies.policyFor(provider, model))
+  handle('work:configure-gemini-workspace', (_event, request) => providerPolicies.configureGeminiWorkspace(request))
+  handle('work:clear-gemini-workspace-verification', () => providerPolicies.clearGeminiWorkspaceVerification())
+  handle('work:set-google-workspace-consent', (_event, provider, granted) => providerPolicies.setGoogleWorkspaceConsent(provider, granted))
   handle('work:permissions:get', () => workPermissionSettings.get())
   handle('work:permissions:set-global', async (event, mode: WorkApprovalMode, acknowledgeFullAccess?: boolean) => {
     const updated = await workPermissionSettings.setGlobal(mode, acknowledgeFullAccess === true)
@@ -1534,7 +1562,7 @@ function registerIpc(): void {
       const connected = new Set((await workConnectors.list())
         .filter((connector) => connector.status.state === 'connected')
         .map((connector) => connector.id))
-      const providerPolicy = request ? providerPolicies.policyFor(request.provider, request.model) : undefined
+      const providerPolicy = request ? await providerPolicies.policyFor(request.provider, request.model) : undefined
       const availableTools = workTools.list('work').filter((tool) =>
         connected.has(tool.connectorId) &&
         (!isGoogleWorkspaceConnector(tool.connectorId) || providerPolicy?.allowsGoogleWorkspaceData === true)
@@ -1549,6 +1577,11 @@ function registerIpc(): void {
         (toolRequest) => executeWorkTool(event, toolRequest, operation.controller.signal),
         {
           signal: operation.controller.signal,
+          providerPolicy,
+          connectedGoogleWorkspace: {
+            gmail: connected.has('gmail'),
+            drive: connected.has('google-drive')
+          },
           onDelta: (delta) => {
             if (operation.controller.signal.aborted || event.sender.isDestroyed()) return
             const payload: WorkAgentStreamEvent = { requestId, type: 'delta', delta }

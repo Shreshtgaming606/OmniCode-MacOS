@@ -1298,6 +1298,7 @@ export class AIManager {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
       body: JSON.stringify({
+        store: false,
         systemInstruction: { parts: [{ text: request.system }] },
         contents: googleToolMessages(request.messages),
         tools: [{ functionDeclarations: tools.map(({ descriptor, name }) => ({
@@ -1456,6 +1457,7 @@ export class AIManager {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
         body: JSON.stringify({
+          store: false,
           systemInstruction: system ? { parts: [{ text: system }] } : undefined,
           contents: messages.filter((message) => message.role !== 'system').map((message) => ({
             role: message.role === 'assistant' ? 'model' : 'user',
@@ -1533,6 +1535,7 @@ export class AIManager {
       {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
         body: JSON.stringify({
+          store: false,
           systemInstruction: system ? { parts: [{ text: system }] } : undefined,
           contents: messages.filter((message) => message.role !== 'system').map((message) => ({
             role: message.role === 'assistant' ? 'model' : 'user', parts: [{ text: message.content }]
