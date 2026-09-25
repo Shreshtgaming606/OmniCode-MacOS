@@ -28,7 +28,7 @@ Status reviewed: September 23, 2026
 - [ ] Google determination and, if required, completion of a restricted-scope security assessment
 - [ ] All five public URLs confirmed reachable without authentication from outside the hosting network
 - [ ] Public-domain phishing/reputation interception resolved
-- [x] Current Public Beta v1 download status accurately disclosed as unsigned and not notarized
+- [x] Current Public Beta v1 0.9.0 download status accurately disclosed as unsigned and not notarized
 - [ ] Full public production release signed and notarized
 - [ ] No unresolved Google verification blockers
 

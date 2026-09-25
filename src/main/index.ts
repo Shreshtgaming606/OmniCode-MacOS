@@ -28,6 +28,7 @@ import { GitManager } from './services/git-manager'
 import { CredentialManager, CredentialNotFoundError } from './services/credential-manager'
 import { WorkspaceIndexer } from './services/workspace-indexer'
 import { AIManager } from './services/ai-manager'
+import { AIUsageManager } from './services/ai-usage-manager'
 import { DiffManager } from './services/diff-manager'
 import { SettingsManager } from './services/settings-manager'
 import { WorkspaceHistoryManager } from './services/workspace-history-manager'
@@ -72,6 +73,7 @@ import { MacOSPermissionManager } from './services/macos-permission-manager'
 import { isOmniOverlayInvokeChannel } from './services/omni-overlay-channel-policy'
 import { isGoogleWorkspaceConnector, ProviderPolicyManager } from './services/provider-policy-manager'
 import type { GitCloneProgress, OmniSettingsChanges } from '../shared/contracts'
+import type { AIUsageExportFormat, AIUsageQuery, AIUsageSettings } from '../shared/ai-usage-contracts'
 import type { OmniExecutionMode, OmniPermissionId, OmniPermissionsSnapshot, OmniSettings, OmniStartRequest } from '../shared/omni-contracts'
 import { OMNI_CURSOR_EMERGENCY_STOP_SHORTCUT } from '../shared/omni-cursor-contracts'
 import type {
@@ -107,12 +109,28 @@ const server = new DevServerManager()
 const git = new GitManager()
 const credentials = new CredentialManager()
 const indexer = new WorkspaceIndexer()
+const diagnostics = new DiagnosticLogger(path.join(app.getPath('userData'), 'logs'))
+const aiUsage = new AIUsageManager(path.join(app.getPath('userData'), 'ai-usage.sqlite'))
 const ai = new AIManager(credentials, indexer, detectHardware, {
-  settingsPath: path.join(app.getPath('userData'), 'ai-model-preferences.json')
+  settingsPath: path.join(app.getPath('userData'), 'ai-model-preferences.json'),
+  usageManager: aiUsage,
+  onUsageError: (error) => { void diagnostics.failure('ai-usage:persistence', error).catch(() => undefined) },
+  confirmLargeRequest: async (estimate) => {
+    const options: Electron.MessageBoxOptions = {
+      type: 'question',
+      buttons: ['Send Request', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+      message: `This ${estimate.provider} request may cost about $${estimate.estimatedTotalCost?.toFixed(4) ?? '—'}.`,
+      detail: `Model: ${estimate.model}\nEstimated input: ${estimate.inputTokens.toLocaleString()} tokens\nExpected output allowance: ${estimate.expectedOutputTokens.toLocaleString()} tokens\n\nThis is an estimate; provider billing is authoritative.`
+    }
+    const result = mainWindow ? await dialog.showMessageBox(mainWindow, options) : await dialog.showMessageBox(options)
+    return result.response === 0
+  }
 })
 const settings = new SettingsManager()
 const workspaceHistory = new WorkspaceHistoryManager(path.join(app.getPath('userData'), 'recent-workspaces.json'))
-const diagnostics = new DiagnosticLogger(path.join(app.getPath('userData'), 'logs'))
 const workConversations = new WorkConversationManager(path.join(app.getPath('userData'), 'work-conversations.json'))
 const workAttachments = new WorkAttachmentManager(path.join(app.getPath('userData'), 'work-attachments'))
 const workTransfers = new WorkTransferStore(path.join(app.getPath('userData'), 'work-transfers'))
@@ -1577,6 +1595,14 @@ function registerIpc(): void {
         (toolRequest) => executeWorkTool(event, toolRequest, operation.controller.signal),
         {
           signal: operation.controller.signal,
+          usageContext: {
+            mode: 'work',
+            feature: tools.length ? 'tool-planning' : 'chat',
+            conversationId: typeof request?.conversationId === 'string' && WORK_REQUEST_ID_PATTERN.test(request.conversationId)
+              ? request.conversationId
+              : undefined,
+            taskId: requestId
+          },
           providerPolicy,
           connectedGoogleWorkspace: {
             gmail: connected.has('gmail'),
@@ -1732,6 +1758,12 @@ function registerIpc(): void {
   })
   handle('ai:chat', (_event, request) => ai.chat({
     ...request,
+    usageContext: {
+      mode: 'code',
+      feature: ['chat', 'code-completion', 'inline-edit', 'workspace-analysis'].includes(request?.usageContext?.feature)
+        ? request.usageContext.feature
+        : 'chat'
+    },
     workspacePath: request.workspacePath ? assertCurrentWorkspace(request.workspacePath) : undefined,
     attachedPaths: Array.isArray(request.attachedPaths) ? request.attachedPaths.map((target: string) => fileSystem.resolveAuthorizedPath(target)) : undefined
   }))
@@ -1741,6 +1773,42 @@ function registerIpc(): void {
   handle('ai:delete-credential', (_event, provider) => ai.deleteCredential(provider))
   handle('ai:index', (_event, root: string) => ai.index(assertCurrentWorkspace(root)))
   handle('ai:context-preview', (_event, root: string, query: string) => ai.contextPreview(assertCurrentWorkspace(root), query))
+  handle('ai:usage:summary', (_event, query?: AIUsageQuery) => aiUsage.summary(query))
+  handle('ai:usage:settings', () => aiUsage.settings())
+  handle('ai:usage:update-settings', (_event, settings: AIUsageSettings) => aiUsage.updateSettings(settings))
+  handle('ai:usage:pricing', () => aiUsage.pricingCatalog())
+  handle('ai:usage:estimate', (_event, provider, model: string, inputTokens: number, expectedOutputTokens: number) => (
+    aiUsage.estimateRequest({ provider, model, inputTokens, expectedOutputTokens })
+  ))
+  handle('ai:usage:export', async (event, format: AIUsageExportFormat, query?: AIUsageQuery) => {
+    const exported = aiUsage.exportData(format, query)
+    const extension = format === 'csv' ? 'csv' : 'json'
+    const options: Electron.SaveDialogOptions = {
+      title: 'Export AI usage history',
+      defaultPath: path.join(app.getPath('documents'), `OmniCode-AI-Usage-${new Date().toISOString().slice(0, 10)}.${extension}`),
+      filters: [{ name: format === 'csv' ? 'CSV' : 'JSON', extensions: [extension] }]
+    }
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    const result = owner ? await dialog.showSaveDialog(owner, options) : await dialog.showSaveDialog(options)
+    if (result.canceled || !result.filePath) return { cancelled: true, recordCount: 0 }
+    await fs.writeFile(result.filePath, exported.content, { encoding: 'utf8', mode: 0o600 })
+    return { cancelled: false, path: result.filePath, recordCount: exported.recordCount }
+  })
+  handle('ai:usage:delete-history', async (event) => {
+    const options: Electron.MessageBoxOptions = {
+      type: 'warning',
+      buttons: ['Delete Usage History', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+      message: 'Delete all local AI usage history?',
+      detail: 'This permanently removes request counts, token totals, cost estimates, and latency history stored by OmniCode. API keys and conversations are not affected.'
+    }
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    const result = owner ? await dialog.showMessageBox(owner, options) : await dialog.showMessageBox(options)
+    if (result.response !== 0) return { cancelled: true, deletedRecords: 0 }
+    return { cancelled: false, deletedRecords: aiUsage.deleteHistory() }
+  })
   handle('agent:approve-command', async (event, workspaceRoot: string, command: string, reason: string) => {
     assertCurrentWorkspace(workspaceRoot)
     const validated = validateAgentCommand(command, reason)
@@ -1840,5 +1908,8 @@ app.on('will-quit', (event) => {
     codeBrowserConnector.disconnect(),
     omniBrowserConnector.disconnect(),
     diagnostics.lifecycle('shutdown', 'OmniCode completed its shutdown sequence.')
-  ]).finally(() => app.exit(0))
+  ]).finally(() => {
+    aiUsage.close()
+    app.exit(0)
+  })
 })

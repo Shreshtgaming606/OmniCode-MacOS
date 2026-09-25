@@ -140,6 +140,7 @@ export interface WorkConversationSearchRequest {
 export interface WorkAgentChatRequest {
   provider: AIProviderId
   model: string
+  conversationId?: string
   messages: Array<Pick<WorkMessage, 'role' | 'content' | 'dataSources'> & { attachmentIds?: string[] }>
 }
 

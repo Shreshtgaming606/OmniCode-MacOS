@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 
 import type {
   CodeAgentEvent,
@@ -369,6 +369,10 @@ export class CodeAgentManager {
         (toolRequest) => this.executeTool(taskId, active, request.approvalMode, toolRequest),
         {
           mode: 'code', systemPrompt: CODE_AGENT_SYSTEM, signal: active.controller.signal,
+          usageContext: {
+            mode: 'code', feature: 'agent', agentRunId: taskId, taskId,
+            projectId: createHash('sha256').update(request.workspaceRoot).digest('hex').slice(0, 24)
+          },
           maxSteps: 20, maxToolCalls: 40,
           beforeAction: () => this.waitIfPaused(taskId, active),
           takeIntervention: () => this.takeIntervention(taskId)

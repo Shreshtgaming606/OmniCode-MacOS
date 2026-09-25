@@ -56,6 +56,17 @@ import type {
   OmniVoiceAvailability
 } from './omni-contracts'
 import type { OmniCursorRuntimeStatus } from './omni-cursor-contracts'
+import type {
+  AICostEstimate,
+  AIUsageDeleteResult,
+  AIUsageExportFormat,
+  AIUsageExportResult,
+  AIUsageQuery,
+  AIUsageSettings,
+  AIUsageSummary,
+  AIUsageContext,
+  ModelPricing
+} from './ai-usage-contracts'
 
 export type ThemePreference = 'system' | 'dark' | 'light'
 
@@ -372,6 +383,8 @@ export interface AIChatRequest {
   workspacePath?: string
   attachWorkspaceContext?: boolean
   attachedPaths?: string[]
+  /** Set by trusted OmniCode call sites; the main process normalizes IPC values. */
+  usageContext?: AIUsageContext
 }
 
 export interface AIChatResponse {
@@ -742,6 +755,15 @@ export interface OmniCodeAPI {
     deleteCredential(provider: Exclude<AIProviderId, 'ollama'>): Promise<void>
     index(root: string): Promise<WorkspaceIndexStatus>
     contextPreview(root: string, query: string): Promise<string[]>
+    usage: {
+      summary(query?: AIUsageQuery): Promise<AIUsageSummary>
+      settings(): Promise<AIUsageSettings>
+      updateSettings(settings: AIUsageSettings): Promise<AIUsageSettings>
+      pricing(): Promise<ModelPricing[]>
+      estimate(provider: AIProviderId, model: string, inputTokens: number, expectedOutputTokens: number): Promise<AICostEstimate>
+      export(format: AIUsageExportFormat, query?: AIUsageQuery): Promise<AIUsageExportResult>
+      deleteHistory(): Promise<AIUsageDeleteResult>
+    }
   }
   agent: {
     approveCommand(workspaceRoot: string, command: string, reason: string): Promise<boolean>

@@ -189,6 +189,7 @@ export function AIChat({
         : nextMessages
       const response = await window.omnicode.ai.chat({
         provider, model, messages: requestMessages, workspacePath: workspacePath ?? undefined,
+        usageContext: { mode: 'code', feature: 'chat' },
         attachWorkspaceContext: attachWorkspace,
         attachedPaths
       })

@@ -10,6 +10,7 @@ import type {
   WorkToolPreviewItem
 } from '../../shared/work-contracts'
 import type { AppMode } from '../../shared/work-contracts'
+import type { AIUsageContext } from '../../shared/ai-usage-contracts'
 import type { AIToolCall, AIToolConversationMessage } from './ai-tool-types'
 import { AIManager } from './ai-manager'
 import { serializeToolResultForModel } from './model-tool-result-sanitizer'
@@ -43,6 +44,7 @@ export interface WorkAgentRunOptions {
   onToolActivity?(activity: WorkToolActivity): void
   providerPolicy?: ProviderDataPolicy
   connectedGoogleWorkspace?: { gmail: boolean; drive: boolean }
+  usageContext?: AIUsageContext
 }
 
 /**
@@ -293,6 +295,7 @@ export class WorkAgentManager {
       const chatRequest = {
         provider: request.provider,
         model: request.model.trim(),
+        usageContext: { ...options.usageContext, mode, feature: 'chat' as const },
         messages: systemPrompt === WORK_AGENT_SYSTEM
           ? request.messages
           : [{ role: 'system' as const, content: systemPrompt }, ...request.messages]
@@ -329,7 +332,10 @@ export class WorkAgentManager {
         system: systemPrompt,
         messages,
         tools
-      }, { signal: options.signal })
+      }, {
+        signal: options.signal,
+        usageContext: { ...options.usageContext, mode, feature: 'tool-planning' }
+      })
       if (!turn || typeof turn.content !== 'string') throw new Error('The AI provider returned an invalid Work response.')
       validateTurnCalls(turn.calls)
       if (!turn.calls.length) {

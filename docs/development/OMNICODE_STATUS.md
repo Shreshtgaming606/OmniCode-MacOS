@@ -2,6 +2,25 @@
 
 Last updated: 2026-09-24
 
+## OmniCode 0.9.0 AI usage and cost
+
+- ✅ One centralized `AIManager` invocation boundary tracks Code, Work, Agent,
+  and Omni provider requests without changing provider/tool infrastructure.
+- ✅ OpenAI, Anthropic, Gemini, and Ollama native usage metadata is normalized;
+  unavailable fields remain unavailable instead of being invented.
+- ✅ Local versioned SQLite persistence, aggregation, retention, export, and
+  deletion pass focused tests. Stored/exported records exclude content and
+  credentials.
+- ✅ Settings → AI Usage & Cost renders real totals, trends, local/cloud share,
+  breakdowns, request metadata, budget state, and lifecycle controls.
+- ✅ Known catalog models use versioned provider-owned pricing sources. Unknown
+  cloud models show Unavailable and Ollama shows `$0` API cost.
+- ✅ Budget hard stops and large-request confirmation are enforced in the main
+  process before provider network access.
+- 🔵 Provider-console dollar reconciliation is external: provider billing is
+  authoritative, and live calls still require the user's valid credential,
+  quota, model access, and service availability.
+
 ## OmniCode 0.8.0 Google Workspace model-data policy repair
 
 - ✅ Gmail and Google Drive connection state is now separate from AI-provider
@@ -112,8 +131,8 @@ surface alone is not evidence that its backing operation works.
   checksum verification. The Intel package ran the smokes; arm64 execution still
   requires matching Apple Silicon hardware.
 
-- Current Omni verification: the complete serial run passed 70 test files with
-  611 tests passed and one intentionally skipped native-Keychain file/test.
+- Current verification: the complete serial run passed 73 test files with
+  623 tests passed and one intentionally skipped native-Keychain file/test.
   TypeScript checking and the complete multi-entry production build passed,
   including the dedicated `omni-overlay.cjs` preload and
   `omni-overlay.html` renderer. A built-app live smoke rendered the
@@ -124,7 +143,7 @@ surface alone is not evidence that its backing operation works.
   installed macOS voice list, and verified a missing selected model fails
   clearly without creating task history. Approval-display, agent-terminal,
   model-result, browser-isolation, and native-Cursor hardening pass the complete
-  serial suite, typecheck, 3,122-module production build, x86_64 native-helper
+  serial suite, typecheck, 3,123-module production build, x86_64 native-helper
   build, x64 package, and packaged core/Omni readiness smoke. The 0.7.0 x64
   installer-level overlay audit also verified restricted IPC, permission state,
   no focus theft, compact geometry, and zero renderer errors.
@@ -136,14 +155,15 @@ surface alone is not evidence that its backing operation works.
   Activity structure, confirmed the removed permanent Course/History/
   Availability panels stay absent, checked 960×600 and 720×720 layouts,
   validated Reduce Motion and persistence, and recorded zero renderer errors.
-  TypeScript and the complete 3,122-module production build pass.
+  TypeScript and the complete 3,123-module production build pass.
 
-- Current distribution: OmniCode 0.8.0 x64 and arm64 DMG/ZIP artifacts were
-  rebuilt after the conditional Workspace policy and login-item repair. Both disk images pass `hdiutil verify`
+- Current distribution: OmniCode 0.9.0 x64 and arm64 DMG/ZIP artifacts were
+  rebuilt after the AI usage/cost work. Both disk images pass `hdiutil verify`
   and mounted-content/version/architecture checks; both ZIPs pass integrity
-  testing. The x64 packaged app passed the release smoke with a real PTY,
-  localhost security boundary, Omni native readiness, navigation denial, and
-  zero renderer errors. Arm64 execution still requires Apple Silicon hardware.
+  testing. The x64 packaged app passed a two-launch isolated-profile soak with
+  fresh shell/workspace readiness at 8.1/10.3 seconds, warm readiness at
+  4.1/4.9 seconds, settled CPU below 5.8%, RSS below 430 MiB, clean quit/helper
+  cleanup, and zero renderer errors. Arm64 execution still requires Apple Silicon hardware.
   Both builds are unsigned and unnotarized because no Developer ID certificate
   is installed.
 
@@ -214,7 +234,7 @@ native/release gates.
 | Work connector result cards | ✅ Working & Verified | Tool activity can include bounded display-only Gmail, Drive, and file previews projected by the trusted Work agent and validated before persistence | Unit/renderer tests pass; dark and 960×600 light packaged smokes persisted and reloaded one Gmail and one Drive card, verified their content, found no internal IDs, and logged zero errors | Replaced generic success-only activity with provider-specific cards while excluding service IDs, URLs, transfer capabilities, local paths, raw bodies, and binary data | Live read-only Google API probes have passed; a Paid-Gemini-generated card remains part of the external eligible-plan/safe-data gate |
 | Work attachments | 🟡 Partially Working | Native picker/drop imports private copies with opaque IDs; bounded text/source context and persisted safe metadata | Unit tests cover mode `0600`, names, traversal/symlink/binary/size rejection, context bounds, removal, and cleanup; live Markdown attachment content reached Gemini without exposing its source path | Replaced persistent external-path capabilities with controlled private copies | PDF, Word, spreadsheet, and image extraction are not implemented |
 | Repository import | ✅ Working & Verified | Open existing repository and clone entry points in Welcome, File, palette, and Source Control; inspection, progress, cancel, validation | Real normal-folder/open-repository transitions passed; local bare clone reported progress through completion and opened the exact repo; early cancellation produced cancelled state and no output; invalid URL failed without leaking raw output | Added sanitized origin metadata, HTTPS/SSH/local validation, real stderr progress parsing, sender-bound cancellation, and polished progress UI | Authenticated GitHub write testing remains externally blocked |
-| Packaging | 🟡 Partially Working | Versioned x64/arm64 DMG and ZIP via electron-builder | All four 0.8.0 artifacts pass ZIP/DMG integrity, mounted Applications-link/version checks, Electron/helper/node-pty architecture validation, packaged main-bundle markers, and SHA-256 validation; the x64 app passes the final workspace/PTY/server/Omni/navigation/no-error smoke | Preserved the original `build/icon.icns`, restored development helpers and `node-pty` to x86_64 after cross-packaging, and generated release-specific SHA-256 sums | Apple Silicon launch and Apple signing/notarization remain externally blocked |
+| Packaging | 🟡 Partially Working | Versioned x64/arm64 DMG and ZIP via electron-builder | All four 0.9.0 artifacts pass ZIP/DMG integrity, mounted Applications-link/version checks, Electron/helper/node-pty architecture validation, and SHA-256 validation; the x64 app passes the final two-launch startup/idle/quit/no-error soak | Preserved the original `build/icon.icns`, restored development helpers and `node-pty` to x86_64 after cross-packaging, and generated release-specific SHA-256 sums | Apple Silicon launch and Apple signing/notarization remain externally blocked |
 | macOS integration | 🟡 Partially Working | Menus, native and styled dialogs, notifications, Finder open/reveal, file associations, theme | Packaged launch, native folder/destination/Open/Save As/Open With/confirmation sheets, accessible styled text-input dialogs, exact Finder reveal, OS file/folder drop, window lifecycle, native dirty-close choices, all 11 application menus/48 expected items, and real System Events shortcuts passed; notification validation passed but the unsigned app cannot be delivered by macOS Notification Center | Fixed native Undo/Redo routing, Sonoma Inline AI shortcut fallback, unreliable Finder selection, and Electron's unsupported `window.prompt()` calls | Native notification presentation remains blocked only by the missing Developer ID signature |
 | File explorer / workspace | ✅ Working & Verified | Explorer UI and main-process open/read/write/create/rename/move/duplicate/trash/reveal/watch/project APIs | Packaged workflows passed actual context-menu New Folder/New File/Rename/Duplicate/Trash with styled/native dialogs and exact Unicode/space/period paths, native folder Open/Cancel/restoration, New Project, nested create, search/replace, native file Open/Save As, exact Finder reveal, Open With/TextEdit, external file/folder drop, Explorer drag-move, binary/boundary rejection, delayed autosave, external lifecycle, recent-folder restart/reopen, moved-workspace recovery, and permission-denied saves | Replaced unreliable Finder reveal with macOS `open -R`; replaced unsupported project/file/rename prompting; context action rejections now reach visible error reporting | None in the tested workspace lifecycle |
 | Monaco editor | ✅ Working & Verified | Bundled Monaco, tabs, dirty state, save/autosave, language mapping, diff editor | Packaged workflow passed three tabs, switching/closing, system clipboard copy/paste with restoration, native Undo/Redo/Save/Save As/Find, inline Replace All, exact disk bytes, delayed autosave, unsaved-tab cancel/discard, native dirty-window Save All/Discard/Cancel, conflict preservation, indentation, brackets, line/syntax/folding/minimap rendering, language state, panel relayout, and zero renderer errors | Fixed Monaco 0.56 provider disposal and routed native Undo/Redo to the Monaco text-model history | None in the tested editor workflow |

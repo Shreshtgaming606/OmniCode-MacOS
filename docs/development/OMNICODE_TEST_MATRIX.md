@@ -2,6 +2,22 @@
 
 Last updated: 2026-09-24
 
+## AI usage and cost (0.9.0)
+
+| System | Feature | Test | Result | Automated/Manual | Notes |
+| --- | --- | --- | --- | --- | --- |
+| Usage boundary | Shared AI Manager | Send a real-shaped OpenAI response through the production manager | Pass | Integration | Provider token/cache metadata and Work context reach one record; prompt and test credential do not |
+| Usage parsing | OpenAI | Normalize input/output/cached/reasoning/total fields | Pass | Unit | Uses response metadata; no tokenizer estimate is substituted after the request |
+| Usage parsing | Anthropic | Normalize input/output/cache-read/cache-write fields | Pass | Unit | Total input includes provider-separated cache fields |
+| Usage parsing | Gemini | Normalize prompt/candidate/cache/thought/total metadata | Pass | Unit | Missing values remain unavailable |
+| Usage parsing | Ollama | Normalize prompt-eval/eval counters | Pass | Unit | Local API cost remains zero; missing counters remain unavailable |
+| Cost engine | Model matching | Select narrow model/version family and cached rates | Pass | Unit | Unknown cloud model stays unpriced rather than inheriting another tier |
+| Persistence | SQLite schema | Write/query two providers and aggregate totals | Pass | Integration | Versioned schema and provider/model/mode/context indexes; parameterized writes |
+| Privacy | Usage export | Inspect JSON export after a failed cloud request | Pass | Integration | Contains bounded metadata/opaque IDs; excludes prompt, API key, and authorization fields |
+| Budgets | Main-process hard stop | Exceed a configured daily estimate before request | Pass | Unit | Throws before provider network use; Ollama is exempt |
+| Dashboard | Real empty/data states | Type-check and production-build Settings dashboard | Pass | TypeScript + build | No sample data; unknown cost reads Unavailable and local reads `$0` |
+| Cloud billing | Provider-console reconciliation | Compare OmniCode estimates with a billed account | Blocked | Manual | **BLOCKED — USER CONFIGURATION REQUIRED:** valid billable provider account and safe test budget |
+
 ## Google Workspace model-data policy (0.8.0)
 
 | System | Feature | Test | Result | Automated/Manual | Notes |
@@ -160,13 +176,13 @@ substitute for a real integration test where one is required.
 | Diagnostics | Persistent structured log | Record categorized failures without secrets | Pass | Unit + packaged E2E | Real boundary failure recorded timestamp/subsystem/operation/permission category in a mode-`0600` log; IPC argument and authorization-header scans passed; rotation/redaction/symlink tests passed |
 | Failure | Offline/provider/rate-limit/timeout | Graceful accurate errors | Partial | Unit + packaged E2E | Invalid auth, a real Gemini 503, and repeated live `fetch failed` transport errors surfaced honestly with no fake success; rate-limit/timeout paths pass unit tests, while a physically disconnected-network E2E remains |
 | Failure | Permission/read-only/moved files | Graceful accurate errors | Pass | Packaged E2E + unit | Real mode-`0555` save surfaced EACCES guidance; moving a workspace during a dirty edit produced a visible conflict error; both cases preserved disk bytes and dirty buffers, then recovered cleanly |
-| Performance | Startup/idle | Time, CPU, memory | Pass | Packaged three-launch soak | Fresh-profile shell/workspace 5.4/7.1 s; warm at most 4.3/4.7 s; settled CPU 1.4–2.6%, RSS 392–441 MiB, quit in 0.6–1.1 s with complete helper cleanup |
+| Performance | Startup/idle | Time, CPU, memory | Pass | Packaged soak | 0.9.0 fresh-profile shell/workspace 8.1/10.3 s; warm 4.1/4.9 s; settled CPU 5.8% then 1.6%, RSS 427/411 MiB, quit in 0.9–1.1 s with complete helper cleanup and zero renderer errors |
 | Performance | Large workspace/index/search | Responsiveness and bounds | Pass | Packaged measurement | 1,203 files: workspace open 415 ms, index 1.53 s, search 47 ms; renderer stayed responsive and results/ignores were exact |
 | Performance | Cleanup/leaks | Listeners, PTYs, servers, AI operations | Pass | Packaged soak | 8 PTYs and 3 servers created/stopped; server was not left running, app RSS settled 397→422 MiB, median idle CPU 0%, and no renderer error was captured |
-| Production | Build | Typecheck, electron-vite, and native helper build | Pass | Automated | Current source typechecks; main/two preload bundles, 3,122 renderer modules, and the x86_64 Swift helper compile successfully |
-| Production | Intel app | Launch and core smoke on Sonoma | Pass | Automated smoke | Current x64 directory package passed startup, workspace IPC, real zsh PTY, server/public-secret boundaries, blocked external navigation, packaged Omni helper/Accessibility readiness, and zero renderer errors; earlier Work/Gemini smokes remain valid |
-| Production | Apple Silicon app | Correct executable/native slices | Pass | Automated inspection | Final 0.3.1 app executable and active `node-pty` module are arm64; the DMG verifies and matching-hardware launch remains blocked |
-| Production | Archives | DMG/ZIP integrity and checksums | Pass | Automated | 0.3.1 Intel/Apple Silicon DMGs verify; both ZIPs decompress cleanly; embedded versions, original icons, claimed executable/native architectures, and fresh SHA-256 sums pass |
+| Production | Build | Typecheck, electron-vite, and native helper build | Pass | Automated | Current source typechecks; main/two preload bundles, 3,123 renderer modules, and both x86_64 native helpers compile successfully |
+| Production | Intel app | Launch and core smoke on Sonoma | Pass | Automated smoke | 0.9.0 x64 directory package passed fresh and warm startup/workspace/idle/quit/helper-cleanup gates with zero renderer errors; prior PTY/server/Omni/navigation smokes remain valid and its native slices were reverified |
+| Production | Apple Silicon app | Correct executable/native slices | Pass | Automated inspection | 0.9.0 Electron, `node-pty`, Cursor, and Speech binaries are all arm64; the DMG verifies and matching-hardware launch remains blocked |
+| Production | Archives | DMG/ZIP integrity and checksums | Pass | Automated | 0.9.0 Intel/Apple Silicon DMGs verify; both ZIPs decompress cleanly; embedded version/bundle identity, Applications links, claimed executable/native architectures, and fresh SHA-256 sums pass |
 | Production | Signing/notarization | Gatekeeper-ready public release | Blocked | External | Developer ID certificate required; the helper is ad-hoc signed for local integrity, but a freshly replaced nested helper exceeded the 10-second audit and 15-second production first-invocation timeouts during provenance processing, while its immediate retry and full functional audit passed |
 | Modes | Separate Code and Work modes | Switch both ways without replacing Code workbench | Pass | Unit + packaged E2E | Work rendered as an independent surface; Code remained mounted and returned with its state boundary intact |
 | Work conversations | CRUD/history | Create, reopen, rename, pin, search, and delete | Pass | Unit + packaged E2E | Real packaged conversation title/message persisted, search found it, and cleanup deleted it |

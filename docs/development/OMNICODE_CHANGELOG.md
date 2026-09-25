@@ -3,6 +3,31 @@
 This log records repairs and audit milestones made during the no-new-features
 stabilization phase.
 
+## OmniCode 0.9.0 AI usage and cost dashboard — 2026-09-24
+
+- Added one main-process usage boundary across Code chat/autocomplete/inline
+  edit, Work, Code Agent, and Omni. Successful provider calls record native
+  token/cache/reasoning metadata; failures record bounded diagnostic metadata.
+- Added a versioned, local SQLite usage store with schema migration, indexed
+  time/provider/model/mode/context queries, retention cleanup, CSV/JSON export,
+  and confirmed deletion. Prompts, responses, file contents, API keys, OAuth
+  tokens, authorization headers, cookies, and tool results are excluded.
+- Added Settings → AI Usage & Cost with real period/provider/mode filters,
+  cost/token/request charts, local-versus-cloud totals, provider/model/mode/
+  feature breakdowns, recent request metadata, budgets, retention, exports, and
+  deletion controls. Empty states use real zero/Unavailable values, not demos.
+- Added provider-native usage parsing for OpenAI, Anthropic, Gemini, and Ollama,
+  including cached/reasoning fields where supplied and supported rate-limit
+  response metadata. Streaming OpenAI calls request usage explicitly.
+- Added a narrow, versioned pricing catalog sourced from official provider
+  documentation. Unknown model prices remain unavailable; Ollama is clearly
+  `$0` API cost; every dollar value is labeled as an estimate.
+- Added daily/weekly/monthly budget warnings, opt-in hard enforcement in the
+  trusted main process, and native confirmation for requests above the user's
+  configured estimated-cost threshold. Cloud limits never block local Ollama.
+- Added focused parser, pricing, persistence, aggregation, export-privacy,
+  budget, and real shared-`AIManager` metadata regression tests.
+
 ## OmniCode 0.8.0 conditional Google Workspace AI access — 2026-09-23
 
 - Replaced the blanket Gemini/Gmail/Drive restriction with a fail-closed,

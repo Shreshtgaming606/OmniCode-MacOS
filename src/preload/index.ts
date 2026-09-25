@@ -242,7 +242,16 @@ const api: OmniCodeAPI = {
     testProviderConnection: (provider: Exclude<AIProviderId, 'ollama'>) => ipcRenderer.invoke('ai:test-provider-connection', provider),
     deleteCredential: (provider: Exclude<AIProviderId, 'ollama'>) => ipcRenderer.invoke('ai:delete-credential', provider),
     index: (root) => ipcRenderer.invoke('ai:index', root),
-    contextPreview: (root, query) => ipcRenderer.invoke('ai:context-preview', root, query)
+    contextPreview: (root, query) => ipcRenderer.invoke('ai:context-preview', root, query),
+    usage: {
+      summary: (query) => ipcRenderer.invoke('ai:usage:summary', query),
+      settings: () => ipcRenderer.invoke('ai:usage:settings'),
+      updateSettings: (settings) => ipcRenderer.invoke('ai:usage:update-settings', settings),
+      pricing: () => ipcRenderer.invoke('ai:usage:pricing'),
+      estimate: (provider, model, inputTokens, expectedOutputTokens) => ipcRenderer.invoke('ai:usage:estimate', provider, model, inputTokens, expectedOutputTokens),
+      export: (format, query) => ipcRenderer.invoke('ai:usage:export', format, query),
+      deleteHistory: () => ipcRenderer.invoke('ai:usage:delete-history')
+    }
   },
   agent: {
     approveCommand: (workspaceRoot, command, reason) => ipcRenderer.invoke('agent:approve-command', workspaceRoot, command, reason),

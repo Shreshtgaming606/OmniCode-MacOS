@@ -7,6 +7,7 @@ import type { ConnectorDescriptor, WorkApprovalMode, WorkPermissionSettings } fr
 import { googleAccountSummary } from '../lib/google-account-status'
 import { WORK_APPROVAL_MODES, WORK_APPROVAL_MODE_COPY } from '../lib/work-approval-mode'
 import { FullAccessWarning } from './work/FullAccessWarning'
+import { AIUsageDashboard } from './AIUsageDashboard'
 
 type CloudProvider = Exclude<AIProviderId, 'ollama'>
 const PROVIDERS: Array<{ id: CloudProvider; name: string; placeholder: string }> = [
@@ -374,7 +375,7 @@ export function SettingsPanel({
     <div className="settings-panel">
       <header><div><h1>Settings</h1><p>User settings · stored locally</p></div><button onClick={onClose} title="Close settings"><X /></button></header>
       <div className="settings-content">
-        <nav><a href="#appearance">Appearance</a><a href="#files">Files & Autosave</a><a href="#providers">AI Providers</a><a href="#autocomplete">AI Autocomplete</a><a href="#omni">Omni</a><a href="#work-mode">Work Mode</a><a href="#connected-apps">Connected Apps</a><a href="#workspace">Workspace</a><a href="#permissions">Permissions & Privacy</a></nav>
+        <nav><a href="#appearance">Appearance</a><a href="#files">Files & Autosave</a><a href="#providers">AI Providers</a><a href="#ai-usage">AI Usage & Cost</a><a href="#autocomplete">AI Autocomplete</a><a href="#omni">Omni</a><a href="#work-mode">Work Mode</a><a href="#connected-apps">Connected Apps</a><a href="#workspace">Workspace</a><a href="#permissions">Permissions & Privacy</a></nav>
         <main>
           <section id="appearance"><h2>Appearance</h2><p>Choose how OmniCode follows macOS.</p>
             <div className="segmented">{(['system', 'dark', 'light'] as ThemePreference[]).map((item) => <button className={theme === item ? 'active' : ''} key={item} onClick={() => onTheme(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}</div>
@@ -406,6 +407,7 @@ export function SettingsPanel({
             </div>}</Fragment>)}
             {status && <div className={`settings-status${statusError ? ' error' : ''}`} role={statusError ? 'alert' : 'status'}>{status}</div>}
           </section>
+          <section id="ai-usage"><h2>AI Usage & Cost</h2><p>Understand provider-reported token usage, estimated API cost, latency, and local-versus-cloud activity across Code, Work, and Omni.</p><AIUsageDashboard /></section>
           <section id="autocomplete"><h2>AI Autocomplete</h2><p>Use a separate model for editor suggestions. This is disabled by default; cloud providers receive the nearby code shown to the completion model.</p>
             <label className="setting-toggle"><span><strong>Inline AI suggestions</strong><small>Generate next-line suggestions while you type. Press Tab to accept a suggestion.</small></span><input type="checkbox" checked={aiAutocomplete} onChange={(event) => {
               const enabled = event.target.checked

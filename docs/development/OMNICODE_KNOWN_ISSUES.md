@@ -5,6 +5,25 @@ Last updated: 2026-09-24
 Resolved issues remain in this file with a resolution so audit history is not
 lost. Secrets, tokens, and authorization headers must never be included here.
 
+## OMI-058 — Usage cost is estimated and the bundled catalog requires release maintenance
+
+- Severity: Medium for cost-display accuracy; no effect on provider execution
+- Reproduction: Use a newly released, custom-priced, batch, long-context, image,
+  audio, or otherwise differently billed cloud model not present in the narrow
+  text-pricing catalog.
+- Expected: OmniCode either applies an officially verified matching price or
+  marks cost unavailable.
+- Actual: 0.9.0 correctly marks unmatched models unavailable. It does not fetch
+  or infer a price and does not import the provider's billing ledger.
+- Suspected cause: Provider pricing and billing dimensions change independently
+  and the text response APIs do not return a universal billed-dollars field.
+- Relevant files: `src/main/services/ai-pricing-catalog.ts`,
+  `src/main/services/ai-usage-manager.ts`,
+  `docs/development/OMNICODE_AI_USAGE_AND_COST.md`.
+- Current status: 🟡 Expected limitation. Catalog version/date/source is visible,
+  unknown prices are honest, and provider billing remains authoritative. Review
+  official source pages before every release.
+
 ## OMI-057 — Packaged settings repeatedly rewrote an unchanged login item — Resolved
 
 - Severity: Low

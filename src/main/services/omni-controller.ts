@@ -394,6 +394,12 @@ export class OmniController {
         (toolRequest) => this.executeTool(taskId, active, request.approvalMode, toolRequest),
         {
           mode: 'omni',
+          usageContext: {
+            mode: 'omni',
+            feature: ['global-shortcut', 'wake-word', 'overlay'].includes(request.activationSource) ? 'voice' : 'agent',
+            agentRunId: taskId,
+            taskId
+          },
           systemPrompt: active.toolCapable ? OMNI_SYSTEM : OMNI_CHAT_ONLY_SYSTEM,
           signal: active.controller.signal,
           maxSteps: 20,

@@ -456,6 +456,7 @@ export function WorkMode({ active, onOpenSettings, onError, onRequireAttention, 
       const response = await window.omnicode.work.agent.chat(requestId, {
         provider: selectedProvider,
         model: selectedModelId,
+        conversationId: conversation.id,
         messages
       })
       if (response.cancelled) {

@@ -517,6 +517,7 @@ export function App() {
       if (!preferred) throw new Error('No Ollama model is available. Install a local model or use AI Chat with a configured cloud provider.')
       const response = await window.omnicode.ai.chat({
         provider: 'ollama', model: preferred.id, attachedPaths: [activeDocument.path],
+        usageContext: { mode: 'code', feature: 'inline-edit' },
         messages: [{ role: 'system', content: 'You are editing selected code. Return only the complete replacement code with no Markdown fence or commentary.' }, { role: 'user', content: `${instruction}\n\nSelected code:\n${inlineEdit.original}` }]
       })
       const proposal = response.content.replace(/^```[\w+-]*\n?/, '').replace(/\n?```$/, '')
@@ -579,6 +580,7 @@ export function App() {
             request = window.omnicode.ai.chat({
               provider: settings.provider,
               model: chosenModel,
+              usageContext: { mode: 'code', feature: 'code-completion' },
               messages: [
                 { role: 'system', content: 'Complete code at the cursor. Return only the exact text to insert, without Markdown or explanation. Prefer a concise next line or block and do not repeat existing code.' },
                 { role: 'user', content: `Language: ${textModel.getLanguageId()}\n\nCode before cursor:\n${prefix}\n\n<CURSOR>\n\nCode after cursor:\n${suffix}` }

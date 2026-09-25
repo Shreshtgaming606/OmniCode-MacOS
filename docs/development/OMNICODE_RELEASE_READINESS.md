@@ -6,9 +6,10 @@ Last updated: 2026-09-24
 
 **NOT READY for a signed public release.**
 
-OmniCode 0.8.0 is ready for controlled Intel macOS Sonoma testing as an
+OmniCode 0.9.0 is ready for controlled Intel macOS Sonoma testing as an
 unsigned internal build. Its Apple Silicon package is structurally verified,
-but still requires execution on matching hardware. The conditional Google
+but still requires execution on matching hardware. The AI usage/cost system,
+conditional Google
 Workspace provider policy, separate connected-data consent, existing compact
 Omni overlay and macOS permissions, Code/Work surfaces, and shared backends pass
 the current automated gates. Developer ID signing, notarization, clean-TCC
@@ -16,8 +17,8 @@ interactive prompt coverage, a live verified Paid Gemini Workspace workflow,
 missing service credentials/models, and arm64 runtime execution remain explicit
 release gates.
 
-The stabilization matrix currently records **257 of 284 behaviors passing
-(90.5%)**. Eighteen are externally blocked, three are accurately not
+The stabilization matrix currently records **267 of 295 behaviors passing
+(90.5%)**. Nineteen are externally blocked, three are accurately not
 implemented, and six are partially verified. No blocked, partial, or absent
 capability is counted as passing.
 
@@ -25,17 +26,17 @@ capability is counted as passing.
 
 | Result | Count | Meaning |
 | --- | ---: | --- |
-| Tests passed | 257 | Tracked behavior met the stated expectation |
+| Tests passed | 267 | Tracked behavior met the stated expectation |
 | Tests failed | 0 | No tracked behavior currently has a failing result |
-| Tests blocked | 18 | Credential, service, billing-plan verification, signing, permission, safe-data, runtime, repository, or matching hardware required |
+| Tests blocked | 19 | Credential, service, billing/reconciliation, signing, permission, safe-data, runtime, repository, or matching hardware required |
 | Tests not run / not implemented | 3 | Accurately absent behavior is not presented as complete |
 | Tests partially run | 6 | Safe or platform-dependent portions pass; a remaining real-world gate is documented |
 
-Automated regression result: **611 passed, 1 intentionally skipped, 0 failed**
-across 71 files (70 passing and one skipped). The skipped native Keychain test
+Automated regression result: **623 passed, 1 intentionally skipped, 0 failed**
+across 74 files (73 passing and one skipped). The skipped native Keychain test
 is excluded from the ordinary run because it changes the user's login Keychain;
 that boundary has separate disposable-credential evidence. TypeScript checking,
-the 3,122-module multi-entry production build, x86_64 and arm64 native helper
+the 3,123-module multi-entry production build, x86_64 and arm64 native helper
 builds, and both architecture-specific packages pass.
 
 Packaged Intel evidence includes:
@@ -68,13 +69,14 @@ Packaged Intel evidence includes:
 | Gemini | 🟡 Account/provider dependent | Prior real API-key and model workflows pass; transient provider availability and account quota remain external |
 | Google Workspace AI policy | ✅ Ready around external plan gate | Free/unknown/expired Gemini fails closed; verified Paid plus separate consent enables shared tools; credential rotation, expiry, provider switching, provenance, private storage, and connected-state UI pass. The final live Paid workflow is externally blocked |
 | AI Chat | ✅ Implemented behavior ready | Provider/model routing, Markdown/code, context, errors, Work streaming/Stop, and clear behavior pass their documented scopes |
+| AI Usage & Cost | ✅ Ready with estimated-cost limitation | Shared provider boundary, native token/cache/reasoning metadata, SQLite aggregation, real dashboard, budgets, retention, export/privacy, and deletion pass. Unknown model prices remain unavailable and provider billing is authoritative |
 | Workspace Indexer | ✅ Ready | Initial/change/delete/rename freshness, ignores, binary/sensitive exclusions, ranking, and large-workspace responsiveness pass |
 | AI Agent | ✅ Implemented workflow ready | Real tools, plans, approvals, pause/resume/stop, intervention, cleanup, redaction, and false-success prevention pass; Stop teardown race was repaired |
 | Diff System | ✅ Ready | Create/modify/delete proposals, accept/reject, filesystem match, undo, and traversal denial pass |
 | Settings | ✅ Ready | Private atomic persistence, corruption recovery, real Omni permission actions, setup rerun, and provider/permission state pass |
 | Keychain | ✅ Ready | Save/read/restart/update/delete passed with disposable credentials; secrets remain out of renderer state, logs, workspace, and Git |
 | macOS Integration | 🟡 Internal-build ready | Menus, dialogs, shortcuts, overlay, supported permission requests, Settings routing, and return refresh are implemented; public TCC stability requires signing |
-| Production Build | 🟡 Unsigned release candidate | Both 0.8.0 DMG/ZIP sets pass integrity, version, icon, Applications link, and Electron/helper/node-pty architecture checks; x64 passed the final isolated-profile live smoke |
+| Production Build | 🟡 Unsigned release candidate | Both 0.9.0 DMG/ZIP sets pass integrity, version, icon, Applications link, and Electron/helper/node-pty architecture checks; x64 passed a two-launch isolated-profile soak with zero renderer errors |
 
 ## Omni 0.7.0 Verification
 
@@ -116,13 +118,13 @@ Packaged Intel evidence includes:
 
 | Target | Artifact | Size | SHA-256 |
 | --- | --- | ---: | --- |
-| Intel installer | `dist/OmniCode-0.8.0-x64.dmg` | 147,409,052 bytes | `465dedb0228671243f5123d561e7f1e58ba727f0c812e057084ea583cefa2235` |
-| Intel archive | `dist/OmniCode-0.8.0-x64.zip` | 145,451,783 bytes | `505f8fea614a24449320ed5ed348370fcd3b80b905496acecaa73a42750e0fd0` |
-| Apple Silicon installer | `dist/OmniCode-0.8.0-arm64.dmg` | 143,735,581 bytes | `109c1902c158d7a1bdb90d69f82e4023f5edb95a260d9ee223c7805af63668cb` |
-| Apple Silicon archive | `dist/OmniCode-0.8.0-arm64.zip` | 141,735,330 bytes | `4705e2e89d1da3bfb3a64bfd6c557c1f56f9acd5b858c823001f29bdf00f0705` |
+| Intel installer | `dist/OmniCode-0.9.0-x64.dmg` | 147,430,062 bytes | `6f8197f45c1947a75f6a6b8e7ba3b1036017c17d4e35cd0f1fb3d1c6aafcbf33` |
+| Intel archive | `dist/OmniCode-0.9.0-x64.zip` | 145,470,705 bytes | `815fb480b73b8ce93b9b7ae97d1e7778f166a32a3dd9946df66ed649cebe286c` |
+| Apple Silicon installer | `dist/OmniCode-0.9.0-arm64.dmg` | 143,755,104 bytes | `217195f2f30ac8360c37dfc93df23ae35ee488cc89f73065a0c5dea408b7c7d4` |
+| Apple Silicon archive | `dist/OmniCode-0.9.0-arm64.zip` | 141,754,291 bytes | `14a64f4a612e4f9910b17af1f66371ae40f243342e77832cb516ea48f8a6f86f` |
 
-Checksums are recorded in `dist/OmniCode-0.8.0-SHA256SUMS.txt`,
-`dist/SHA256SUMS-0.8.0.txt`, and the cumulative `dist/SHA256SUMS.txt`.
+Checksums are recorded in `dist/OmniCode-0.9.0-SHA256SUMS.txt` and revalidated
+against all four artifacts after both architecture builds completed.
 
 ## Remaining Problems
 
@@ -153,7 +155,7 @@ Checksums are recorded in `dist/OmniCode-0.8.0-SHA256SUMS.txt`,
 
 ## Conclusion
 
-OmniCode 0.8.0 is a verified **unsigned internal Intel release candidate** with
+OmniCode 0.9.0 is a verified **unsigned internal Intel release candidate** with
 a structurally verified Apple Silicon counterpart. It is not ready to be
 labeled a signed/notarized public macOS release until the remaining Apple,
 matching-hardware, permission, and external-service gates above are completed.

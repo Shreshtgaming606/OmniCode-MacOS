@@ -35,6 +35,9 @@ typed preload boundary; the React renderer has no direct Node.js access.
   adapters. Cloud credentials are encrypted by macOS Keychain-backed storage.
 - Local model catalog, download progress/cancel, delete, load/unload, defaults,
   and hardware-aware recommendations.
+- Private local AI usage/cost history with provider-native token metadata,
+  real Code/Work/Omni breakdowns, versioned price estimates, budgets, retention,
+  CSV/JSON export, and confirmed deletion. Prompts and secrets are not stored.
 - Workspace indexing, selected context attachments, chat, inline editing,
   Agent Mode, permission tiers, and reversible file/hunk diff review.
 - Six-step first-launch setup for theme, tools, runtimes, local AI, cloud AI,
@@ -144,10 +147,10 @@ npm run dist:arm64
 Artifacts are written to `dist/` with names such as:
 
 ```text
-OmniCode-0.1.1-x64.dmg
-OmniCode-0.1.1-x64.zip
-OmniCode-0.1.1-arm64.dmg
-OmniCode-0.1.1-arm64.zip
+OmniCode-0.9.0-x64.dmg
+OmniCode-0.9.0-x64.zip
+OmniCode-0.9.0-arm64.dmg
+OmniCode-0.9.0-arm64.zip
 ```
 
 `node-pty` contains native code, so each artifact must contain the matching CPU
