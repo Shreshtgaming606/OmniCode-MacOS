@@ -39,7 +39,7 @@ Older version-1 Omni settings documents migrate missing `setupCompleted` and
 The renderer does not receive media devices or Node access. Microphone capture
 is owned by the fixed-protocol Swift helper through the main process. Only
 bounded text events cross IPC; raw audio is not persisted. If the required
-on-device Speech asset or permission is unavailable, setup gives a real status
+on-device Speech asset, input device, or permission is unavailable, setup gives a real status
 and full Omni remains usable through an explicitly enabled typed fallback. The
 global overlay remains voice-only.
 
@@ -47,7 +47,8 @@ global overlay remains voice-only.
 
 Settings → Omni provides General, Voice, Activation, AI, Execution, Approvals,
 Input, Permissions, Privacy, and Activity sections. It supports real voice
-testing, permission refresh, provider/model selection, the `Show text input`
+testing, Auto versus Press Enter completion, system-default microphone details,
+on-device Available/Active state, permission refresh, provider/model selection, the `Show text input`
 toggle, and setup rerun. All writes use `omni:settings:update`; the renderer does
 not write preferences directly.
 

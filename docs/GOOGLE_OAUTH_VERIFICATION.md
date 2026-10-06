@@ -1,14 +1,14 @@
 # Google OAuth verification configuration
 
-Last reviewed: September 23, 2026
+Last reviewed: October 6, 2026
 
 Use these public values in Google Auth Platform:
 
 - Application name: `OmniCode`
-- Application home page: `https://omnicode.steampirate.life/`
-- Privacy policy: `https://omnicode.steampirate.life/privacy/`
-- Terms of service: `https://omnicode.steampirate.life/terms/`
-- Authorized domain: `steampirate.life`
+- Application home page: `https://omnicode.omnicoretech.org/`
+- Privacy policy: `https://omnicode.omnicoretech.org/privacy/`
+- Terms of service: `https://omnicode.omnicoretech.org/terms/`
+- Authorized domain to confirm in Google Auth Platform: `omnicoretech.org`
 - User support email: `omnicoretech606@gmail.com`
 - Developer contact email: `omnicoretech606@gmail.com`
 
@@ -39,13 +39,13 @@ Before recording or submitting the review:
 
 This must be completed manually:
 
-1. Verify `steampirate.life` in Google Search Console, preferably using the DNS
+1. Verify `omnicoretech.org` in Google Search Console, preferably using the DNS
    domain-property flow.
 2. Ensure the Google account completing OAuth verification is appropriately
    associated with both the Search Console property and the Google Cloud
    project.
 3. Keep the DNS ownership-verification record active after verification.
-4. Add `steampirate.life` under the OAuth authorized domains.
+4. Add `omnicoretech.org` under the OAuth authorized domains.
 
 Do not remove or replace DNS records automatically as part of an application
 release.

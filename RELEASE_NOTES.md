@@ -1,3 +1,11 @@
+# OmniCode release notes
+
+The current prerelease is [Beta v1 0.1.0](RELEASE_NOTES_BETA_V1_0.1.0.md).
+The version reset from 0.9.0 to 0.1.0 is intentional beta numbering, not a
+rollback of the application features.
+
+---
+
 # OmniCode 0.8.0 macOS internal release
 
 Build date: 2026-09-23

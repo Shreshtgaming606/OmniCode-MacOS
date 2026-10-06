@@ -375,7 +375,22 @@ export class CodeAgentManager {
           },
           maxSteps: 20, maxToolCalls: 40,
           beforeAction: () => this.waitIfPaused(taskId, active),
-          takeIntervention: () => this.takeIntervention(taskId)
+          takeIntervention: () => this.takeIntervention(taskId),
+          onToolActivity: (activity) => {
+            if (activity.toolId !== 'provider.request' && activity.toolId !== 'response.prepare') return
+            const status = activity.status === 'succeeded' ? 'succeeded'
+              : activity.status === 'failed' ? 'failed'
+                : activity.status === 'cancelled' ? 'cancelled'
+                  : activity.status === 'awaiting-confirmation' ? 'waiting'
+                    : 'running'
+            void this.putEvent(active.senderId, taskId, {
+              id: activity.id,
+              timestamp: activity.createdAt,
+              ...(activity.completedAt ? { completedAt: activity.completedAt } : {}),
+              kind: 'task', status, title: activity.name, summary: activity.summary ?? activity.name,
+              toolId: activity.toolId, category: 'read', risk: 'low', approvalMode: request.approvalMode
+            }).catch(() => undefined)
+          }
         }
       )
       const completed = await this.options.activity.update(taskId, {

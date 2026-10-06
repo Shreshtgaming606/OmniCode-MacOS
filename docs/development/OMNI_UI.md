@@ -24,9 +24,12 @@ regions:
 4. The right Activity timeline renders the newest bounded, redacted task events
    and concise safe summaries.
 
-The bottom voice dock starts/stops real push-to-talk sessions. The captured
-transcript is sent as a task only after the user stops the dashboard session.
-Setup microphone tests never create a task.
+The bottom voice dock starts real push-to-talk sessions. In Auto mode the native
+endpoint detector submits after sustained silence; in Press Enter mode it waits
+through pauses until Enter. Enter overrides Auto and Escape cancels. Live
+partials replace the prior text, and only one finalized non-empty transcript is
+sent through the existing Omni task path. Setup microphone tests never create a
+task.
 
 ## Deliberately secondary UI
 

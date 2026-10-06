@@ -32,7 +32,11 @@ describe('Omni settings defaults and validation', () => {
       launchHelperAtLogin: false,
       menuBarItem: false,
       activation: { shortcut: 'CommandOrControl+Shift+Space', voiceActivation: 'shortcut-only' },
-      voice: { voiceId: '', speakingRate: 1, spokenResponses: true },
+      voice: {
+        voiceId: '', speakingRate: 1, spokenResponses: true, finishSpeaking: 'auto', endOfSpeechDelayMs: 1_600,
+        outputProvider: 'system', elevenlabsVoiceId: '', elevenlabsModelId: '',
+        elevenlabsSettings: { stability: 0.5, similarityBoost: 0.75, style: 0, speed: 1 }, fallbackToSystem: true
+      },
       model: { provider: 'ollama', modelId: '' },
       executionMode: 'invisible',
       approvalMode: 'ask',
@@ -54,7 +58,10 @@ describe('Omni settings defaults and validation', () => {
       ...createDefaultOmniSettings(),
       enabled: true,
       activation: { shortcut: 'Command+Shift+Space', voiceActivation: 'wake-word-and-shortcut' },
-      voice: { voiceId: 'com.apple.voice.compact.en-US.Samantha', speakingRate: 1.25, spokenResponses: false },
+      voice: {
+        voiceId: 'com.apple.voice.compact.en-US.Samantha', speakingRate: 1.25, spokenResponses: false,
+        finishSpeaking: 'enter', endOfSpeechDelayMs: 2_000
+      },
       model: { provider: 'google', modelId: 'gemini-test' },
       executionMode: 'cursor',
       approvalMode: 'auto',
@@ -81,6 +88,8 @@ describe('Omni settings defaults and validation', () => {
     ['unknown voice activation', { activation: { voiceActivation: 'always-listening' } }],
     ['unsafe speaking rate', { voice: { speakingRate: 2.01 } }],
     ['non-finite speaking rate', { voice: { speakingRate: Number.NaN } }],
+    ['unknown finish-speaking mode', { voice: { finishSpeaking: 'pause' } }],
+    ['unsafe end-of-speech delay', { voice: { endOfSpeechDelayMs: 300 } }],
     ['unknown provider', { model: { provider: 'other' } }],
     ['oversized model ID', { model: { modelId: 'm'.repeat(OMNI_LIMITS.modelCharacters + 1) } }],
     ['unknown execution mode', { executionMode: 'hidden' }],
@@ -112,7 +121,7 @@ describe('OmniSettingsManager persistence', () => {
       value.update({ setupCompleted: true, showTextInput: true }),
       value.update({ launchHelperAtLogin: true, menuBarItem: true }),
       value.update({ activation: { shortcut: 'CommandOrControl+Option+Space' } }),
-      value.update({ voice: { voiceId: 'voice.test', speakingRate: 1.5 } }),
+      value.update({ voice: { voiceId: 'voice.test', speakingRate: 1.5, finishSpeaking: 'enter', endOfSpeechDelayMs: 2_000 } }),
       value.update({ model: { provider: 'anthropic', modelId: 'claude-test' } }),
       value.update({ executionMode: 'cursor', approvalMode: 'auto' }),
       value.update({ privacy: { activityRetentionDays: 14 } })
@@ -125,7 +134,7 @@ describe('OmniSettingsManager persistence', () => {
       launchHelperAtLogin: true,
       menuBarItem: true,
       activation: { shortcut: 'CommandOrControl+Option+Space' },
-      voice: { voiceId: 'voice.test', speakingRate: 1.5 },
+      voice: { voiceId: 'voice.test', speakingRate: 1.5, finishSpeaking: 'enter', endOfSpeechDelayMs: 2_000 },
       model: { provider: 'anthropic', modelId: 'claude-test' },
       executionMode: 'cursor',
       approvalMode: 'auto',
@@ -141,8 +150,12 @@ describe('OmniSettingsManager persistence', () => {
     const legacy = { ...current } as Partial<OmniSettings>
     delete legacy.setupCompleted
     delete legacy.showTextInput
+    legacy.voice = { voiceId: '', speakingRate: 1, spokenResponses: true } as OmniSettings['voice']
 
-    expect(validateOmniSettings(legacy)).toMatchObject({ setupCompleted: false, showTextInput: false })
+    expect(validateOmniSettings(legacy)).toMatchObject({
+      setupCompleted: false, showTextInput: false,
+      voice: { finishSpeaking: 'auto', endOfSpeechDelayMs: 1_600, outputProvider: 'system', fallbackToSystem: true }
+    })
   })
 
   it('does not persist invalid updates and keeps the operation queue usable after a rejection', async () => {

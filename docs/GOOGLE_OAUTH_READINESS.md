@@ -1,6 +1,6 @@
 # Google OAuth readiness checklist
 
-Status reviewed: September 23, 2026
+Status reviewed: October 6, 2026
 
 - [x] Homepage accurately describes OmniCode
 - [x] Privacy Policy finalized against the audited implementation
@@ -20,7 +20,7 @@ Status reviewed: September 23, 2026
 - [x] Google disconnect behavior covered by automated tests
 - [x] macOS Keychain implementation and tests verified
 - [x] In-app Privacy, Terms, and About links present
-- [ ] `steampirate.life` verified in Google Search Console
+- [ ] `omnicoretech.org` verified in Google Search Console
 - [ ] OAuth branding URLs and authorized domain confirmed in the production Google Cloud project
 - [x] Verification demo script ready
 - [ ] Live connect, Gmail, Drive, disconnect, and revocation flow completed with the production OAuth client and safe test account
@@ -28,7 +28,7 @@ Status reviewed: September 23, 2026
 - [ ] Google determination and, if required, completion of a restricted-scope security assessment
 - [ ] All five public URLs confirmed reachable without authentication from outside the hosting network
 - [ ] Public-domain phishing/reputation interception resolved
-- [x] Current Public Beta v1 0.9.0 download status accurately disclosed as unsigned and not notarized
+- [x] Current Beta v1 0.1.0 download status accurately disclosed as ad-hoc signed and not notarized
 - [ ] Full public production release signed and notarized
 - [ ] No unresolved Google verification blockers
 
@@ -38,7 +38,8 @@ Status reviewed: September 23, 2026
 
 The application and legal text are substantially aligned, but submission must
 wait for the unchecked external and release items. In particular, the public
-domain was intercepted by an AT&T Smart Home Manager phishing block from the
-audit network and HTTPS could not be validated there. Search Console ownership,
-production OAuth branding/client configuration, a live safe-account test, and
-Google's restricted-scope assessment decision also require manual completion.
+domain was changed from `omnicode.steampirate.life` to the currently reachable
+`omnicode.omnicoretech.org`; independent external-network validation is still
+pending. Search Console ownership, production OAuth branding/client
+configuration, a live safe-account test, and Google's restricted-scope
+assessment decision also require manual completion.

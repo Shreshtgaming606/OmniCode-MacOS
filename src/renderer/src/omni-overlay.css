@@ -108,18 +108,29 @@ button { font: inherit; color: inherit; }
 
 .omni-phase-label { display: flex; align-items: center; gap: 6px; font-size: 14px; line-height: 20px; }
 .omni-phase-label svg { width: 16px; color: #5de7b0; }
-.omni-voice-center p {
+.omni-transcript {
   width: 100%;
+  max-height: 50px;
   margin: 6px 0 0;
+  padding: 0 2px;
   color: rgba(220, 232, 252, .78);
   font-size: 12px;
   line-height: 1.35;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  overflow: hidden auto;
+  scrollbar-width: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  mask-image: linear-gradient(to bottom, transparent 0, #000 13px, #000 100%);
+  transition: color 160ms ease;
 }
-.omni-voice-center p.error { color: #ffb6c4; }
+.omni-transcript::-webkit-scrollbar { display: none; }
+.omni-transcript.error { color: #ffb6c4; }
+.omni-finish-hint {
+  margin-top: 5px;
+  color: rgba(170, 200, 238, .56);
+  font-size: 9px;
+  letter-spacing: .02em;
+}
 
 .omni-voice-actions {
   position: relative;

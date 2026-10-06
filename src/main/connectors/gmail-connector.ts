@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto'
+import { domainToASCII } from 'node:url'
 
 import type { JsonValue } from '../../shared/tool-contracts'
 import { GoogleOAuthManager, GOOGLE_GMAIL_SCOPES } from '../services/google-oauth-manager'
+import { redactDiagnosticMessage } from '../services/diagnostic-logger'
 import { ToolRegistry } from '../services/tool-registry'
 import { WorkTransferStore, type SaveWorkTransfer } from '../services/work-transfer-store'
 import type { ConnectorAdapter } from '../services/connector-manager'
@@ -12,6 +14,23 @@ const MAX_THREAD_MESSAGES = 20
 const MAX_ATTACHMENT_TEXT_BYTES = 128 * 1024
 const MAX_EMAIL_ATTACHMENT_BYTES = 18 * 1024 * 1024
 const MESSAGE_ID_PATTERN = /^[A-Za-z0-9_-]{1,256}$/u
+const RESERVED_RECIPIENT_DOMAINS = new Set(['example.com', 'example.net', 'example.org', 'localhost'])
+const SELF_RECIPIENT_ALIASES = new Set([
+  'self',
+  'me',
+  'myself',
+  'my email',
+  'my email address',
+  'my gmail',
+  'my gmail account',
+  'my connected gmail account',
+  'email me',
+  'send this to me',
+  'send this to myself',
+  'send this to my email',
+  'send this to my gmail',
+  'send this to myself at my connected gmail account'
+])
 const SAFE_TEXT_ATTACHMENT_TYPES = new Set([
   'application/json',
   'application/ld+json',
@@ -39,6 +58,23 @@ interface GmailMessageResource {
   internalDate?: unknown
   payload?: unknown
 }
+
+export interface GmailApiDiagnostic {
+  operation: string
+  endpoint: string
+  httpStatus: number
+  googleReason: string
+  googleMessage: string
+  requestMetadata?: {
+    recipientCount: number
+    hasSubject: boolean
+    bodyLength: number
+    hasAttachment: boolean
+    mode: 'draft' | 'message' | 'reply'
+  }
+}
+
+type GmailDiagnosticReporter = (diagnostic: GmailApiDiagnostic) => void | Promise<void>
 
 function requireId(value: unknown, label: string): string {
   if (typeof value !== 'string' || !MESSAGE_ID_PATTERN.test(value)) throw new Error(`${label} is invalid.`)
@@ -164,6 +200,8 @@ function normalizeMessage(value: unknown, bodyLimit = MAX_BODY_BYTES): Record<st
     threadId: requireId(message.threadId, 'Gmail thread ID'),
     from: cleanText(headers.from, 1_000),
     to: cleanText(headers.to, 1_000),
+    cc: cleanText(headers.cc, 1_000),
+    bcc: cleanText(headers.bcc, 1_000),
     subject: cleanText(headers.subject, 998),
     date: cleanText(headers.date, 200),
     messageId: cleanText(headers['message-id'], 998),
@@ -182,9 +220,79 @@ function cleanHeader(value: unknown, label: string, maximum: number): string {
   return normalized
 }
 
-function recipients(value: unknown): string[] {
-  if (!Array.isArray(value) || !value.length || value.length > 50) throw new Error('At least one recipient is required.')
-  return value.map((entry) => cleanHeader(entry, 'Recipient', 320))
+function isSelfRecipient(value: string): boolean {
+  return SELF_RECIPIENT_ALIASES.has(value.toLowerCase().replace(/[.!?]+$/gu, '').replace(/\s+/gu, ' ').trim())
+}
+
+function mailbox(value: unknown, label = 'Recipient'): string {
+  const normalized = cleanHeader(value, label, 320)
+  const displayMatch = normalized.match(/^(.+?)\s*<([^<>]+)>$/u)
+  if ((normalized.includes('<') || normalized.includes('>')) && !displayMatch) throw new Error(`${label} is not a valid email address.`)
+  const displayName = displayMatch?.[1].trim()
+  const address = (displayMatch?.[2] ?? normalized).trim()
+  const at = address.lastIndexOf('@')
+  if (at <= 0 || at === address.length - 1 || address.slice(0, at).includes('@')) throw new Error(`${label} is not a valid email address.`)
+  const local = address.slice(0, at)
+  const domain = domainToASCII(address.slice(at + 1))
+  const quotedLocal = /^"(?:[^"\\\r\n]|\\[\x20-\x7e])+"$/u.test(local)
+  const dotAtom = !local.startsWith('.') && !local.endsWith('.') && !local.includes('..') &&
+    !/[\s()<>,;:\\"\[\]]/u.test(local)
+  if ((!quotedLocal && !dotAtom) || Buffer.byteLength(local, 'utf8') > 64 || !domain || domain.length > 253) {
+    throw new Error(`${label} is not a valid email address.`)
+  }
+  const labels = domain.split('.')
+  if (labels.some((entry) => !entry || entry.length > 63 || !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/iu.test(entry))) {
+    throw new Error(`${label} is not a valid email address.`)
+  }
+  const normalizedDomain = domain.toLowerCase()
+  if (
+    RESERVED_RECIPIENT_DOMAINS.has(normalizedDomain) ||
+    [...RESERVED_RECIPIENT_DOMAINS].some((reserved) => normalizedDomain.endsWith(`.${reserved}`)) ||
+    /\.(?:example|invalid|test)$/u.test(normalizedDomain)
+  ) {
+    throw new Error(`${label} uses a reserved placeholder domain. Use "self" for the connected Gmail account or provide a real recipient address.`)
+  }
+  const normalizedAddress = `${local}@${normalizedDomain}`
+  if (!displayName) return normalizedAddress
+  if (!displayName || /[<>]/u.test(displayName) || (/[,;]/u.test(displayName) && !/^"(?:[^"\\\r\n]|\\[\x20-\x7e])+"$/u.test(displayName))) {
+    throw new Error(`${label} display name is invalid.`)
+  }
+  return `${displayName} <${normalizedAddress}>`
+}
+
+function recipients(value: unknown, profileEmail: string, required: boolean, label: string): string[] {
+  if (!Array.isArray(value) || value.length > 50 || (required && !value.length)) throw new Error(required ? 'At least one recipient is required.' : `${label} recipients are invalid.`)
+  return [...new Set(value.map((entry) => {
+    const header = cleanHeader(entry, label, 320)
+    return isSelfRecipient(header) ? profileEmail : mailbox(header, label)
+  }))]
+}
+
+function preflightRecipients(input: Record<string, JsonValue>): void {
+  for (const [value, required, label] of [
+    [input.to, true, 'Recipient'],
+    [input.cc, false, 'Cc recipient'],
+    [input.bcc, false, 'Bcc recipient']
+  ] as const) {
+    if (value === undefined && !required) continue
+    if (!Array.isArray(value) || value.length > 50 || (required && !value.length)) {
+      throw new Error(required ? 'At least one recipient is required.' : `${label} recipients are invalid.`)
+    }
+    for (const entry of value) {
+      const header = cleanHeader(entry, label, 320)
+      if (!isSelfRecipient(header)) mailbox(header, label)
+    }
+  }
+}
+
+function preflightMessage(input: Record<string, JsonValue>): void {
+  preflightRecipients(input)
+  cleanHeader(input.subject, 'Subject', 998)
+  const body = typeof input.body === 'string' ? input.body : ''
+  if (!body.trim() || Buffer.byteLength(body, 'utf8') > MAX_BODY_BYTES || body.includes('\0')) {
+    throw new Error('Email body is empty or too large.')
+  }
+  transferIds(input.transferIds)
 }
 
 function transferIds(value: unknown): string[] {
@@ -203,15 +311,36 @@ function wrappedBase64(data: Buffer): string {
   return data.toString('base64').match(/.{1,76}/gu)?.join('\r\n') ?? ''
 }
 
+function encodedSubject(value: string): string {
+  if (/^[\x20-\x7e]+$/u.test(value)) return value
+  const chunks: string[] = []
+  let current = ''
+  for (const character of value) {
+    const candidate = `${current}${character}`
+    if (current && Buffer.byteLength(candidate, 'utf8') > 45) {
+      chunks.push(current)
+      current = character
+    } else current = candidate
+  }
+  if (current) chunks.push(current)
+  return chunks.map((chunk) => `=?UTF-8?B?${Buffer.from(chunk, 'utf8').toString('base64')}?=`).join('\r\n ')
+}
+
+function crlfBody(value: string): string {
+  return value.replace(/\r\n|\r|\n/gu, '\n').replace(/\n/gu, '\r\n')
+}
+
 async function mimeMessage(
   input: Record<string, JsonValue>,
+  profileEmail: string,
   reply = false,
   transfers?: WorkTransferStore
 ): Promise<string> {
-  const to = recipients(input.to)
-  const cc = input.cc === undefined ? [] : recipients(input.cc)
+  const to = recipients(input.to, profileEmail, true, 'Recipient')
+  const cc = input.cc === undefined ? [] : recipients(input.cc, profileEmail, false, 'Cc recipient')
+  const bcc = input.bcc === undefined ? [] : recipients(input.bcc, profileEmail, false, 'Bcc recipient')
   const subject = cleanHeader(input.subject, 'Subject', 998)
-  const body = typeof input.body === 'string' ? input.body : ''
+  const body = crlfBody(typeof input.body === 'string' ? input.body : '')
   if (!body.trim() || Buffer.byteLength(body, 'utf8') > 128 * 1024 || body.includes('\0')) throw new Error('Email body is empty or too large.')
   const ids = transferIds(input.transferIds)
   if (ids.length && !transfers) throw new Error('Connected-app attachment transfers are unavailable.')
@@ -220,9 +349,11 @@ async function mimeMessage(
     throw new Error('Email attachments exceed OmniCode\'s safe 18 MB combined limit.')
   }
   const envelope = [
+    `From: ${profileEmail}`,
     `To: ${to.join(', ')}`,
     ...(cc.length ? [`Cc: ${cc.join(', ')}`] : []),
-    `Subject: ${subject}`
+    ...(bcc.length ? [`Bcc: ${bcc.join(', ')}`] : []),
+    `Subject: ${encodedSubject(subject)}`
   ]
   if (reply) {
     const inReplyTo = cleanHeader(input.inReplyTo, 'Reply message ID', 998)
@@ -258,7 +389,7 @@ async function mimeMessage(
   return Buffer.from(envelope.join('\r\n'), 'utf8').toString('base64url')
 }
 
-function gmailError(status: number): Error {
+function gmailUserError(status: number): Error {
   if (status === 401) return new Error('Gmail authorization expired. Reconnect the Google account.')
   if (status === 403) return new Error('Gmail denied the operation or the required permission is missing.')
   if (status === 404) return new Error('The requested Gmail item was not found.')
@@ -266,7 +397,56 @@ function gmailError(status: number): Error {
   return new Error(status >= 500 ? 'Gmail is temporarily unavailable.' : `Gmail request failed (HTTP ${status}).`)
 }
 
+function googleErrorDetails(value: unknown): { reason: string; message: string } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { reason: '', message: '' }
+  const outer = value as { error?: unknown }
+  if (!outer.error || typeof outer.error !== 'object' || Array.isArray(outer.error)) return { reason: '', message: '' }
+  const error = outer.error as { message?: unknown; errors?: unknown; details?: unknown }
+  const message = error.message === undefined ? '' : redactDiagnosticMessage(cleanText(error.message, 1_000))
+  const legacyReason = Array.isArray(error.errors)
+    ? error.errors.flatMap((entry) => entry && typeof entry === 'object' && !Array.isArray(entry)
+      ? cleanText((entry as { reason?: unknown }).reason, 200) || []
+      : [])[0]
+    : undefined
+  const detailReason = Array.isArray(error.details)
+    ? error.details.flatMap((entry) => entry && typeof entry === 'object' && !Array.isArray(entry)
+      ? cleanText((entry as { reason?: unknown }).reason, 200) || []
+      : [])[0]
+    : undefined
+  const reason = legacyReason ?? detailReason
+  return { reason: reason ? redactDiagnosticMessage(reason) : '', message }
+}
+
+async function gmailFailure(
+  response: Response,
+  operation: string,
+  endpoint: string,
+  requestMetadata?: GmailApiDiagnostic['requestMetadata']
+): Promise<{ error: Error; diagnostic: GmailApiDiagnostic }> {
+  let value: unknown
+  try {
+    const text = (await response.text()).slice(0, 64 * 1024)
+    value = text ? JSON.parse(text) : undefined
+  } catch {
+    value = undefined
+  }
+  const details = googleErrorDetails(value)
+  return {
+    error: gmailUserError(response.status),
+    diagnostic: {
+      operation,
+      endpoint,
+      httpStatus: response.status,
+      googleReason: details.reason,
+      googleMessage: details.message,
+      ...(requestMetadata ? { requestMetadata } : {})
+    }
+  }
+}
+
 export class GmailConnector implements ConnectorAdapter {
+  #profileCache?: { email: string; expiresAt: number }
+
   readonly descriptor = {
     id: 'gmail',
     name: 'Gmail',
@@ -280,17 +460,35 @@ export class GmailConnector implements ConnectorAdapter {
     private readonly oauth: GoogleOAuthManager,
     private readonly fetchApi: typeof fetch = fetch,
     private readonly transfers?: WorkTransferStore,
-    private readonly saveTransfer?: SaveWorkTransfer
+    private readonly saveTransfer?: SaveWorkTransfer,
+    private readonly reportDiagnostic?: GmailDiagnosticReporter
   ) {}
 
-  async connect(): Promise<void> { await this.oauth.connect('gmail') }
+  async connect(): Promise<void> {
+    this.#profileCache = undefined
+    await this.oauth.connect('gmail')
+  }
 
   async verify() {
     const status = await this.oauth.verify('gmail')
     return { connectorId: this.descriptor.id, state: status.state, message: status.message, checkedAt: status.checkedAt, grantedScopes: status.grantedScopes }
   }
 
-  async disconnect(): Promise<void> { await this.oauth.disconnect() }
+  async disconnect(): Promise<void> {
+    this.#profileCache = undefined
+    await this.oauth.disconnect()
+  }
+
+  async resolveMessageForApproval(input: Record<string, JsonValue>, signal?: AbortSignal): Promise<Record<string, JsonValue>> {
+    preflightMessage(input)
+    const profileEmail = await this.#profileEmail(signal)
+    return {
+      ...input,
+      to: recipients(input.to, profileEmail, true, 'Recipient'),
+      cc: input.cc === undefined ? [] : recipients(input.cc, profileEmail, false, 'Cc recipient'),
+      bcc: input.bcc === undefined ? [] : recipients(input.bcc, profileEmail, false, 'Bcc recipient')
+    }
+  }
 
   async search(query: string, maximum: number, signal?: AbortSignal): Promise<Record<string, JsonValue>> {
     const params = new URLSearchParams({ q: query, maxResults: String(maximum) })
@@ -406,17 +604,21 @@ export class GmailConnector implements ConnectorAdapter {
   }
 
   async createDraft(input: Record<string, JsonValue>, signal?: AbortSignal): Promise<JsonValue> {
-    const value = await this.#json(`${GMAIL_API}/drafts`, { method: 'POST', body: JSON.stringify({ message: { raw: await mimeMessage(input, false, this.transfers) } }) }, signal) as { id?: unknown; message?: { id?: unknown; threadId?: unknown } }
+    preflightMessage(input)
+    const profileEmail = await this.#profileEmail(signal)
+    const value = await this.#json(`${GMAIL_API}/drafts`, { method: 'POST', body: JSON.stringify({ message: { raw: await mimeMessage(input, profileEmail, false, this.transfers) } }) }, signal, 'gmail.draft', this.#messageMetadata(input, 'draft')) as { id?: unknown; message?: { id?: unknown; threadId?: unknown } }
     await this.#removeConsumedTransfers(input)
     return { id: requireId(value.id, 'Gmail draft ID'), messageId: requireId(value.message?.id, 'Gmail message ID'), threadId: requireId(value.message?.threadId, 'Gmail thread ID') }
   }
 
   async send(input: Record<string, JsonValue>, reply = false, signal?: AbortSignal): Promise<JsonValue> {
     const threadId = reply ? requireId(input.threadId, 'Gmail thread ID') : undefined
+    preflightMessage(input)
+    const profileEmail = await this.#profileEmail(signal)
     const value = await this.#json(`${GMAIL_API}/messages/send`, {
       method: 'POST',
-      body: JSON.stringify({ raw: await mimeMessage(input, reply, this.transfers), ...(threadId ? { threadId } : {}) })
-    }, signal) as { id?: unknown; threadId?: unknown; labelIds?: unknown }
+      body: JSON.stringify({ raw: await mimeMessage(input, profileEmail, reply, this.transfers), ...(threadId ? { threadId } : {}) })
+    }, signal, reply ? 'gmail.reply' : 'gmail.send', this.#messageMetadata(input, reply ? 'reply' : 'message')) as { id?: unknown; threadId?: unknown; labelIds?: unknown }
     await this.#removeConsumedTransfers(input)
     return {
       id: requireId(value.id, 'Gmail message ID'),
@@ -425,9 +627,56 @@ export class GmailConnector implements ConnectorAdapter {
     }
   }
 
+  async sendDraft(draftId: string, signal?: AbortSignal): Promise<JsonValue> {
+    const value = await this.#json(`${GMAIL_API}/drafts/send`, {
+      method: 'POST', body: JSON.stringify({ id: requireId(draftId, 'Gmail draft ID') })
+    }, signal, 'gmail.send-draft') as { id?: unknown; threadId?: unknown; labelIds?: unknown }
+    return {
+      id: requireId(value.id, 'Gmail message ID'),
+      threadId: requireId(value.threadId, 'Gmail thread ID'),
+      labels: Array.isArray(value.labelIds) ? value.labelIds.filter((label): label is string => typeof label === 'string').slice(0, 100) : []
+    }
+  }
+
+  async resolveDraftForApproval(draftId: string, signal?: AbortSignal): Promise<Record<string, JsonValue>> {
+    const checkedDraftId = requireId(draftId, 'Gmail draft ID')
+    const value = await this.#json(
+      `${GMAIL_API}/drafts/${encodeURIComponent(checkedDraftId)}?format=full`,
+      {}, signal, 'gmail.read-draft'
+    ) as { id?: unknown; message?: unknown }
+    if (requireId(value.id, 'Gmail draft ID') !== checkedDraftId) throw new Error('Gmail returned the wrong draft for approval.')
+    const message = normalizeMessage(value.message)
+    return {
+      draftId: checkedDraftId,
+      to: message.to,
+      cc: message.cc,
+      bcc: message.bcc,
+      subject: message.subject,
+      body: message.body
+    }
+  }
+
   async #removeConsumedTransfers(input: Record<string, JsonValue>): Promise<void> {
     if (!this.transfers) return
     await Promise.allSettled(transferIds(input.transferIds).map((id) => this.transfers!.remove(id)))
+  }
+
+  #messageMetadata(input: Record<string, JsonValue>, mode: 'draft' | 'message' | 'reply'): GmailApiDiagnostic['requestMetadata'] {
+    return {
+      recipientCount: [input.to, input.cc, input.bcc].reduce<number>((total, value) => total + (Array.isArray(value) ? value.length : 0), 0),
+      hasSubject: typeof input.subject === 'string' && input.subject.trim().length > 0,
+      bodyLength: typeof input.body === 'string' ? input.body.length : 0,
+      hasAttachment: Array.isArray(input.transferIds) && input.transferIds.length > 0,
+      mode
+    }
+  }
+
+  async #profileEmail(signal?: AbortSignal): Promise<string> {
+    if (this.#profileCache && this.#profileCache.expiresAt > Date.now()) return this.#profileCache.email
+    const value = await this.#json(`${GMAIL_API}/profile`, {}, signal, 'gmail.profile') as { emailAddress?: unknown }
+    const email = mailbox(value.emailAddress, 'Authenticated Gmail address')
+    this.#profileCache = { email, expiresAt: Date.now() + 5 * 60_000 }
+    return email
   }
 
   async modify(id: string, addLabelIds: string[], removeLabelIds: string[], signal?: AbortSignal): Promise<JsonValue> {
@@ -476,18 +725,23 @@ export class GmailConnector implements ConnectorAdapter {
       inputSchema: { type: 'object', properties: {}, additionalProperties: false }
     }, async (_input, context) => this.labels(context.signal))
     const mailFields = {
-      to: { type: 'array' as const, items: { type: 'string' as const, minLength: 1, maxLength: 320 }, minItems: 1, maxItems: 50 },
+      to: { type: 'array' as const, description: 'Recipients. Use "self" for the connected Gmail account; otherwise use valid email addresses.', items: { type: 'string' as const, minLength: 1, maxLength: 320 }, minItems: 1, maxItems: 50 },
       cc: { type: 'array' as const, items: { type: 'string' as const, minLength: 1, maxLength: 320 }, maxItems: 50 },
+      bcc: { type: 'array' as const, items: { type: 'string' as const, minLength: 1, maxLength: 320 }, maxItems: 50 },
       subject: { type: 'string' as const, minLength: 1, maxLength: 998 },
       body: { type: 'string' as const, minLength: 1, maxLength: 131_072 },
       transferIds: { type: 'array' as const, items: { type: 'string' as const, minLength: 36, maxLength: 36 }, maxItems: 10 }
     }
     registry.register({
-      ...base, ...routineWrite, id: 'gmail.draft', name: 'Create Gmail draft', description: 'Create a Gmail draft without sending it.', action: 'write', confirmation: 'policy',
+      ...base, ...routineWrite, id: 'gmail.draft', name: 'Create Gmail draft', description: 'Create and save an unsent Gmail draft. Use this only when the requested final state is an unsent draft. If the user asks to draft or compose and then send, use Send Gmail message instead. When the user means their connected account, use "self" in to; never invent a placeholder address.', action: 'write', confirmation: 'policy',
       inputSchema: { type: 'object', properties: mailFields, required: ['to', 'subject', 'body'], additionalProperties: false }
     }, async (input, context) => this.createDraft(input, context.signal))
     registry.register({
-      ...base, ...communication, id: 'gmail.send', name: 'Send Gmail message', description: 'Send an email using the exact validated recipients, subject, and body.', action: 'sensitive', confirmation: 'policy',
+      ...base, ...communication, id: 'gmail.send-draft', name: 'Send existing Gmail draft', description: 'Send an existing Gmail draft created earlier in this task. Use the exact draftId returned by Create Gmail draft. This requires a separate send approval.', action: 'sensitive', confirmation: 'policy',
+      inputSchema: { type: 'object', properties: { draftId: { type: 'string', minLength: 1, maxLength: 256 } }, required: ['draftId'], additionalProperties: false }
+    }, async (input, context) => this.sendDraft(String(input.draftId), context.signal))
+    registry.register({
+      ...base, ...communication, id: 'gmail.send', name: 'Send Gmail message', description: 'Compose and send an email using the exact validated recipients, subject, and body. Use this when the user asks to draft or compose an email and then send it; do not create a separate unsent draft first. When the user means their connected account, use "self" in to; never invent a placeholder address.', action: 'sensitive', confirmation: 'policy',
       inputSchema: { type: 'object', properties: mailFields, required: ['to', 'subject', 'body'], additionalProperties: false }
     }, async (input, context) => this.send(input, false, context.signal))
     registry.register({
@@ -508,7 +762,13 @@ export class GmailConnector implements ConnectorAdapter {
     }, async (input, context) => this.modify(String(input.messageId), input.addLabelIds as string[], input.removeLabelIds as string[], context.signal))
   }
 
-  async #json(url: string, init: RequestInit = {}, signal?: AbortSignal): Promise<unknown> {
+  async #json(
+    url: string,
+    init: RequestInit = {},
+    signal?: AbortSignal,
+    operation = 'gmail.request',
+    requestMetadata?: GmailApiDiagnostic['requestMetadata']
+  ): Promise<unknown> {
     const accessToken = await this.oauth.getAccessToken(GOOGLE_GMAIL_SCOPES)
     let response: Response
     try {
@@ -521,7 +781,12 @@ export class GmailConnector implements ConnectorAdapter {
       if (signal?.aborted || (error instanceof Error && error.name === 'AbortError')) throw error
       throw new Error('Gmail could not be reached. Check the network and try again.')
     }
-    if (!response.ok) throw gmailError(response.status)
+    if (!response.ok) {
+      const endpoint = (() => { try { return new URL(url).pathname } catch { return 'gmail-api' } })()
+      const failure = await gmailFailure(response, operation, endpoint, requestMetadata)
+      await Promise.resolve(this.reportDiagnostic?.(failure.diagnostic)).catch(() => undefined)
+      throw failure.error
+    }
     return response.json()
   }
 }

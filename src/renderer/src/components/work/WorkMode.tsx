@@ -29,6 +29,7 @@ const CLOUD_PROVIDERS = new Set<AIProviderId>(['openai', 'anthropic', 'google'])
 
 export interface WorkModeProps {
   active: boolean
+  targetConversationId?: string
   onOpenSettings(): void
   onError(error: unknown): void
   onRequireAttention?(): void
@@ -187,7 +188,7 @@ function ConnectedAppsDialog({
   </div>
 }
 
-export function WorkMode({ active, onOpenSettings, onError, onRequireAttention, requestText }: WorkModeProps) {
+export function WorkMode({ active, targetConversationId, onOpenSettings, onError, onRequireAttention, requestText }: WorkModeProps) {
   const initialProvider = storedAIProvider(localStorage, 'omnicode.workProvider', 'ollama')
   const [conversations, setConversations] = useState<WorkConversationSummary[]>([])
   const [currentConversation, setCurrentConversation] = useState<WorkConversation | null>(null)
@@ -216,7 +217,7 @@ export function WorkMode({ active, onOpenSettings, onError, onRequireAttention, 
   const mounted = useRef(true)
   const requireAttention = useRef(onRequireAttention)
   const modelRequest = useRef(0)
-  const activeRequest = useRef<{ requestId: string; conversationId: string; messageId: string } | null>(null)
+  const activeRequest = useRef<{ requestId: string; conversationId: string; messageId: string; activities: import('../../../../shared/work-contracts').WorkToolActivity[] } | null>(null)
   const streamedContent = useRef('')
   const cancelRequested = useRef(new Set<string>())
 
@@ -233,14 +234,30 @@ export function WorkMode({ active, onOpenSettings, onError, onRequireAttention, 
 
   useEffect(() => window.omnicode.work.agent.onEvent((event) => {
     const active = activeRequest.current
-    if (!active || event.requestId !== active.requestId || event.type !== 'delta' || !event.delta) return
-    streamedContent.current += event.delta
+    if (!active || event.requestId !== active.requestId) return
+    if (event.type === 'delta') {
+      if (!event.delta) return
+      streamedContent.current += event.delta
+    } else {
+      active.activities = [
+        ...active.activities.filter((activity) => activity.id !== event.activity.id),
+        event.activity
+      ].sort((left, right) => left.createdAt - right.createdAt)
+    }
     setCurrentConversation((conversation) => {
       if (!conversation || conversation.id !== active.conversationId) return conversation
       return {
         ...conversation,
         messages: conversation.messages.map((message) => message.id === active.messageId
-          ? { ...message, content: streamedContent.current, status: 'streaming' }
+          ? event.type === 'delta'
+            ? { ...message, content: streamedContent.current, status: 'streaming' }
+            : {
+                ...message,
+                toolActivities: [
+                  ...(message.toolActivities ?? []).filter((activity) => activity.id !== event.activity.id),
+                  event.activity
+                ].sort((left, right) => left.createdAt - right.createdAt)
+              }
           : message)
       }
     })
@@ -370,6 +387,13 @@ export function WorkMode({ active, onOpenSettings, onError, onRequireAttention, 
     } catch (cause) { onError(cause) }
   }
 
+  useEffect(() => {
+    if (!targetConversationId) return
+    void selectConversation(targetConversationId)
+  // A linked target changes only when the user opens a notification.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetConversationId])
+
   const createConversation = async (): Promise<void> => {
     try {
       const conversation = await window.omnicode.work.conversations.create({
@@ -452,7 +476,7 @@ export function WorkMode({ active, onOpenSettings, onError, onRequireAttention, 
     try {
       requestId = crypto.randomUUID()
       streamedContent.current = ''
-      activeRequest.current = { requestId, conversationId: conversation.id, messageId: pendingAssistantId }
+      activeRequest.current = { requestId, conversationId: conversation.id, messageId: pendingAssistantId, activities: [] }
       const response = await window.omnicode.work.agent.chat(requestId, {
         provider: selectedProvider,
         model: selectedModelId,
@@ -461,20 +485,23 @@ export function WorkMode({ active, onOpenSettings, onError, onRequireAttention, 
       })
       if (response.cancelled) {
         const stoppedContent = streamedContent.current.trim() || 'Generation stopped.'
+        const activities = activeRequest.current?.requestId === requestId ? activeRequest.current.activities : response.toolActivities
         await window.omnicode.work.conversations.updateMessage(conversation.id, pendingAssistantId, {
           content: stoppedContent,
           status: 'cancelled',
-          toolActivities: response.toolActivities
+          toolActivities: activities
         })
         setCurrentConversation(await window.omnicode.work.conversations.get(conversation.id))
         await refreshConversationList('')
         return
       }
       if (!response.content.trim()) throw new Error('The AI provider returned an empty response.')
+      const liveActivities = activeRequest.current?.requestId === requestId ? activeRequest.current.activities : []
+      const activities = [...liveActivities, ...response.toolActivities.filter((activity) => !liveActivities.some((current) => current.id === activity.id))]
       await window.omnicode.work.conversations.updateMessage(conversation.id, pendingAssistantId, {
         content: response.content,
         status: 'complete',
-        toolActivities: response.toolActivities,
+        toolActivities: activities,
         dataSources: response.dataSources ?? []
       })
       setCurrentConversation(await window.omnicode.work.conversations.get(conversation.id))
@@ -482,10 +509,13 @@ export function WorkMode({ active, onOpenSettings, onError, onRequireAttention, 
     } catch (cause) {
       const cancelled = Boolean(requestId && cancelRequested.current.has(requestId))
       const message = cancelled ? 'Generation stopped.' : humanizeWorkError(cause)
+      const failedRequest = activeRequest.current
+      const failedActivities = failedRequest && failedRequest.requestId === requestId ? failedRequest.activities : undefined
       setError(cancelled ? undefined : message)
       await window.omnicode.work.conversations.updateMessage(conversation.id, pendingAssistantId, {
         content: cancelled ? streamedContent.current.trim() || message : `Request failed: ${message}`,
-        status: cancelled ? 'cancelled' : 'failed'
+        status: cancelled ? 'cancelled' : 'failed',
+        toolActivities: failedActivities
       }).catch(() => undefined)
       setCurrentConversation(await window.omnicode.work.conversations.get(conversation.id).catch(() => conversation))
     } finally {
@@ -748,7 +778,7 @@ export function WorkMode({ active, onOpenSettings, onError, onRequireAttention, 
       onOpenActivity={() => setShowActivity(true)}
       onLinkError={(message) => onError(new Error(message))}
     />
-    {showConnectedApps && <ConnectedAppsDialog connectors={connectors} busyId={connectorBusyId} onClose={() => setShowConnectedApps(false)} onToggle={(connector) => void toggleConnector(connector)} onOpenBrowser={() => void openManagedBrowser()} onManageGoogle={() => void window.omnicode.app.openExternal('https://myaccount.google.com/connections').catch(onError)} onOpenPrivacy={() => void window.omnicode.app.openExternal('https://omnicode.steampirate.life/privacy/').catch(onError)} />}
+    {showConnectedApps && <ConnectedAppsDialog connectors={connectors} busyId={connectorBusyId} onClose={() => setShowConnectedApps(false)} onToggle={(connector) => void toggleConnector(connector)} onOpenBrowser={() => void openManagedBrowser()} onManageGoogle={() => void window.omnicode.app.openExternal('https://myaccount.google.com/connections').catch(onError)} onOpenPrivacy={() => void window.omnicode.app.openExternal('https://omnicode.omnicoretech.org/privacy/').catch(onError)} />}
     {showActivity && <WorkActivityDialog onClose={() => setShowActivity(false)} onError={onError} />}
     {showFullAccessWarning && <FullAccessWarning onCancel={() => setShowFullAccessWarning(false)} onEnable={() => void changeApprovalMode('full', true)} />}
     {pendingApproval && <WorkApprovalCard request={pendingApproval} busy={approvalBusy} onResolve={(approved) => void resolveApproval(approved)} />}

@@ -12,5 +12,6 @@ release/
 .env.local
 client_secret_*.apps.googleusercontent.com.json
 google-oauth-client*.json
+google-oauth-desktop.json
 .omnicode-oauth/
 .omnicode/cache/

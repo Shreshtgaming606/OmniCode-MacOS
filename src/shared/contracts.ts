@@ -3,6 +3,7 @@ import type {
   AIModelCatalogResult,
   CloudAIProviderId
 } from './model-contracts'
+import type { ElevenLabsModel, ElevenLabsVoice, ElevenLabsVoiceSettings } from './elevenlabs-contracts'
 import type {
   ConnectorDescriptor,
   ToolDescriptor,
@@ -56,6 +57,7 @@ import type {
   OmniVoiceAvailability
 } from './omni-contracts'
 import type { OmniCursorRuntimeStatus } from './omni-cursor-contracts'
+import type { NotificationSettings, NotificationSnapshot } from './notification-contracts'
 import type {
   AICostEstimate,
   AIUsageDeleteResult,
@@ -332,6 +334,7 @@ export interface AIModel {
   capabilities?: string[]
   codingCapability?: AICodingCapability
   toolUse?: boolean
+  modelCapabilities?: AIModelCapabilities
   digest?: string
   modifiedAt?: string
   catalog?: boolean
@@ -346,11 +349,32 @@ export interface AIModel {
 export interface AIModelPreferences {
   selectedModel?: string
   defaultModel?: string
+  ollamaEndpoint?: string
+}
+
+export interface AIModelCapabilities {
+  supportsTools: boolean
+  supportsNativeTools: boolean
+  supportsStructuredOutput: boolean
+  supportsStreaming: boolean
+  supportsVision: boolean
+  supportsEmbeddings: boolean
+  toolMode: 'native' | 'structured' | 'none'
+}
+
+export type OllamaConnectionState = 'connected' | 'not-running' | 'unreachable'
+
+export interface OllamaProviderSettings {
+  endpoint: string
 }
 
 export interface OllamaStatus {
   installed: boolean
   available: boolean
+  state: OllamaConnectionState
+  endpoint: string
+  message: string
+  checkedAt: string
   version?: string
 }
 
@@ -654,6 +678,12 @@ export interface OmniAPI {
   voice: {
     availability(): Promise<OmniVoiceAvailability>
     voices(): Promise<OmniInstalledVoice[]>
+    elevenlabsConnected(): Promise<boolean>
+    elevenlabsConnect(key: string): Promise<void>
+    elevenlabsDisconnect(): Promise<void>
+    elevenlabsVoices(): Promise<ElevenLabsVoice[]>
+    elevenlabsModels(): Promise<ElevenLabsModel[]>
+    elevenlabsPreview(voiceId: string, modelId: string, settings: ElevenLabsVoiceSettings): Promise<{ status: 'completed' | 'interrupted'; startedAt?: number | null }>
     test(): Promise<void>
     stop(): Promise<boolean>
     inputAvailability(): Promise<OmniSpeechInputAvailability>
@@ -736,6 +766,8 @@ export interface OmniCodeAPI {
   omni: OmniAPI
   ai: {
     ollamaStatus(): Promise<OllamaStatus>
+    ollamaSettings(): Promise<OllamaProviderSettings>
+    updateOllamaSettings(settings: OllamaProviderSettings): Promise<OllamaProviderSettings>
     models(): Promise<AIModel[]>
     modelCatalog(query?: string): Promise<AIModel[]>
     cloudModelCatalog(provider: CloudAIProviderId, query?: AIModelCatalogQuery): Promise<AIModelCatalogResult>
@@ -795,5 +827,14 @@ export interface OmniCodeAPI {
     copyText(value: string): Promise<void>
     notify(title: string, body: string): Promise<void>
     onCommand(callback: (command: string, payload?: unknown) => void): () => void
+  }
+  notifications: {
+    snapshot(): Promise<NotificationSnapshot>
+    markRead(id: string, read?: boolean): Promise<NotificationSnapshot>
+    markAllRead(): Promise<NotificationSnapshot>
+    remove(id: string): Promise<NotificationSnapshot>
+    clear(): Promise<NotificationSnapshot>
+    updateSettings(changes: Partial<Omit<NotificationSettings, 'version'>>): Promise<NotificationSnapshot>
+    onChanged(callback: (snapshot: NotificationSnapshot) => void): () => void
   }
 }

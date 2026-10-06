@@ -46,8 +46,8 @@ function gmailMessage() {
     payload: {
       mimeType: 'multipart/mixed',
       headers: [
-        { name: 'From', value: 'teacher@example.com' },
-        { name: 'To', value: 'person@example.com' },
+        { name: 'From', value: 'teacher@mailbox.dev' },
+        { name: 'To', value: 'person@mailbox.dev' },
         { name: 'Subject', value: 'Today report' }
       ],
       parts: [{
@@ -136,6 +136,7 @@ describe('Google Workspace cross-connector workflows', () => {
     })
     const gmailFetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input)
+      if (url.endsWith('/profile')) return Response.json({ emailAddress: 'person@mailbox.dev' })
       if (url.endsWith('/drafts')) {
         const payload = JSON.parse(String(init?.body)) as { message: { raw: string } }
         draftMime = Buffer.from(payload.message.raw, 'base64url').toString('utf8')
@@ -154,7 +155,7 @@ describe('Google Workspace cross-connector workflows', () => {
       if (turn === 3) {
         const result = JSON.parse(request.messages.at(-1)!.content) as { result: { id: string } }
         return { content: '', calls: [{ callId: 'call-draft', name: 'gmail_draft', toolId: 'gmail.draft', input: {
-          to: ['alex@example.com'], subject: 'Latest resume', body: 'Hi Alex,\n\nI attached my latest resume.', transferIds: [result.result.id]
+          to: ['alex@mailbox.dev'], subject: 'Latest resume', body: 'Hi Alex,\n\nI attached my latest resume.', transferIds: [result.result.id]
         } }] }
       }
       return { content: 'The Gmail draft is ready with your latest resume attached.', calls: [] }
@@ -171,7 +172,7 @@ describe('Google Workspace cross-connector workflows', () => {
     }, registry.list('work'), (request) => registry.execute(request, { accessLevel: 'ask-before-changes', approvalMode: 'ask', confirm }))
 
     expect(response).toMatchObject({ content: 'The Gmail draft is ready with your latest resume attached.', toolCallCount: 3 })
-    expect(draftMime).toContain('To: alex@example.com')
+    expect(draftMime).toContain('To: alex@mailbox.dev')
     expect(draftMime).toContain("filename*=UTF-8''Latest%20resume.pdf")
     expect(draftMime).toContain(resumeBytes.toString('base64'))
     expect(confirm).toHaveBeenCalledOnce()

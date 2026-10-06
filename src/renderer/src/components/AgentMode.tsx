@@ -27,6 +27,7 @@ import {
 import type { AIProviderId, DiffProposalChangeInput } from '../../../shared/contracts'
 import type { CodeAgentEvent, CodeAgentFocusBehavior, CodeAgentPlan, CodeAgentTask, CodeAgentTaskSummary, CodeAgentVisibility } from '../../../shared/code-agent-contracts'
 import type { WorkApprovalMode } from '../../../shared/tool-contracts'
+import { LiveActivityCard, type LiveActivityEntry, type LiveActivityState } from './activity/LiveActivityCard'
 
 interface AgentCommand {
   command: string
@@ -44,6 +45,7 @@ interface AgentModeProps {
   workspacePath: string | null
   provider: AIProviderId
   model: string
+  notificationTaskId?: string
   activeFile?: string
   openFiles: string[]
   terminalOutput: string
@@ -149,6 +151,7 @@ export function AgentMode({
   workspacePath,
   provider,
   model,
+  notificationTaskId,
   permission,
   resetToken,
   prepareWorkspace,
@@ -195,6 +198,11 @@ export function AgentMode({
   }, [resetToken])
 
   useEffect(() => {
+    if (!notificationTaskId) return
+    void window.omnicode.agent.get(notificationTaskId).then(setCurrentTask).catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)))
+  }, [notificationTaskId])
+
+  useEffect(() => {
     setError('')
   }, [provider, model])
 
@@ -206,6 +214,28 @@ export function AgentMode({
   const events = currentTask?.events ?? []
   const latest = events.at(-1)
   const visibleEvents = useMemo(() => visibleAgentEvents(events, visibility), [events, visibility])
+  const liveEntries = useMemo<LiveActivityEntry[]>(() => events.map((event, index) => ({
+    id: event.id,
+    title: event.relativePath ? `${event.title} · ${event.relativePath}` : event.title,
+    summary: event.summary,
+    status: event.status === 'succeeded' || event.status === 'info' ? 'completed'
+      : event.status === 'cancelled' ? 'cancelled'
+        : event.status === 'running' && Boolean(event.toolId) && events.slice(0, index).some((previous) => previous.toolId === event.toolId && previous.status === 'failed') ? 'retrying'
+          : event.status,
+    startedAt: event.timestamp,
+    completedAt: event.completedAt,
+    ...(event.command ? { detail: `$ ${event.command.length > 180 ? `${event.command.slice(0, 177)}…` : event.command}` } : {})
+  })), [events])
+  const liveStatus: LiveActivityState = !currentTask ? 'queued'
+    : currentTask.status === 'completed' ? 'completed'
+      : currentTask.status === 'failed' ? 'failed'
+        : currentTask.status === 'stopped' ? 'cancelled'
+          : currentTask.status === 'paused' || currentTask.status === 'pausing' ? 'waiting'
+            : 'running'
+  const filesChanged = useMemo(() => new Set(events.filter((event) => event.status === 'succeeded' && (
+    event.toolId?.startsWith('files.write') || event.toolId?.startsWith('files.delete') || event.proposalId
+  )).map((event) => event.relativePath ?? event.proposalId)).size, [events])
+  const checksPassed = useMemo(() => events.filter((event) => ['test', 'build'].includes(event.kind) && event.status === 'succeeded').length, [events])
 
   const changePlan = async (): Promise<void> => {
     if (!currentTask || !planInstruction.trim()) return
@@ -283,13 +313,22 @@ export function AgentMode({
           <div><button onClick={() => { setEditingPlan(false); setPlanInstruction('') }}>Cancel</button><button className="primary" disabled={!planInstruction.trim()} onClick={() => void changePlan()}>Update Plan</button></div>
         </div>}
         {currentTask.plan && <AgentPlanPanel plan={currentTask.plan} expanded={planExpanded} onToggle={() => setPlanExpanded((value) => !value)} />}
-        {latest && <p className="agent-now"><Activity />{latest.title}: {latest.summary}</p>}
+        <LiveActivityCard
+          mode="Code"
+          status={liveStatus}
+          startedAt={currentTask.createdAt}
+          completedAt={currentTask.completedAt}
+          entries={liveEntries}
+          modelLabel={`${currentTask.provider} · ${currentTask.model}`}
+          filesChanged={filesChanged}
+          checksPassed={checksPassed}
+        />
         {['completed', 'failed', 'stopped'].includes(currentTask.status) && <AgentFinalReportView report={buildAgentFinalReport(currentTask)} status={currentTask.status} />}
         {currentTask.error && <div className="inline-error"><strong>Task failed</strong><p>{currentTask.error}</p></div>}
-        <div className="agent-timeline">
+        {visibility === 'glasses' && <div className="agent-timeline">
           {visibleEvents.map((event) => <AgentTimelineEvent key={event.id} event={event} onReviewProposal={onReviewProposal} glasses={visibility === 'glasses'} />)}
           {!visibleEvents.length && <p className="agent-no-changes">Waiting for the first visible action…</p>}
-        </div>
+        </div>}
       </section>}
       <section className="agent-history">
         <header><span><History /><strong>Activity</strong></span>{history.length > 0 && <button title="Clear completed activity" onClick={() => void window.omnicode.agent.clearHistory().then(() => setHistory((items) => items.filter((item) => ['running', 'pausing', 'paused'].includes(item.status))))}><Trash2 /></button>}</header>

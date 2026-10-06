@@ -3,6 +3,121 @@
 This log records repairs and audit milestones made during the no-new-features
 stabilization phase.
 
+## Omni Siri-style voice endpoint and transcript repair — 2026-09-30
+
+- Replaced the previous “wait for Apple final result or 60-second cap” behavior
+  with explicit voice-session states and a single native endpoint monitor driven
+  by real microphone energy plus partial-recognition activity.
+- Added Automatically and Press Enter finish modes, a 12-second initial-speech
+  timeout, configurable 1.2–2.5 second final silence, Enter override in Auto,
+  session-only Enter/Esc hooks, empty-input handling, and one-winner
+  finalization protection.
+- Added smooth live partial replacement in the compact overlay, fixed-height
+  newest-text scrolling, actual-amplitude waveform input, explicit finishing /
+  thinking / working / speaking states, and centralized final transcript
+  submission through the existing Omni agent.
+- Changed finalization to stop audio, call `endAudio()`, retain the recognizer
+  for its final result, and use a Bluetooth-tolerant fallback so the last word
+  is not deliberately cut off.
+- Added CoreAudio system-default input name, transport, sample rate, and channel
+  reporting; Settings now shows an honest System Default device and on-device
+  Available versus Active state. Route/format changes fail cleanly for retry.
+- Embedded a stable `com.omnicode.editor.speech-helper` privacy identity and
+  microphone/Speech purpose strings in the command-line helper, retained the
+  narrow audio-input entitlement, and extended macOS package validation.
+- Typecheck, production build, and the full automated suite pass. Native arm64
+  execution/signature verification and x86_64 cross-build/signature verification
+  pass. Real AirPods transcript tests remain explicitly unclaimed because the
+  GUI is locked, AirPods are disconnected, macOS has no input device, and
+  Speech authorization is not determined.
+
+## Ollama first-class provider and phi3 validation — 2026-09-27
+
+- Added a complete Settings → AI Providers card for the loopback Ollama
+  endpoint, connection state/test, installed-model enumeration and metadata,
+  selection, confirmed pull, confirmed removal, and refresh.
+- Added `/api/show`-derived model capabilities. Native tool calls remain the
+  preferred protocol; completion-only models use a constrained one-call
+  structured adapter with schema/name validation, one repair attempt, duplicate
+  call rejection, and unchanged ToolRegistry/PermissionManager execution.
+- Added provider-neutral relevant-tool selection (up to 16 action tools) to
+  prevent small context windows from receiving every Omni tool. Structured
+  local models receive the required plan tool first, the exact single-tool
+  argument schema, and a final-only repair after an exact repeated call.
+- Corrected structured-response errors that were being mislabeled as an Ollama
+  service outage.
+- Verified Ollama 0.34.4 and `phi3:mini` on arm64. Native tool calls are rejected
+  by Ollama; structured JSON, streaming, system/multi-turn messages, a real
+  read-only ToolRegistry call, approved production file write/read, and
+  tool-error recovery all succeeded in individual live runs.
+- Repeated live runs also established a phi3-specific limitation: it may answer
+  without choosing a tool, stop after a recoverable error, or repeat a broader
+  inspection call. OmniCode keeps hard action bounds and never bypasses
+  permissions to make those runs pass.
+- A final strict real suite passed 3/6 cases. A built-app Invisible task did
+  complete plan → `runtime.detect` → result → final response, while a Managed
+  Browser task opened the page but wandered into unrelated tools and an
+  approval boundary. These partial results remain documented rather than
+  promoted to full agent parity.
+- Verified the arm64 speech helper reports on-device/streaming support, TTS
+  interruption and completion work, and the compact overlay remains restricted.
+  Real speech capture is still blocked by `not-determined` Microphone/Speech
+  permissions and the inactive (`loginwindow`) GUI session used for the audit.
+- Corrected Invisible Mode tool exposure to use the active execution mode and
+  corrected the production file-list tool to accept `.` as its documented root
+  sentinel.
+
+## Apple Silicon DMG signature diagnosis — 2026-09-26
+
+- Extended the repaired packaging sequence to a separate x86_64 cross-build at
+  `dist/x64-adhoc` without changing or overwriting the arm64 artifact. Electron,
+  active `node-pty`, all Electron helpers/frameworks, and both Omni helpers are
+  x86_64; the Intel app and DMG validator reports 39 PASS, 7 expected warnings,
+  and 0 FAIL.
+- Added an explicit `dist:x64:adhoc` script and architecture-aware validation.
+  `OMNICODE_TARGET_ARCH` now takes precedence for native helper compilation,
+  electron-builder receives an explicit dependency architecture, and active
+  development `node-pty` is restored to arm64 after cross-packaging.
+- Produced `dist/x64-adhoc/OmniCode-0.9.0-x64.dmg` (149,259,691 bytes,
+  SHA-256 `bf041b46e0cad179efa81ece04dcf5b9dd68c9ab3167ff941042c660ca387f48`).
+  Rosetta 2 is absent, so runtime validation of this exact artifact remains a
+  real-Intel-hardware gate.
+
+- Reinstalled dependencies natively on an Apple M6 Mac mini. Electron 44.1.0,
+  the active `node-pty` module/helper, Electron frameworks/helpers, and both
+  Omni Swift helpers verify as arm64; 623 tests pass, one native-Keychain test
+  remains intentionally skipped, and typecheck/build pass.
+- Reproduced the prior no-certificate packaging defect. electron-builder
+  skipped its final signing pass, leaving linker-generated ad-hoc signatures
+  that did not cover the completed app's resources or Info.plist.
+  `codesign --deep --strict`, `syspolicy_check`, and `spctl` all identified a
+  real malformed signature rather than only an unsigned/notarized warning.
+- Added `forceCodeSigning` to normal release packaging so a missing Developer ID
+  cannot silently emit another malformed release candidate.
+- Added `dist:arm64:adhoc`, an explicitly local diagnostic path that uses
+  electron-builder 26 ad-hoc signing with hardened runtime disabled, restores
+  the Cursor/Speech helpers' narrow intended signing profiles, reseals the final
+  outer app, packages from that validated app, and writes SHA-256.
+- Added `validate:mac`, which inventories every Mach-O, validates Info.plist and
+  required bundle files, distinguishes inactive Intel prebuilds, checks nested
+  and outer signatures, runs `syspolicy_check`/`spctl`, verifies and mounts the
+  DMG, compares its app to the source app, and distinguishes PASS, unsigned or
+  ad-hoc WARNING, and technical FAIL.
+- The final arm64 app passes deep/strict signing validation and packaged
+  Code/Work/Omni/real-PTY smokes with zero renderer errors. The new Mac reports
+  `en-US` on-device Speech available; microphone, Speech, and Accessibility
+  still await normal user authorization.
+- Produced `dist/arm64-adhoc/OmniCode-0.9.0-arm64.dmg` (142,507,208 bytes,
+  SHA-256 `b88d81e8af1f0a55094cce45da865064021dce5729f7afe68ae39932fa294c27`).
+  `hdiutil verify`, mounted deep-signature validation, and exact app-content
+  comparison pass. System policy now reports only ad-hoc identity and missing
+  notarization; a quarantined disposable copy retains a valid signature and is
+  blocked with Apple's “could not verify ... is free of malware” dialog rather
+  than the former malformed-bundle “damaged” wording.
+- The diagnostic artifact intentionally omits Google OAuth client metadata
+  because the migrated `.env.local` credentials path is stale. It is not a
+  feature-complete release and is not Developer ID signed or notarized.
+
 ## OmniCode 0.9.0 AI usage and cost dashboard — 2026-09-24
 
 - Added one main-process usage boundary across Code chat/autocomplete/inline

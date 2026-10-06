@@ -1,4 +1,8 @@
 const port = Number(process.argv[2] ?? 9333)
+const requestedProvider = process.argv[3] ?? 'google'
+const requestedModel = process.argv[4]
+const requestedPrompt = process.env.OMNICODE_OMNI_AUDIT_PROMPT
+const expectedToolId = process.env.OMNICODE_OMNI_AUDIT_TOOL ?? 'runtime.detect'
 
 async function targetWhenReady() {
   const deadline = Date.now() + 60_000
@@ -7,7 +11,7 @@ async function targetWhenReady() {
       const response = await fetch(`http://127.0.0.1:${port}/json`)
       if (response.ok) {
         const targets = await response.json()
-        const target = targets.find((item) => item.type === 'page' && item.webSocketDebuggerUrl)
+        const target = targets.find((item) => item.type === 'page' && item.webSocketDebuggerUrl && !item.url?.includes('omni-overlay.html'))
         if (target) return target
       }
     } catch {
@@ -61,26 +65,39 @@ const original = await evaluate(`return await window.omnicode.omni.settings.get(
 let taskId = ''
 
 try {
-  const catalog = await evaluate(`return await window.omnicode.ai.cloudModelCatalog('google', {})`)
-  const eligible = catalog.models.filter((candidate) =>
-    candidate.availability !== 'unavailable' && candidate.capabilities.chat.support !== 'unsupported'
-  )
-  const model = eligible.find((candidate) => candidate.id === 'gemini-flash-latest') ??
-    eligible.find((candidate) => candidate.capabilities['tool-calling'].support === 'supported') ?? eligible[0]
-  if (!model) throw new Error('No account-visible Google chat model is available for the Omni audit.')
+  let model
+  if (requestedProvider === 'ollama') {
+    const models = await evaluate(`return await window.omnicode.ai.models()`)
+    model = models.find((candidate) => candidate.provider === 'ollama' && candidate.installed &&
+      candidate.id === (requestedModel ?? 'phi3:mini'))
+    if (!model) throw new Error(`The requested local Ollama model is not installed: ${requestedModel ?? 'phi3:mini'}`)
+  } else {
+    const catalog = await evaluate(`return await window.omnicode.ai.cloudModelCatalog(${JSON.stringify(requestedProvider)}, {})`)
+    const eligible = catalog.models.filter((candidate) =>
+      candidate.availability !== 'unavailable' && candidate.capabilities.chat.support !== 'unsupported'
+    )
+    model = eligible.find((candidate) => candidate.id === requestedModel) ??
+      eligible.find((candidate) => candidate.id === 'gemini-flash-latest') ??
+      eligible.find((candidate) => candidate.capabilities['tool-calling'].support === 'supported') ?? eligible[0]
+    if (!model) throw new Error(`No account-visible ${requestedProvider} chat model is available for the Omni audit.`)
+  }
   const modelLiteral = JSON.stringify(model.id)
+  const providerLiteral = JSON.stringify(requestedProvider)
+  const taskInput = requestedPrompt ?? (requestedProvider === 'ollama'
+    ? 'Determine whether Node.js is installed on this Mac and report the verified result.'
+    : 'Use the runtime.detect tool exactly once. Then report whether Node.js is installed based only on that tool result. Do not run commands, edit files, open applications, or use any other action tool.')
 
   await evaluate(`return await window.omnicode.omni.settings.update({
     enabled: true,
     executionMode: 'invisible',
     voice: { spokenResponses: false },
-    model: { provider: 'google', modelId: ${modelLiteral} }
+    model: { provider: ${providerLiteral}, modelId: ${modelLiteral} }
   })`)
 
   const task = await evaluate(`return await window.omnicode.omni.tasks.start({
-    provider: 'google',
+    provider: ${providerLiteral},
     model: ${modelLiteral},
-    input: 'Use the runtime.detect tool exactly once. Then report whether Node.js is installed based only on that tool result. Do not run commands, edit files, open applications, or use any other action tool.',
+    input: ${JSON.stringify(taskInput)},
     activationSource: 'main-window',
     executionMode: 'invisible',
     approvalMode: 'ask'
@@ -101,21 +118,23 @@ try {
       events: finished.events?.map((event) => ({ toolId: event.toolId, status: event.status, summary: event.summary }))
     })}`)
   }
-  const runtimeEvents = finished.events.filter((event) => event.toolId === 'runtime.detect')
-  if (runtimeEvents.filter((event) => event.status === 'succeeded').length !== 1 ||
-      runtimeEvents.some((event) => event.status === 'failed' || event.status === 'cancelled')) {
-    throw new Error(`The task did not complete exactly one successful runtime detection: ${JSON.stringify(runtimeEvents)}`)
+  const expectedEvents = finished.events.filter((event) => event.toolId === expectedToolId)
+  if (expectedEvents.filter((event) => event.status === 'succeeded').length !== 1 ||
+      expectedEvents.some((event) => event.status === 'failed' || event.status === 'cancelled')) {
+    throw new Error(`The task did not complete exactly one successful ${expectedToolId} action: ${JSON.stringify(expectedEvents)}`)
   }
   const otherActionTools = finished.events.filter((event) =>
-    event.toolId && event.toolId !== 'runtime.detect' && event.toolId !== 'omni.update-plan'
+    event.toolId && event.toolId !== expectedToolId && event.toolId !== 'omni.update-plan'
   )
   if (otherActionTools.length) throw new Error(`The task used an unexpected action tool: ${JSON.stringify(otherActionTools)}`)
 
   console.log(JSON.stringify({
     invisibleToolAudit: 'passed',
+    provider: requestedProvider,
     model: model.id,
     taskStatus: finished.status,
-    runtimeToolSuccesses: 1,
+    expectedToolId,
+    expectedToolSuccesses: 1,
     unexpectedActionTools: 0,
     resultSummary: finished.resultSummary
   }, null, 2))

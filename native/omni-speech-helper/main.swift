@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreAudio
 import CoreFoundation
 import Foundation
 import Speech
@@ -7,9 +8,91 @@ private let protocolVersion = 1
 private let maximumRequestBytes = 64 * 1024
 private let maximumLocaleCharacters = 64
 private let minimumDurationMs = 1_000
-private let maximumDurationMs = 60_000
+private let maximumDurationMs = 300_000
 private let maximumTranscriptCharacters = 16_384
 private let outputLock = NSLock()
+
+// ElevenLabs returns signed 16-bit mono PCM at 24 kHz. This playback mode reads
+// the stream from stdin and keeps audio in memory; no temporary audio file or
+// unrelated player process is created. The process is terminated on barge-in.
+private func playPCMStream() throws {
+    guard let format = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 24_000, channels: 1, interleaved: true) else {
+        throw HelperFailure(code: "audio-format", message: "Omni could not configure voice playback.")
+    }
+    let engine = AVAudioEngine()
+    let player = AVAudioPlayerNode()
+    engine.attach(player)
+    engine.connect(player, to: engine.mainMixerNode, format: format)
+    try engine.start()
+    let playback = DispatchGroup()
+    var pending = Data()
+    var started = false
+    var totalBytes = 0
+    while let chunk = try FileHandle.standardInput.read(upToCount: 8_192), !chunk.isEmpty {
+        totalBytes += chunk.count
+        if totalBytes > 24 * 1_024 * 1_024 {
+            throw HelperFailure(code: "audio-size", message: "The generated voice response was too long.")
+        }
+        pending.append(chunk)
+        let playableBytes = min(pending.count & ~1, 16_384)
+        if playableBytes == 0 { continue }
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(playableBytes / 2)),
+              let samples = buffer.int16ChannelData?[0] else {
+            throw HelperFailure(code: "audio-buffer", message: "Omni could not prepare voice playback.")
+        }
+        pending.copyBytes(to: UnsafeMutableRawBufferPointer(start: samples, count: playableBytes), count: playableBytes)
+        pending.removeFirst(playableBytes)
+        buffer.frameLength = AVAudioFrameCount(playableBytes / 2)
+        playback.enter()
+        player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { _ in playback.leave() }
+        if !started {
+            player.play()
+            started = true
+            FileHandle.standardOutput.write(Data("STARTED\n".utf8))
+        }
+    }
+    if !pending.isEmpty { throw HelperFailure(code: "audio-format", message: "The generated voice audio was incomplete.") }
+    if started {
+        if playback.wait(timeout: .now() + 180) == .timedOut {
+            throw HelperFailure(code: "audio-timeout", message: "Voice playback timed out.")
+        }
+    }
+    player.stop()
+    engine.stop()
+}
+
+private enum VoiceSessionState: String {
+    case starting = "STARTING"
+    case listening = "LISTENING"
+    case speechDetected = "SPEECH_DETECTED"
+    case waitingForEnd = "WAITING_FOR_END"
+    case finalizingTranscript = "FINALIZING_TRANSCRIPT"
+    case completed = "COMPLETED"
+    case cancelled = "CANCELLED"
+    case failed = "FAILED"
+}
+
+private enum FinishSpeakingMode: String {
+    case auto
+    case enter
+}
+
+private enum FinalizationReason: String {
+    case silence = "SILENCE"
+    case enter = "ENTER"
+    case timeout = "TIMEOUT"
+    case manual = "MANUAL"
+    case speechFramework = "SPEECH_FRAMEWORK"
+    case cancel = "CANCEL"
+}
+
+private struct InputDeviceInfo {
+    let id: AudioDeviceID
+    let name: String
+    let transport: String
+    let sampleRate: Double
+    let channelCount: UInt32
+}
 
 private struct HelperFailure: Error {
     let code: String
@@ -58,6 +141,89 @@ private func microphonePermissionName(_ status: AVAuthorizationStatus) -> String
     }
 }
 
+private func propertyString(_ object: AudioObjectID, selector: AudioObjectPropertySelector) -> String? {
+    var address = AudioObjectPropertyAddress(
+        mSelector: selector,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    var value: CFString = "" as CFString
+    var size = UInt32(MemoryLayout<CFString>.size)
+    guard AudioObjectGetPropertyData(object, &address, 0, nil, &size, &value) == noErr else { return nil }
+    return value as String
+}
+
+private func transportName(_ value: UInt32) -> String {
+    switch value {
+    case kAudioDeviceTransportTypeBluetooth: return "Bluetooth"
+    case kAudioDeviceTransportTypeBluetoothLE: return "Bluetooth LE"
+    case kAudioDeviceTransportTypeBuiltIn: return "Built-in"
+    case kAudioDeviceTransportTypeUSB: return "USB"
+    case kAudioDeviceTransportTypeDisplayPort: return "DisplayPort"
+    case kAudioDeviceTransportTypeHDMI: return "HDMI"
+    case kAudioDeviceTransportTypeAggregate: return "Aggregate"
+    case kAudioDeviceTransportTypeVirtual: return "Virtual"
+    default: return "Other"
+    }
+}
+
+private func defaultInputDeviceInfo() -> InputDeviceInfo? {
+    var device = AudioDeviceID(kAudioObjectUnknown)
+    var deviceSize = UInt32(MemoryLayout<AudioDeviceID>.size)
+    var defaultAddress = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwarePropertyDefaultInputDevice,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    guard AudioObjectGetPropertyData(
+        AudioObjectID(kAudioObjectSystemObject), &defaultAddress, 0, nil, &deviceSize, &device
+    ) == noErr, device != kAudioObjectUnknown else { return nil }
+
+    var sampleRate = 0.0
+    var sampleRateSize = UInt32(MemoryLayout<Double>.size)
+    var sampleRateAddress = AudioObjectPropertyAddress(
+        mSelector: kAudioDevicePropertyNominalSampleRate,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    _ = AudioObjectGetPropertyData(device, &sampleRateAddress, 0, nil, &sampleRateSize, &sampleRate)
+
+    var transport = UInt32(0)
+    var transportSize = UInt32(MemoryLayout<UInt32>.size)
+    var transportAddress = AudioObjectPropertyAddress(
+        mSelector: kAudioDevicePropertyTransportType,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    _ = AudioObjectGetPropertyData(device, &transportAddress, 0, nil, &transportSize, &transport)
+
+    var channelCount: UInt32 = 0
+    var streamsAddress = AudioObjectPropertyAddress(
+        mSelector: kAudioDevicePropertyStreamConfiguration,
+        mScope: kAudioDevicePropertyScopeInput,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    var streamsSize: UInt32 = 0
+    if AudioObjectGetPropertyDataSize(device, &streamsAddress, 0, nil, &streamsSize) == noErr, streamsSize > 0 {
+        let storage = UnsafeMutableRawPointer.allocate(
+            byteCount: Int(streamsSize), alignment: MemoryLayout<AudioBufferList>.alignment
+        )
+        defer { storage.deallocate() }
+        let list = storage.assumingMemoryBound(to: AudioBufferList.self)
+        if AudioObjectGetPropertyData(device, &streamsAddress, 0, nil, &streamsSize, list) == noErr {
+            channelCount = UnsafeMutableAudioBufferListPointer(list).reduce(0) { $0 + $1.mNumberChannels }
+        }
+    }
+
+    return InputDeviceInfo(
+        id: device,
+        name: propertyString(device, selector: kAudioObjectPropertyName) ?? "System Default",
+        transport: transportName(transport),
+        sampleRate: sampleRate,
+        channelCount: channelCount
+    )
+}
+
 private func readInitialRequest() throws -> [String: Any] {
     guard let line = readLine(), let data = line.data(using: .utf8), data.count <= maximumRequestBytes,
           let object = try? JSONSerialization.jsonObject(with: data),
@@ -103,6 +269,7 @@ private func boundedInteger(_ value: Any?, minimum: Int, maximum: Int, label: St
 
 private func status(id: String, locale: String) -> Never {
     let recognizer = SFSpeechRecognizer(locale: Locale(identifier: locale))
+    let input = defaultInputDeviceInfo()
     let supportedLocales = SFSpeechRecognizer.supportedLocales()
         .map(\.identifier).sorted().prefix(512)
     writeEvent(id: id, event: "status", values: [
@@ -112,7 +279,11 @@ private func status(id: String, locale: String) -> Never {
         "onDevice": recognizer?.supportsOnDeviceRecognition ?? false,
         "streaming": true,
         "locale": locale,
-        "supportedLocales": Array(supportedLocales)
+        "supportedLocales": Array(supportedLocales),
+        "inputDeviceName": input?.name ?? "System Default",
+        "inputDeviceTransport": input?.transport ?? "Unknown",
+        "sampleRate": input?.sampleRate ?? 0,
+        "channelCount": input?.channelCount ?? 0
     ])
     exit(0)
 }
@@ -155,22 +326,52 @@ private final class RecognitionController {
     private let id: String
     private let locale: String
     private let requireOnDevice: Bool
+    private let finishMode: FinishSpeakingMode
+    private let initialSilenceTimeoutMs: Int
+    private let endSilenceMs: Int
     private let maximumDurationMs: Int
     private let maximumTranscriptCharacters: Int
     private let audioEngine = AVAudioEngine()
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
     private var finalTranscript = ""
-    private var finishing = false
-    private var stopping = false
+    private var state: VoiceSessionState = .starting
+    private var finalizationStarted = false
+    private var finished = false
     private var tapInstalled = false
-    private var timeout: DispatchSourceTimer?
+    private var monitor: DispatchSourceTimer?
+    private var finalizationFallback: DispatchWorkItem?
     private var lastAmplitudeAt = 0.0
+    private var startedAt = 0.0
+    private var speechStartedAt: Double?
+    private var lastVoiceAt: Double?
+    private var lastPartialAt: Double?
+    private var voiceCandidateAt: Double?
+    private var noiseFloor: Float = 0.004
+    private var partialResultCount = 0
+    private var finalizationReason: FinalizationReason?
+    private var inputDevice: InputDeviceInfo?
+    private var captureSampleRate = 0.0
+    private var captureChannelCount: AVAudioChannelCount = 0
+    private var defaultInputListener: AudioObjectPropertyListenerBlock?
+    private var configurationObserver: NSObjectProtocol?
 
-    init(id: String, locale: String, requireOnDevice: Bool, maximumDurationMs: Int, maximumTranscriptCharacters: Int) {
+    init(
+        id: String,
+        locale: String,
+        requireOnDevice: Bool,
+        finishMode: FinishSpeakingMode,
+        initialSilenceTimeoutMs: Int,
+        endSilenceMs: Int,
+        maximumDurationMs: Int,
+        maximumTranscriptCharacters: Int
+    ) {
         self.id = id
         self.locale = locale
         self.requireOnDevice = requireOnDevice
+        self.finishMode = finishMode
+        self.initialSilenceTimeoutMs = initialSilenceTimeoutMs
+        self.endSilenceMs = endSilenceMs
         self.maximumDurationMs = maximumDurationMs
         self.maximumTranscriptCharacters = maximumTranscriptCharacters
     }
@@ -237,6 +438,9 @@ private final class RecognitionController {
         guard format.sampleRate > 0, format.channelCount > 0 else {
             throw HelperFailure(code: "microphone-unavailable", message: "No usable microphone input format is available.")
         }
+        inputDevice = defaultInputDeviceInfo()
+        captureSampleRate = format.sampleRate
+        captureChannelCount = format.channelCount
         inputNode.installTap(onBus: 0, bufferSize: 1_024, format: format) { [weak self] buffer, _ in
             guard let self else { return }
             self.request?.append(buffer)
@@ -251,6 +455,7 @@ private final class RecognitionController {
             let rms = sqrt(sum / Float(frames))
             let normalized = min(1, max(0, (rms - 0.006) / 0.18))
             writeEvent(id: self.id, event: "amplitude", values: ["amplitude": normalized])
+            DispatchQueue.main.async { [weak self] in self?.observeAudioEnergy(rms, at: now) }
         }
         tapInstalled = true
         audioEngine.prepare()
@@ -261,32 +466,113 @@ private final class RecognitionController {
         }
 
         task = recognizer.recognitionTask(with: recognitionRequest) { [weak self] result, error in
-            guard let self, !self.finishing else { return }
-            if let result {
-                let transcript = String(result.bestTranscription.formattedString.prefix(self.maximumTranscriptCharacters))
-                self.finalTranscript = transcript
-                writeEvent(id: self.id, event: result.isFinal ? "final" : "partial", values: [
-                    "transcript": transcript,
-                    "cancelled": false
-                ])
-                if result.isFinal { self.finish(exitCode: 0, emitFinal: false) }
-            } else if error != nil {
-                if self.stopping {
-                    writeEvent(id: self.id, event: "final", values: ["transcript": self.finalTranscript, "cancelled": false])
-                    self.finish(exitCode: 0, emitFinal: false)
-                } else {
-                    self.finishWithError(HelperFailure(code: "recognition-failed", message: "Speech recognition stopped before producing a final transcript."))
+            DispatchQueue.main.async {
+                guard let self, !self.finished else { return }
+                if let result {
+                    let transcript = String(result.bestTranscription.formattedString.prefix(self.maximumTranscriptCharacters))
+                    self.finalTranscript = transcript
+                    if result.isFinal {
+                        if self.finalizationStarted { self.finishSuccess(transcript: transcript) }
+                        else { self.beginFinalization(reason: .speechFramework, finalTranscript: transcript) }
+                    } else {
+                        self.observePartial(transcript)
+                    }
+                } else if error != nil {
+                    if self.finalizationStarted { self.finishSuccess(transcript: self.finalTranscript) }
+                    else {
+                        self.finishWithError(HelperFailure(code: "recognition-failed", message: "Speech recognition stopped before producing a final transcript."))
+                    }
                 }
             }
         }
 
+        startedAt = ProcessInfo.processInfo.systemUptime
+        transition(to: .listening)
+        installAudioRouteObservers()
         let timer = DispatchSource.makeTimerSource(queue: .main)
-        timer.schedule(deadline: .now() + .milliseconds(maximumDurationMs))
-        timer.setEventHandler { [weak self] in self?.stop() }
+        timer.schedule(deadline: .now() + .milliseconds(100), repeating: .milliseconds(100))
+        timer.setEventHandler { [weak self] in self?.evaluateEndOfSpeech() }
         timer.resume()
-        timeout = timer
-        writeEvent(id: id, event: "ready", values: ["locale": locale, "onDevice": requireOnDevice])
+        monitor = timer
+        let device = inputDevice
+        writeEvent(id: id, event: "ready", values: [
+            "locale": locale,
+            "onDevice": requireOnDevice,
+            "onDeviceSupported": recognizer.supportsOnDeviceRecognition,
+            "inputDeviceName": device?.name ?? "System Default",
+            "inputDeviceTransport": device?.transport ?? "Unknown",
+            "sampleRate": format.sampleRate,
+            "channelCount": format.channelCount,
+            "finishSpeaking": finishMode.rawValue
+        ])
+        emitDiagnostics()
         listenForCommands()
+    }
+
+    private func transition(to next: VoiceSessionState, reason: FinalizationReason? = nil) {
+        guard !finished || next == .completed || next == .cancelled || next == .failed else { return }
+        guard state != next else { return }
+        state = next
+        var values: [String: Any] = ["state": next.rawValue]
+        if let reason { values["reason"] = reason.rawValue }
+        writeEvent(id: id, event: "state", values: values)
+    }
+
+    private func observePartial(_ transcript: String) {
+        guard !finalizationStarted, !finished else { return }
+        finalTranscript = transcript
+        partialResultCount += 1
+        let now = ProcessInfo.processInfo.systemUptime
+        lastPartialAt = now
+        if !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            markSpeechDetected(at: now)
+        }
+        writeEvent(id: id, event: "partial", values: ["transcript": transcript, "cancelled": false])
+    }
+
+    private func observeAudioEnergy(_ rms: Float, at now: Double) {
+        guard !finalizationStarted, !finished else { return }
+        let threshold = max(0.008, min(0.035, noiseFloor * 3.0))
+        let voiced = rms >= threshold
+        if speechStartedAt == nil && !voiced {
+            noiseFloor = max(0.001, min(0.02, noiseFloor * 0.97 + rms * 0.03))
+        }
+        if voiced {
+            if voiceCandidateAt == nil { voiceCandidateAt = now }
+            if speechStartedAt != nil || now - (voiceCandidateAt ?? now) >= 0.12 {
+                lastVoiceAt = now
+                markSpeechDetected(at: now)
+            }
+        } else {
+            voiceCandidateAt = nil
+        }
+    }
+
+    private func markSpeechDetected(at now: Double) {
+        if speechStartedAt == nil { speechStartedAt = now }
+        if state == .listening || state == .waitingForEnd { transition(to: .speechDetected) }
+    }
+
+    private func evaluateEndOfSpeech() {
+        guard !finalizationStarted, !finished else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        if now - startedAt >= Double(maximumDurationMs) / 1_000 {
+            beginFinalization(reason: .timeout)
+            return
+        }
+        guard speechStartedAt != nil else {
+            if finishMode == .auto && now - startedAt >= Double(initialSilenceTimeoutMs) / 1_000 {
+                beginFinalization(reason: .timeout)
+            }
+            return
+        }
+        let lastActivity = max(lastVoiceAt ?? speechStartedAt ?? now, lastPartialAt ?? speechStartedAt ?? now)
+        let silence = now - lastActivity
+        if silence >= 0.3 && state == .speechDetected { transition(to: .waitingForEnd) }
+        if silence < 0.3 && state == .waitingForEnd { transition(to: .speechDetected) }
+        if finishMode == .auto && silence >= Double(endSilenceMs) / 1_000 {
+            beginFinalization(reason: .silence)
+        }
     }
 
     private func listenForCommands() {
@@ -298,7 +584,9 @@ private final class RecognitionController {
                       object["id"] as? String == self?.id,
                       let command = object["command"] as? String else { continue }
                 if command == "stop" {
-                    DispatchQueue.main.async { self?.stop() }
+                    let rawReason = object["reason"] as? String
+                    let reason = rawReason.flatMap(FinalizationReason.init(rawValue:)) ?? .manual
+                    DispatchQueue.main.async { self?.beginFinalization(reason: reason) }
                     return
                 }
                 if command == "cancel" {
@@ -312,52 +600,81 @@ private final class RecognitionController {
         }
     }
 
-    func stop() {
-        guard !finishing else { return }
-        stopping = true
+    private func beginFinalization(reason: FinalizationReason, finalTranscript: String? = nil) {
+        guard !finalizationStarted, !finished else { return }
+        finalizationStarted = true
+        finalizationReason = reason
+        transition(to: .finalizingTranscript, reason: reason)
         stopAudio()
         request?.endAudio()
-        timeout?.cancel()
-        timeout = nil
-        // Give Speech a short opportunity to emit its final result.
-        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(1_500)) { [weak self] in
-            guard let self, !self.finishing else { return }
-            writeEvent(id: self.id, event: "final", values: ["transcript": self.finalTranscript, "cancelled": false])
-            self.finish(exitCode: 0, emitFinal: false)
+        monitor?.cancel()
+        monitor = nil
+        if let finalTranscript {
+            finishSuccess(transcript: finalTranscript)
+            return
         }
+        let fallback = DispatchWorkItem { [weak self] in
+            guard let self, !self.finished else { return }
+            self.finishSuccess(transcript: self.finalTranscript)
+        }
+        finalizationFallback = fallback
+        // Bluetooth routes can deliver their final recognition result later
+        // than built-in microphones. Keep the request alive long enough to
+        // preserve the last word after endAudio().
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(2_500), execute: fallback)
     }
 
     func cancel() {
-        guard !finishing else { return }
-        writeEvent(id: id, event: "final", values: ["transcript": "", "cancelled": true])
-        finish(exitCode: 0, emitFinal: false, cancelTask: true)
+        guard !finished else { return }
+        finalizationReason = .cancel
+        finished = true
+        transition(to: .cancelled, reason: .cancel)
+        cleanup(cancelTask: true)
+        emitDiagnostics()
+        writeEvent(id: id, event: "final", values: [
+            "transcript": "", "cancelled": true, "reason": FinalizationReason.cancel.rawValue
+        ])
+        exit(0)
     }
 
     private func finishWithError(_ failure: HelperFailure) {
-        guard !finishing else { return }
+        guard !finished else { return }
+        finished = true
+        transition(to: .failed)
         cleanup(cancelTask: true)
+        emitDiagnostics()
         writeEvent(id: id, event: "error", values: ["error": ["code": failure.code, "message": failure.message]])
         exit(1)
     }
 
-    private func finish(exitCode: Int32, emitFinal: Bool, cancelTask: Bool = false) {
-        guard !finishing else { return }
-        cleanup(cancelTask: cancelTask)
-        if emitFinal {
-            writeEvent(id: id, event: "final", values: ["transcript": finalTranscript, "cancelled": cancelTask])
-        }
-        exit(exitCode)
+    private func finishSuccess(transcript: String) {
+        guard !finished else { return }
+        finished = true
+        finalTranscript = transcript
+        finalizationFallback?.cancel()
+        finalizationFallback = nil
+        cleanup(cancelTask: false)
+        transition(to: .completed, reason: finalizationReason)
+        emitDiagnostics()
+        writeEvent(id: id, event: "final", values: [
+            "transcript": finalTranscript,
+            "cancelled": false,
+            "reason": (finalizationReason ?? .speechFramework).rawValue
+        ])
+        exit(0)
     }
 
     private func cleanup(cancelTask: Bool) {
-        finishing = true
-        timeout?.cancel()
-        timeout = nil
+        monitor?.cancel()
+        monitor = nil
+        finalizationFallback?.cancel()
+        finalizationFallback = nil
         stopAudio()
         request?.endAudio()
         if cancelTask { task?.cancel() } else { task?.finish() }
         task = nil
         request = nil
+        removeAudioRouteObservers()
     }
 
     private func stopAudio() {
@@ -366,6 +683,92 @@ private final class RecognitionController {
             audioEngine.inputNode.removeTap(onBus: 0)
             tapInstalled = false
         }
+    }
+
+    private func installAudioRouteObservers() {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            DispatchQueue.main.async { self?.handleAudioRouteChange() }
+        }
+        if AudioObjectAddPropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject), &address, DispatchQueue.main, listener
+        ) == noErr {
+            defaultInputListener = listener
+        }
+        configurationObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: audioEngine,
+            queue: .main
+        ) { [weak self] _ in self?.handleAudioRouteChange() }
+    }
+
+    private func removeAudioRouteObservers() {
+        if let listener = defaultInputListener {
+            var address = AudioObjectPropertyAddress(
+                mSelector: kAudioHardwarePropertyDefaultInputDevice,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain
+            )
+            AudioObjectRemovePropertyListenerBlock(
+                AudioObjectID(kAudioObjectSystemObject), &address, DispatchQueue.main, listener
+            )
+            defaultInputListener = nil
+        }
+        if let configurationObserver {
+            NotificationCenter.default.removeObserver(configurationObserver)
+            self.configurationObserver = nil
+        }
+    }
+
+    private func handleAudioRouteChange() {
+        guard !finalizationStarted, !finished else { return }
+        let current = defaultInputDeviceInfo()
+        let format = audioEngine.inputNode.outputFormat(forBus: 0)
+        let changedDevice = current?.id != inputDevice?.id
+        let invalidFormat = format.sampleRate <= 0 || format.channelCount == 0
+        let changedFormat = abs(format.sampleRate - captureSampleRate) > 1 || format.channelCount != captureChannelCount
+        if changedDevice || invalidFormat || changedFormat {
+            finishWithError(HelperFailure(
+                code: "microphone-disconnected",
+                message: "Microphone disconnected or changed. Try the voice request again."
+            ))
+        }
+    }
+
+    private func emitDiagnostics() {
+        let now = ProcessInfo.processInfo.systemUptime
+        let lastActivity = max(lastVoiceAt ?? speechStartedAt ?? now, lastPartialAt ?? speechStartedAt ?? now)
+        var values: [String: Any] = [
+            "inputDeviceName": inputDevice?.name ?? "System Default",
+            "inputDeviceTransport": inputDevice?.transport ?? "Unknown",
+            "sampleRate": captureSampleRate,
+            "channelCount": captureChannelCount,
+            "locale": locale,
+            "onDeviceRequested": requireOnDevice,
+            "onDeviceSupported": true,
+            "onDeviceActive": requireOnDevice,
+            "sessionDurationMs": max(0, Int((now - startedAt) * 1_000)),
+            "partialResultCount": partialResultCount
+        ]
+        if let speechStartedAt { values["speechStartMs"] = max(0, Int((speechStartedAt - startedAt) * 1_000)) }
+        if speechStartedAt != nil { values["finalSilenceMs"] = max(0, Int((now - lastActivity) * 1_000)) }
+        if let finalizationReason { values["finalizationReason"] = finalizationReason.rawValue }
+        writeEvent(id: id, event: "diagnostic", values: values)
+    }
+}
+
+if CommandLine.arguments.count == 2 && CommandLine.arguments[1] == "--play-pcm-24000" {
+    do {
+        try playPCMStream()
+        exit(0)
+    } catch {
+        // Audio-mode errors are deliberately generic; request text and credentials
+        // are never written to this helper's stdout or stderr.
+        exit(1)
     }
 }
 
@@ -391,17 +794,31 @@ do {
         throw HelperFailure(code: "invalid-request", message: "The speech helper command is unsupported.")
     }
     try strictKeys(request, allowed: [
-        "version", "id", "command", "locale", "requireOnDevice", "maximumDurationMs", "maximumTranscriptCharacters"
+        "version", "id", "command", "locale", "requireOnDevice", "finishSpeaking", "initialSilenceTimeoutMs",
+        "endSilenceMs", "maximumDurationMs", "maximumTranscriptCharacters"
     ])
     guard let requireOnDevice = request["requireOnDevice"] as? Bool else {
         throw HelperFailure(code: "invalid-request", message: "The recognition privacy policy is invalid.")
     }
+    guard let finishModeValue = request["finishSpeaking"] as? String,
+          let finishMode = FinishSpeakingMode(rawValue: finishModeValue) else {
+        throw HelperFailure(code: "invalid-request", message: "The finish-speaking mode is invalid.")
+    }
+    let initialSilence = try boundedInteger(
+        request["initialSilenceTimeoutMs"], minimum: 5_000, maximum: 30_000, label: "Initial listening timeout"
+    )
+    let endSilence = try boundedInteger(
+        request["endSilenceMs"], minimum: 1_200, maximum: 2_500, label: "End-of-speech delay"
+    )
     let duration = try boundedInteger(request["maximumDurationMs"], minimum: minimumDurationMs, maximum: maximumDurationMs, label: "Recognition duration")
     let transcriptCharacters = try boundedInteger(request["maximumTranscriptCharacters"], minimum: 1, maximum: maximumTranscriptCharacters, label: "Transcript size")
     let controller = RecognitionController(
         id: id,
         locale: locale,
         requireOnDevice: requireOnDevice,
+        finishMode: finishMode,
+        initialSilenceTimeoutMs: initialSilence,
+        endSilenceMs: endSilence,
         maximumDurationMs: duration,
         maximumTranscriptCharacters: transcriptCharacters
     )

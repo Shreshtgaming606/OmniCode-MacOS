@@ -7,13 +7,17 @@ import { app } from 'electron'
 
 import type {
   OmniPermissionState,
+  OmniSpeechSessionDiagnostics,
   OmniSpeechInputAvailability,
   OmniSpeechInputEvent,
   OmniSpeechRecognitionResult,
-  OmniSpeechStartOptions
+  OmniSpeechStartOptions,
+  OmniVoiceFinalizationReason,
+  OmniVoiceSessionState
 } from '../../shared/omni-contracts'
 
 import { redactOmniActivityText } from './omni-task-store'
+import { OmniVoiceSessionMachine } from './omni-voice-session-machine'
 
 const SAY_EXECUTABLE = '/usr/bin/say'
 const MAX_SPEECH_CHARACTERS = 2_000
@@ -26,9 +30,12 @@ const MAX_SPEAKING_RATE = 2
 const VOICE_ID_PATTERN = /^[\p{L}\p{M}\p{N}][\p{L}\p{M}\p{N} .,'’()_-]*$/u
 const LOCALE_PATTERN = /^[a-z]{2,3}(?:_[A-Z0-9]{2,3})?$/u
 const SPEECH_HELPER_NAME = 'omnicode-speech-helper'
+const SPEECH_HELPER_BUNDLE_NAME = `${SPEECH_HELPER_NAME}.app`
 const DEFAULT_SPEECH_LOCALE = 'en-US'
 const MAX_TRANSCRIPT_CHARACTERS = 16_384
-const MAX_RECOGNITION_DURATION_MS = 60_000
+const MAX_RECOGNITION_DURATION_MS = 5 * 60_000
+const INITIAL_SILENCE_TIMEOUT_MS = 12_000
+const DEFAULT_END_SILENCE_MS = 1_600
 const SPEECH_HELPER_TIMEOUT_MS = 15_000
 const SPEECH_PERMISSION_TIMEOUT_MS = 2 * 60_000
 const SPEECH_LOCALE_PATTERN = /^[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{2,8})*$/u
@@ -76,16 +83,20 @@ export interface SpeechToTextProvider {
   start(options: {
     locale?: string
     requireOnDevice: boolean
+    finishSpeaking?: 'auto' | 'enter'
+    endOfSpeechDelayMs?: number
     signal?: AbortSignal
     onPartial?(transcript: string): void
     onAmplitude?(amplitude: number): void
+    onState?(state: OmniVoiceSessionState, reason?: OmniVoiceFinalizationReason): void
+    onDiagnostic?(diagnostics: OmniSpeechSessionDiagnostics): void
   }): Promise<SpeechRecognitionSession>
 }
 
 export interface SpeechRecognitionSession {
   readonly id: string
   readonly completion: Promise<OmniSpeechRecognitionResult>
-  stop(): Promise<{ transcript: string; cancelled: boolean }>
+  stop(reason?: OmniVoiceFinalizationReason): Promise<OmniSpeechRecognitionResult>
   cancel(): Promise<void>
 }
 
@@ -383,6 +394,68 @@ function safeSpeechHelperError(value: unknown, fallback: string): Error {
   return new Error(message)
 }
 
+function finishSpeakingMode(value: unknown): 'auto' | 'enter' {
+  if (value === undefined || value === 'auto') return 'auto'
+  if (value === 'enter') return 'enter'
+  throw new Error('Choose a valid finish-speaking mode.')
+}
+
+function endOfSpeechDelay(value: unknown): number {
+  if (value === undefined) return DEFAULT_END_SILENCE_MS
+  if (!Number.isSafeInteger(value) || (value as number) < 1_200 || (value as number) > 2_500) {
+    throw new Error('Choose an end-of-speech delay between 1.2 and 2.5 seconds.')
+  }
+  return value as number
+}
+
+const VOICE_STATES = new Set<OmniVoiceSessionState>([
+  'IDLE', 'STARTING', 'LISTENING', 'SPEECH_DETECTED', 'WAITING_FOR_END', 'FINALIZING_TRANSCRIPT',
+  'THINKING', 'WORKING', 'SPEAKING', 'COMPLETED', 'CANCELLED', 'FAILED'
+])
+const FINALIZATION_REASONS = new Set<OmniVoiceFinalizationReason>([
+  'SILENCE', 'ENTER', 'TIMEOUT', 'MANUAL', 'SPEECH_FRAMEWORK', 'CANCEL'
+])
+
+function voiceState(value: unknown): OmniVoiceSessionState | undefined {
+  return typeof value === 'string' && VOICE_STATES.has(value as OmniVoiceSessionState)
+    ? value as OmniVoiceSessionState
+    : undefined
+}
+
+function finalizationReason(value: unknown, fallback: OmniVoiceFinalizationReason): OmniVoiceFinalizationReason {
+  return typeof value === 'string' && FINALIZATION_REASONS.has(value as OmniVoiceFinalizationReason)
+    ? value as OmniVoiceFinalizationReason
+    : fallback
+}
+
+function finiteNumber(value: unknown, fallback = 0): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback
+}
+
+function speechDiagnostics(value: Record<string, unknown>): OmniSpeechSessionDiagnostics {
+  return {
+    inputDeviceName: typeof value.inputDeviceName === 'string' && value.inputDeviceName.trim()
+      ? safeProcessError(value.inputDeviceName).slice(0, 160)
+      : 'System Default',
+    inputDeviceTransport: typeof value.inputDeviceTransport === 'string' && value.inputDeviceTransport.trim()
+      ? safeProcessError(value.inputDeviceTransport).slice(0, 80)
+      : 'Unknown',
+    sampleRate: finiteNumber(value.sampleRate),
+    channelCount: Math.floor(finiteNumber(value.channelCount)),
+    locale: speechLocale(value.locale),
+    onDeviceRequested: value.onDeviceRequested === true,
+    onDeviceSupported: value.onDeviceSupported === true,
+    onDeviceActive: value.onDeviceActive === true,
+    ...(value.sessionDurationMs !== undefined ? { sessionDurationMs: Math.floor(finiteNumber(value.sessionDurationMs)) } : {}),
+    ...(value.speechStartMs !== undefined ? { speechStartMs: Math.floor(finiteNumber(value.speechStartMs)) } : {}),
+    ...(value.finalSilenceMs !== undefined ? { finalSilenceMs: Math.floor(finiteNumber(value.finalSilenceMs)) } : {}),
+    ...(value.partialResultCount !== undefined ? { partialResultCount: Math.floor(finiteNumber(value.partialResultCount)) } : {}),
+    ...(typeof value.finalizationReason === 'string'
+      ? { finalizationReason: finalizationReason(value.finalizationReason, 'MANUAL') }
+      : {})
+  }
+}
+
 export interface ResolveOmniSpeechHelperPathOptions {
   packaged: boolean
   resourcesPath: string
@@ -390,9 +463,10 @@ export interface ResolveOmniSpeechHelperPathOptions {
 }
 
 export function resolveOmniSpeechHelperPath(options: ResolveOmniSpeechHelperPathOptions): string {
-  return options.packaged
-    ? path.join(options.resourcesPath, 'omni-native', SPEECH_HELPER_NAME)
-    : path.join(options.appPath, 'out', 'native', SPEECH_HELPER_NAME)
+  const bundle = options.packaged
+    ? path.join(options.resourcesPath, 'omni-native', SPEECH_HELPER_BUNDLE_NAME)
+    : path.join(options.appPath, 'out', 'native', SPEECH_HELPER_BUNDLE_NAME)
+  return path.join(bundle, 'Contents', 'MacOS', SPEECH_HELPER_NAME)
 }
 
 function defaultSpeechHelperPath(): string {
@@ -420,7 +494,7 @@ interface ActiveRecognition {
   id: string
   child: ChildProcessWithoutNullStreams
   completion: Promise<OmniSpeechRecognitionResult>
-  stop(): Promise<OmniSpeechRecognitionResult>
+  stop(reason?: OmniVoiceFinalizationReason): Promise<OmniSpeechRecognitionResult>
   cancel(): Promise<void>
 }
 
@@ -459,7 +533,11 @@ export class MacOSSpeechToTextProvider implements SpeechToTextProvider {
       onDevice: false,
       streaming: false,
       locale: DEFAULT_SPEECH_LOCALE,
-      supportedLocales: []
+      supportedLocales: [],
+      inputDeviceName: 'Unavailable',
+      inputDeviceTransport: 'Unknown',
+      sampleRate: 0,
+      channelCount: 0
     }))
     return status.available ? { available: true } : { available: false, reason: status.reason }
   }
@@ -480,7 +558,11 @@ export class MacOSSpeechToTextProvider implements SpeechToTextProvider {
       onDevice: false,
       streaming: false,
       locale,
-      supportedLocales: []
+      supportedLocales: [],
+      inputDeviceName: 'Unavailable',
+      inputDeviceTransport: 'Unknown',
+      sampleRate: 0,
+      channelCount: 0
     }
     try { await this.#accessFile(this.#helperPath, fsConstants.X_OK) } catch {
       return {
@@ -492,7 +574,11 @@ export class MacOSSpeechToTextProvider implements SpeechToTextProvider {
         onDevice: false,
         streaming: false,
         locale,
-        supportedLocales: []
+        supportedLocales: [],
+        inputDeviceName: 'Unavailable',
+        inputDeviceTransport: 'Unknown',
+        sampleRate: 0,
+        channelCount: 0
       }
     }
     const id = randomUUID()
@@ -507,11 +593,13 @@ export class MacOSSpeechToTextProvider implements SpeechToTextProvider {
       : []
     const denied = microphonePermission === 'denied' || microphonePermission === 'restricted' ||
       speechRecognitionPermission === 'denied' || speechRecognitionPermission === 'restricted'
-    const available = recognizerAvailable && onDevice && !denied
+    const channelCount = Math.floor(finiteNumber(event.channelCount))
+    const available = recognizerAvailable && onDevice && !denied && channelCount > 0
     let reason: string | undefined
     if (denied) reason = 'Microphone and Speech Recognition permissions must be allowed in System Settings.'
     else if (!recognizerAvailable) reason = 'Apple Speech Recognition is currently unavailable for this locale.'
     else if (!onDevice) reason = 'On-device Speech Recognition is unavailable for this locale.'
+    else if (channelCount === 0) reason = 'No system input microphone is currently available.'
     return {
       available,
       providerId: this.id,
@@ -521,7 +609,15 @@ export class MacOSSpeechToTextProvider implements SpeechToTextProvider {
       onDevice,
       streaming: event.streaming === true,
       locale: typeof event.locale === 'string' ? speechLocale(event.locale) : locale,
-      supportedLocales
+      supportedLocales,
+      inputDeviceName: typeof event.inputDeviceName === 'string' && event.inputDeviceName.trim()
+        ? safeProcessError(event.inputDeviceName).slice(0, 160)
+        : 'System Default',
+      inputDeviceTransport: typeof event.inputDeviceTransport === 'string' && event.inputDeviceTransport.trim()
+        ? safeProcessError(event.inputDeviceTransport).slice(0, 80)
+        : 'Unknown',
+      sampleRate: finiteNumber(event.sampleRate),
+      channelCount
     }
   }
 
@@ -548,9 +644,13 @@ export class MacOSSpeechToTextProvider implements SpeechToTextProvider {
   async start(options: {
     locale?: string
     requireOnDevice: boolean
+    finishSpeaking?: 'auto' | 'enter'
+    endOfSpeechDelayMs?: number
     signal?: AbortSignal
     onPartial?(transcript: string): void
     onAmplitude?(amplitude: number): void
+    onState?(state: OmniVoiceSessionState, reason?: OmniVoiceFinalizationReason): void
+    onDiagnostic?(diagnostics: OmniSpeechSessionDiagnostics): void
   }): Promise<SpeechRecognitionSession> {
     if (this.#platform !== 'darwin') throw new Error('Omni voice input currently requires macOS.')
     if (options.requireOnDevice !== true) throw new Error('Omni voice input currently requires on-device recognition.')
@@ -563,7 +663,7 @@ export class MacOSSpeechToTextProvider implements SpeechToTextProvider {
     return {
       id,
       completion: active.completion,
-      stop: () => active.stop(),
+      stop: (reason) => active.stop(reason),
       cancel: () => active.cancel()
     }
   }
@@ -623,7 +723,15 @@ export class MacOSSpeechToTextProvider implements SpeechToTextProvider {
   async #startRecognition(
     id: string,
     locale: string,
-    options: { signal?: AbortSignal; onPartial?(transcript: string): void; onAmplitude?(amplitude: number): void }
+    options: {
+      finishSpeaking?: 'auto' | 'enter'
+      endOfSpeechDelayMs?: number
+      signal?: AbortSignal
+      onPartial?(transcript: string): void
+      onAmplitude?(amplitude: number): void
+      onState?(state: OmniVoiceSessionState, reason?: OmniVoiceFinalizationReason): void
+      onDiagnostic?(diagnostics: OmniSpeechSessionDiagnostics): void
+    }
   ): Promise<ActiveRecognition> {
     return await new Promise((resolve, reject) => {
       const child = this.#spawnProcess(this.#helperPath, [], { shell: false, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
@@ -663,17 +771,17 @@ export class MacOSSpeechToTextProvider implements SpeechToTextProvider {
         if (!ready) reject(error)
         cleanup()
       }
-      const sendControl = (command: 'stop' | 'cancel'): boolean => {
+      const sendControl = (command: 'stop' | 'cancel', reason?: OmniVoiceFinalizationReason): boolean => {
         if (child.stdin.destroyed || !child.stdin.writable) return false
-        child.stdin.write(`${JSON.stringify({ version: 1, id, command })}\n`, 'utf8')
+        child.stdin.write(`${JSON.stringify({ version: 1, id, command, ...(reason ? { reason } : {}) })}\n`, 'utf8')
         return true
       }
       const session: ActiveRecognition = {
         id,
         child,
         completion,
-        stop: async () => {
-          if (!completionSettled && !sendControl('stop')) throw new Error('Voice recognition is no longer running.')
+        stop: async (reason = 'MANUAL') => {
+          if (!completionSettled && !sendControl('stop', reason)) throw new Error('Voice recognition is no longer running.')
           return await completion
         },
         cancel: async () => {
@@ -707,8 +815,23 @@ export class MacOSSpeechToTextProvider implements SpeechToTextProvider {
           resolve(session)
           return
         }
+        if (parsed.event === 'state') {
+          const state = voiceState(parsed.state)
+          if (!state) {
+            fail(new Error('The speech helper returned an invalid voice state.'), true)
+            return
+          }
+          options.onState?.(state, typeof parsed.reason === 'string'
+            ? finalizationReason(parsed.reason, 'MANUAL')
+            : undefined)
+          return
+        }
+        if (parsed.event === 'diagnostic') {
+          options.onDiagnostic?.(speechDiagnostics(parsed))
+          return
+        }
         if (parsed.event === 'partial') {
-          if (!ready || typeof parsed.transcript !== 'string' || parsed.transcript.length > MAX_TRANSCRIPT_CHARACTERS) {
+          if (typeof parsed.transcript !== 'string' || parsed.transcript.length > MAX_TRANSCRIPT_CHARACTERS) {
             fail(new Error('The speech helper returned an invalid partial transcript.'), true)
             return
           }
@@ -716,7 +839,7 @@ export class MacOSSpeechToTextProvider implements SpeechToTextProvider {
           return
         }
         if (parsed.event === 'amplitude') {
-          if (!ready || typeof parsed.amplitude !== 'number' || !Number.isFinite(parsed.amplitude) || parsed.amplitude < 0 || parsed.amplitude > 1) {
+          if (typeof parsed.amplitude !== 'number' || !Number.isFinite(parsed.amplitude) || parsed.amplitude < 0 || parsed.amplitude > 1) {
             fail(new Error('The speech helper returned invalid microphone amplitude.'), true)
             return
           }
@@ -728,7 +851,8 @@ export class MacOSSpeechToTextProvider implements SpeechToTextProvider {
             fail(new Error('The speech helper returned an invalid final transcript.'), true)
             return
           }
-          finishCompletion({ transcript: parsed.transcript, cancelled: parsed.cancelled })
+          const reason = finalizationReason(parsed.reason, parsed.cancelled ? 'CANCEL' : 'SPEECH_FRAMEWORK')
+          finishCompletion({ transcript: parsed.transcript, cancelled: parsed.cancelled, reason })
           cleanup()
           return
         }
@@ -774,6 +898,9 @@ export class MacOSSpeechToTextProvider implements SpeechToTextProvider {
         command: 'recognize',
         locale,
         requireOnDevice: true,
+        finishSpeaking: finishSpeakingMode(options.finishSpeaking),
+        initialSilenceTimeoutMs: INITIAL_SILENCE_TIMEOUT_MS,
+        endSilenceMs: endOfSpeechDelay(options.endOfSpeechDelayMs),
         maximumDurationMs: MAX_RECOGNITION_DURATION_MS,
         maximumTranscriptCharacters: MAX_TRANSCRIPT_CHARACTERS
       })}\n`, 'utf8')
@@ -781,9 +908,16 @@ export class MacOSSpeechToTextProvider implements SpeechToTextProvider {
   }
 }
 
+interface ActiveVoiceInput {
+  session: SpeechRecognitionSession
+  machine: OmniVoiceSessionMachine
+  diagnostics?: OmniSpeechSessionDiagnostics
+}
+
 export class OmniVoiceService {
   readonly #listeners = new Set<(event: OmniSpeechInputEvent) => void>()
-  #activeInput: SpeechRecognitionSession | null = null
+  #activeInput: ActiveVoiceInput | null = null
+  #startingInput = false
 
   constructor(
     readonly textToSpeech: TextToSpeechProvider = new MacOSSayTextToSpeechProvider(),
@@ -817,7 +951,11 @@ export class OmniVoiceService {
       onDevice: capabilities.onDevice,
       streaming: capabilities.streaming,
       locale: speechLocale(locale),
-      supportedLocales: capabilities.supportedLocales
+      supportedLocales: capabilities.supportedLocales,
+      inputDeviceName: 'System Default',
+      inputDeviceTransport: 'Unknown',
+      sampleRate: 0,
+      channelCount: 0
     }))
   }
 
@@ -827,52 +965,98 @@ export class OmniVoiceService {
   }
 
   async startInput(options: OmniSpeechStartOptions = {}): Promise<{ sessionId: string }> {
-    if (this.#activeInput) throw new Error('Omni is already listening for a voice request.')
+    if (this.#activeInput || this.#startingInput) throw new Error('Omni is already listening for a voice request.')
     if (options.requireOnDevice !== undefined && options.requireOnDevice !== true) {
       throw new Error('Omni voice input requires on-device recognition.')
     }
-    await this.textToSpeech.stop()
+    const finishSpeaking = finishSpeakingMode(options.finishSpeaking)
+    const endOfSpeechDelayMs = endOfSpeechDelay(options.endOfSpeechDelayMs)
+    this.#startingInput = true
+    const machine = new OmniVoiceSessionMachine()
+    machine.start()
     let sessionId = ''
-    let pendingPartial = ''
-    const session = await this.speechToText.start({
-      locale: speechLocale(options.locale),
-      requireOnDevice: true,
-      onPartial: (transcript) => {
-        if (!sessionId) pendingPartial = transcript
-        else this.#emit({ sessionId, type: 'partial', transcript })
-      },
-      onAmplitude: (amplitude) => {
-        if (sessionId) this.#emit({ sessionId, type: 'amplitude', amplitude })
-      }
-    })
+    const pendingEvents: Array<Omit<OmniSpeechInputEvent, 'sessionId'>> = []
+    let latestDiagnostics: OmniSpeechSessionDiagnostics | undefined
+    const emitOrQueue = (event: Omit<OmniSpeechInputEvent, 'sessionId'>): void => {
+      if (sessionId) this.#emit({ sessionId, ...event })
+      else pendingEvents.push(event)
+    }
+    let session: SpeechRecognitionSession
+    try {
+      await this.textToSpeech.stop()
+      session = await this.speechToText.start({
+        locale: speechLocale(options.locale),
+        requireOnDevice: true,
+        finishSpeaking,
+        endOfSpeechDelayMs,
+        onPartial: (transcript) => {
+          if (machine.state === 'LISTENING') machine.transition('SPEECH_DETECTED')
+          emitOrQueue({ type: 'partial', transcript })
+        },
+        onAmplitude: (amplitude) => emitOrQueue({ type: 'amplitude', amplitude }),
+        onState: (state, reason) => {
+          const changed = state === 'FINALIZING_TRANSCRIPT'
+            ? machine.finalizeOnce(reason ?? 'MANUAL')
+            : machine.transition(state)
+          if (changed) emitOrQueue({ type: 'state', state, ...(reason ? { reason } : {}) })
+        },
+        onDiagnostic: (diagnostics) => {
+          latestDiagnostics = diagnostics
+          if (this.#activeInput?.session.id === sessionId) this.#activeInput.diagnostics = diagnostics
+          emitOrQueue({ type: 'diagnostic', diagnostics })
+        }
+      })
+    } catch (error) {
+      machine.fail()
+      throw error
+    } finally {
+      this.#startingInput = false
+    }
     sessionId = session.id
-    this.#activeInput = session
-    this.#emit({ sessionId: session.id, type: 'listening' })
-    if (pendingPartial) this.#emit({ sessionId: session.id, type: 'partial', transcript: pendingPartial })
+    this.#activeInput = { session, machine, ...(latestDiagnostics ? { diagnostics: latestDiagnostics } : {}) }
+    this.#emit({ sessionId, type: 'state', state: 'STARTING' })
+    for (const event of pendingEvents) this.#emit({ sessionId, ...event })
+    if (machine.state === 'STARTING') machine.transition('LISTENING')
+    this.#emit({ sessionId, type: 'listening', state: 'LISTENING' })
     void session.completion.then((result) => {
-      if (this.#activeInput?.id === session.id) this.#activeInput = null
+      const active = this.#activeInput?.session.id === session.id ? this.#activeInput : null
+      if (active) {
+        if (result.cancelled) active.machine.cancel()
+        else active.machine.complete()
+        this.#activeInput = null
+      }
+      const diagnostics = result.diagnostics ?? active?.diagnostics
       this.#emit({
         sessionId: session.id,
         type: result.cancelled ? 'cancelled' : 'final',
+        state: result.cancelled ? 'CANCELLED' : 'COMPLETED',
+        reason: result.reason,
+        ...(diagnostics ? { diagnostics } : {}),
         ...(result.transcript ? { transcript: result.transcript } : {})
       })
     }).catch((error: unknown) => {
-      if (this.#activeInput?.id === session.id) this.#activeInput = null
-      this.#emit({ sessionId: session.id, type: 'error', error: safeProcessError(error instanceof Error ? error.message : '') })
+      if (this.#activeInput?.session.id === session.id) {
+        this.#activeInput.machine.fail()
+        this.#activeInput = null
+      }
+      this.#emit({ sessionId: session.id, type: 'error', state: 'FAILED', error: safeProcessError(error instanceof Error ? error.message : '') })
     })
     return { sessionId: session.id }
   }
 
-  async stopInput(sessionId: string): Promise<OmniSpeechRecognitionResult> {
-    const session = this.#requireInputSession(sessionId)
-    return await session.stop()
+  async stopInput(sessionId: string, reason: OmniVoiceFinalizationReason = 'MANUAL'): Promise<OmniSpeechRecognitionResult> {
+    const active = this.#requireInputSession(sessionId)
+    if (!active.machine.finalizeOnce(reason)) return await active.session.completion
+    this.#emit({ sessionId, type: 'state', state: 'FINALIZING_TRANSCRIPT', reason })
+    return await active.session.stop(reason)
   }
 
   async cancelInput(sessionId: string): Promise<boolean> {
-    const session = this.#activeInput
-    if (!session || session.id !== sessionId) return false
+    const active = this.#activeInput
+    if (!active || active.session.id !== sessionId) return false
+    active.machine.cancel()
     this.#activeInput = null
-    await session.cancel()
+    await active.session.cancel()
     return true
   }
 
@@ -884,14 +1068,14 @@ export class OmniVoiceService {
   async dispose(): Promise<void> {
     const input = this.#activeInput
     this.#activeInput = null
-    if (input) await input.cancel().catch(() => undefined)
+    if (input) await input.session.cancel().catch(() => undefined)
     await this.textToSpeech.dispose()
   }
 
-  #requireInputSession(sessionId: string): SpeechRecognitionSession {
+  #requireInputSession(sessionId: string): ActiveVoiceInput {
     if (!sessionId || sessionId.length > 128) throw new Error('Choose a valid voice-input session.')
     const session = this.#activeInput
-    if (!session || session.id !== sessionId) throw new Error('That voice-input session is no longer active.')
+    if (!session || session.session.id !== sessionId) throw new Error('That voice-input session is no longer active.')
     return session
   }
 

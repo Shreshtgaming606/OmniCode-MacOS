@@ -46,6 +46,7 @@ import type {
   WorkToolPreview
 } from '../../../../shared/work-contracts'
 import { MarkdownMessage } from '../MarkdownMessage'
+import { LiveActivityCard, type LiveActivityEntry, type LiveActivityState } from '../activity/LiveActivityCard'
 import { WORK_APPROVAL_MODES, WORK_APPROVAL_MODE_COPY } from '../../lib/work-approval-mode'
 import './WorkModeShell.css'
 
@@ -280,21 +281,45 @@ function WorkMessageView({
   onLinkError(message: string): void
 }) {
   const user = message.role === 'user'
+  const toolActivities = message.toolActivities ?? []
+  const activityEntries: LiveActivityEntry[] = toolActivities.map((activity, index) => ({
+    id: activity.id,
+    title: activity.name,
+    summary: activity.summary,
+    status: activity.status === 'succeeded' ? 'completed'
+      : activity.status === 'awaiting-confirmation' ? 'waiting'
+        : activity.status === 'pending' ? 'queued'
+          : activity.status === 'running' && toolActivities.slice(0, index).some((previous) => previous.toolId === activity.toolId && previous.status === 'failed') ? 'retrying'
+            : activity.status,
+    startedAt: activity.createdAt,
+    completedAt: activity.completedAt
+  }))
+  const activityStatus: LiveActivityState = message.status === 'failed' ? 'failed'
+    : message.status === 'cancelled' ? 'cancelled'
+      : message.status === 'complete' ? 'completed'
+        : activityEntries.some((activity) => activity.status === 'waiting') ? 'waiting'
+          : 'running'
+  const activityStartedAt = activityEntries[0]?.startedAt ?? message.createdAt
+  const activityCompletedAt = message.status === 'complete' || message.status === 'failed' || message.status === 'cancelled'
+    ? activityEntries.at(-1)?.completedAt ?? activityEntries.at(-1)?.startedAt ?? message.createdAt
+    : undefined
   return <article className={`work-message ${user ? 'user' : 'assistant'} status-${message.status ?? 'complete'}`}>
     <span className="work-message-avatar">{user ? <UserRound /> : <Bot />}</span>
     <div className="work-message-content">
       <strong>{user ? 'You' : 'OmniCode'}</strong>
+      {!user && (message.status === 'pending' || message.status === 'streaming' || activityEntries.length > 0) && <LiveActivityCard
+        mode="Work"
+        status={activityStatus}
+        startedAt={activityStartedAt}
+        completedAt={activityCompletedAt}
+        entries={activityEntries}
+      />}
       {user
         ? <p className="work-message-plain">{message.content}</p>
         : <MarkdownMessage content={message.content} onLinkError={onLinkError} />}
       {!!message.attachments?.length && <div className="work-message-attachments" aria-label="Message attachments">{message.attachments.map((attachment) => <span key={attachment.id}><FileText />{attachment.name}</span>)}</div>}
-      {!!message.toolActivities?.length && <div className="work-tool-activities" aria-label="Connected app activity">
-        {message.toolActivities.map((activity) => <div className={`work-tool-activity state-${activity.status}`} key={activity.id}>
-          {activity.status === 'succeeded' ? <CheckCircle2 /> : activity.status === 'failed' ? <CircleAlert /> : <LoaderCircle className={activity.status === 'running' ? 'spin' : ''} />}
-          <div><strong>{activity.name}</strong><small>{activity.summary ?? activity.status}</small>
-            {activity.preview && <WorkResultPreview preview={activity.preview} />}
-          </div>
-        </div>)}
+      {!user && message.toolActivities?.some((activity) => activity.preview) && <div className="work-result-previews">
+        {message.toolActivities.flatMap((activity) => activity.preview ? [<WorkResultPreview preview={activity.preview} key={activity.id} />] : [])}
       </div>}
       <div className="work-message-actions">
         {!user && message.content && <button type="button" aria-label="Copy response" title="Copy response" onClick={() => onCopy(message)}><Copy />Copy</button>}

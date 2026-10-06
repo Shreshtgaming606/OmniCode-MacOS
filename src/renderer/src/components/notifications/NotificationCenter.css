@@ -1,0 +1,48 @@
+.notification-center { position: relative; margin-left: 3px; -webkit-app-region: no-drag; }
+.notification-bell { position: relative; width: 30px; height: 30px; display: grid; place-items: center; border-radius: var(--radius-sm); color: var(--text-secondary); }
+.notification-bell:hover, .notification-bell.active { color: var(--text); background: var(--bg-hover); }
+.notification-bell > svg { width: 16px; height: 16px; }
+.notification-bell > span { position: absolute; top: -2px; right: -5px; min-width: 16px; height: 16px; padding: 0 4px; display: grid; place-items: center; border: 2px solid var(--bg-title); border-radius: 999px; color: white; background: var(--danger); font-size: 8px; font-weight: 800; line-height: 1; }
+.notification-panel { position: absolute; z-index: 2500; top: calc(100% + 8px); right: 0; width: min(410px, calc(100vw - 24px)); max-height: min(680px, calc(100vh - 62px)); display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; overflow: hidden; border: 1px solid var(--border-strong); border-radius: 14px; background: color-mix(in srgb, var(--bg-raised) 97%, transparent); box-shadow: var(--shadow-lg); backdrop-filter: blur(24px); animation: omni-enter var(--motion-base) var(--ease-emphasized); }
+.notification-panel > header { padding: 13px 13px 10px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); }
+.notification-panel > header > span { display: grid; gap: 2px; }
+.notification-panel > header strong { color: var(--text); font-size: var(--font-md); }
+.notification-panel > header small { color: var(--text-muted); font-size: var(--font-xs); }
+.notification-panel > header button { width: 27px; height: 27px; display: grid; place-items: center; border-radius: var(--radius-sm); color: var(--text-muted); }
+.notification-panel > header button:hover { color: var(--text); background: var(--bg-hover); }
+.notification-panel > header svg { width: 14px; height: 14px; }
+.notification-toolbar { padding: 8px 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--border); }
+.notification-toolbar > div { padding: 2px; display: flex; gap: 1px; border-radius: 8px; background: var(--bg-input); }
+.notification-toolbar button { padding: 5px 7px; display: flex; align-items: center; gap: 4px; border-radius: 6px; color: var(--text-muted); font-size: 10px; }
+.notification-toolbar > div button.active { color: var(--text); background: var(--bg-raised); box-shadow: var(--shadow-xs); }
+.notification-toolbar > button:hover:not(:disabled) { color: var(--text); background: var(--bg-hover); }
+.notification-toolbar svg { width: 12px; height: 12px; }
+.notification-list { min-height: 130px; overflow: auto; padding: 6px; }
+.notification-list article { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; border-radius: 9px; }
+.notification-list article:hover { background: var(--bg-hover); }
+.notification-list article.unread { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.notification-open { min-width: 0; padding: 9px 6px 9px 7px; display: grid; grid-template-columns: 28px minmax(0, 1fr) 7px; align-items: start; gap: 8px; text-align: left; }
+.notification-type-icon { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.severity-success .notification-type-icon { color: var(--success); background: color-mix(in srgb, var(--success) 10%, transparent); }
+.severity-error .notification-type-icon { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.severity-warning .notification-type-icon { color: var(--warning); background: color-mix(in srgb, var(--warning) 10%, transparent); }
+.notification-type-icon svg { width: 14px; height: 14px; }
+.notification-open > span:nth-child(2) { min-width: 0; display: grid; gap: 2px; }
+.notification-open strong { overflow: hidden; color: var(--text); font-size: var(--font-xs); text-overflow: ellipsis; white-space: nowrap; }
+.notification-open small { display: -webkit-box; overflow: hidden; color: var(--text-secondary); font-size: 10px; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.notification-open em { margin-top: 2px; color: var(--text-muted); font-size: 9px; font-style: normal; }
+.notification-open > i { width: 6px; height: 6px; margin-top: 5px; border-radius: 50%; background: var(--accent); }
+.notification-row-actions { padding: 8px 5px 0 0; display: flex; opacity: 0; }
+.notification-list article:hover .notification-row-actions, .notification-row-actions:focus-within { opacity: 1; }
+.notification-row-actions button { width: 23px; height: 23px; display: grid; place-items: center; border-radius: 5px; color: var(--text-muted); }
+.notification-row-actions button:hover { color: var(--text); background: var(--bg-raised); }
+.notification-row-actions svg { width: 11px; height: 11px; }
+.notification-empty { min-height: 180px; display: grid; place-items: center; align-content: center; gap: 5px; color: var(--text-muted); text-align: center; }
+.notification-empty > svg { width: 23px; height: 23px; opacity: .65; }
+.notification-empty strong { color: var(--text-secondary); font-size: var(--font-sm); }
+.notification-empty p { max-width: 240px; margin: 0; font-size: 10px; line-height: 1.4; }
+.notification-panel > footer { padding: 8px 10px; display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--border); }
+.notification-panel > footer button { padding: 5px 7px; display: flex; align-items: center; gap: 5px; border-radius: 6px; color: var(--text-muted); font-size: 10px; }
+.notification-panel > footer button:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); }
+.notification-panel > footer svg { width: 11px; height: 11px; }
+.notification-panel > footer span { color: var(--text-muted); font-size: 9px; }

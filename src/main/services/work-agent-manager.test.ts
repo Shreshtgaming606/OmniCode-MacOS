@@ -60,9 +60,14 @@ describe('Work model tool boundary', () => {
   it('exposes tools only to an installed matching local model with explicit support', () => {
     const models = [
       { id: 'tool-model', installed: true, toolUse: true },
+      { id: 'structured-model', installed: true, toolUse: false, modelCapabilities: {
+        supportsTools: true, supportsNativeTools: false, supportsStructuredOutput: true,
+        supportsStreaming: true, supportsVision: false, supportsEmbeddings: false, toolMode: 'structured' as const
+      } },
       { id: 'not-installed', installed: false, toolUse: true }
     ]
     expect(modelCanUseWorkTools('ollama', 'TOOL-MODEL', models)).toBe(true)
+    expect(modelCanUseWorkTools('ollama', 'structured-model', models)).toBe(true)
     expect(modelCanUseWorkTools('ollama', 'not-installed', models)).toBe(false)
     expect(modelCanUseWorkTools('google', 'gemini-test', [])).toBe(true)
   })
@@ -218,6 +223,37 @@ describe('WorkAgentManager', () => {
     expect(response.toolActivities).toMatchObject([{ toolId: 'browser.read', status: 'succeeded' }])
     expect(execute).toHaveBeenCalledWith({ toolId: 'browser.read', mode: 'work', input: {} })
     expect(response.toolActivities[0]).not.toHaveProperty('result')
+  })
+
+  it.each(['stop', 'length'])('preserves a successful tool outcome when the model returns no final text (%s)', async (stopReason) => {
+    const toolTurn = vi.fn()
+      .mockResolvedValueOnce({ content: '', calls: [{ callId: 'call-1', name: 'tool_0_browser_read', toolId: 'browser.read', input: {} }] })
+      .mockResolvedValueOnce({ content: '', calls: [], stopReason })
+    const manager = new WorkAgentManager({ toolTurn } as unknown as AIManager)
+    const execute = vi.fn(async () => ({
+      toolId: 'browser.read', startedAt: '2026-01-01T00:00:00Z', completedAt: '2026-01-01T00:00:01Z',
+      result: { title: 'Example Domain' }, authorization: automaticAuthorization
+    }))
+
+    const response = await manager.chat({
+      provider: 'ollama', model: 'qwen-test', messages: [{ role: 'user', content: 'Read the page.' }]
+    }, [browserTool], execute)
+
+    expect(response.content).toContain('Read visible page completed.')
+    expect(response.content).toContain(`ended without a final text response (${stopReason})`)
+    expect(response.content).toContain('preserved the confirmed tool result')
+    expect(response).toMatchObject({ toolCallCount: 1, toolActivities: [{ toolId: 'browser.read', status: 'succeeded' }] })
+    expect(execute).toHaveBeenCalledOnce()
+  })
+
+  it('still rejects an empty first model turn because no tool outcome exists to preserve', async () => {
+    const manager = new WorkAgentManager({
+      toolTurn: vi.fn(async () => ({ content: '', calls: [], stopReason: 'stop' }))
+    } as unknown as AIManager)
+
+    await expect(manager.chat({
+      provider: 'ollama', model: 'qwen-test', messages: [{ role: 'user', content: 'Hello.' }]
+    }, [browserTool], vi.fn())).rejects.toThrow('ended without a Work response (stop)')
   })
 
   it('redacts secrets from successful tool results before the next provider turn', async () => {

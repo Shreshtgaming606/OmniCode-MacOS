@@ -209,6 +209,12 @@ const api: OmniCodeAPI = {
     voice: {
       availability: () => ipcRenderer.invoke('omni:voice:availability'),
       voices: () => ipcRenderer.invoke('omni:voice:voices'),
+      elevenlabsConnected: () => ipcRenderer.invoke('omni:voice:elevenlabs-connected'),
+      elevenlabsConnect: (key) => ipcRenderer.invoke('omni:voice:elevenlabs-connect', key),
+      elevenlabsDisconnect: () => ipcRenderer.invoke('omni:voice:elevenlabs-disconnect'),
+      elevenlabsVoices: () => ipcRenderer.invoke('omni:voice:elevenlabs-voices'),
+      elevenlabsModels: () => ipcRenderer.invoke('omni:voice:elevenlabs-models'),
+      elevenlabsPreview: (voiceId, modelId, settings) => ipcRenderer.invoke('omni:voice:elevenlabs-preview', voiceId, modelId, settings),
       test: () => ipcRenderer.invoke('omni:voice:test'),
       stop: () => ipcRenderer.invoke('omni:voice:stop'),
       inputAvailability: () => ipcRenderer.invoke('omni:voice:input-availability'),
@@ -224,6 +230,8 @@ const api: OmniCodeAPI = {
   },
   ai: {
     ollamaStatus: () => ipcRenderer.invoke('ai:ollama-status'),
+    ollamaSettings: () => ipcRenderer.invoke('ai:ollama-settings'),
+    updateOllamaSettings: (settings) => ipcRenderer.invoke('ai:update-ollama-settings', settings),
     models: () => ipcRenderer.invoke('ai:models'),
     modelCatalog: (query) => ipcRenderer.invoke('ai:model-catalog', query),
     cloudModelCatalog: (provider, query) => ipcRenderer.invoke('ai:cloud-model-catalog', provider, query),
@@ -283,6 +291,15 @@ const api: OmniCodeAPI = {
     copyText: (value) => ipcRenderer.invoke('app:copy-text', value),
     notify: (title, body) => ipcRenderer.invoke('app:notify', title, body),
     onCommand: (callback) => appCommands.subscribe(callback)
+  },
+  notifications: {
+    snapshot: () => ipcRenderer.invoke('notifications:snapshot'),
+    markRead: (id, read) => ipcRenderer.invoke('notifications:mark-read', id, read),
+    markAllRead: () => ipcRenderer.invoke('notifications:mark-all-read'),
+    remove: (id) => ipcRenderer.invoke('notifications:remove', id),
+    clear: () => ipcRenderer.invoke('notifications:clear'),
+    updateSettings: (changes) => ipcRenderer.invoke('notifications:update-settings', changes),
+    onChanged: (callback) => subscribe('notifications:changed', callback)
   }
 }
 

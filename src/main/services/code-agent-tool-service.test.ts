@@ -43,6 +43,15 @@ afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root,
 const full = { accessLevel: 'trusted' as const, approvalMode: 'full' as const, confirm: vi.fn(async () => true) }
 
 describe('CodeAgentToolService', () => {
+  it('accepts the conventional dot sentinel when listing the workspace root', async () => {
+    const value = await setup()
+    await expect(value.registry.execute({
+      toolId: 'files.list', mode: 'code', input: { path: '.' }
+    }, full, { executionId: 'task-a' })).resolves.toMatchObject({
+      result: { path: '.', entries: expect.arrayContaining([expect.objectContaining({ name: 'source.ts', kind: 'file' })]) }
+    })
+  })
+
   it('applies workspace changes through a real diff proposal and preserves undo', async () => {
     const value = await setup()
     const result = await value.registry.execute({

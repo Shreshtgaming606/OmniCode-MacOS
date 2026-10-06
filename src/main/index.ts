@@ -36,6 +36,7 @@ import { RUNTIME_TOOL_DEFINITIONS, detectHardware, detectTools } from './service
 import { RuntimeInstaller, installationPlanFor, runtimeToolId } from './services/runtime-installer'
 import { validateAgentCommand } from './services/agent-command-policy'
 import { DiagnosticLogger } from './services/diagnostic-logger'
+import { NotificationManager } from './services/notification-manager'
 import { WorkConversationManager } from './services/work-conversation-manager'
 import { ModelCatalogManager } from './services/model-catalog-manager'
 import { ConnectorManager } from './services/connector-manager'
@@ -47,7 +48,7 @@ import { GoogleDriveConnector } from './connectors/google-drive-connector'
 import { GoogleOAuthManager, readGoogleOAuthConfig } from './services/google-oauth-manager'
 import { SecureKeychainStore } from './services/secure-keychain-store'
 import type { JsonValue, ToolConfirmationRequest, ToolExecutionRequest } from '../shared/tool-contracts'
-import type { WorkAgentChatRequest, WorkAgentStreamEvent } from '../shared/work-contracts'
+import type { WorkAgentChatRequest, WorkAgentChatResponse, WorkAgentStreamEvent } from '../shared/work-contracts'
 import { modelCanUseWorkTools, WorkAgentManager } from './services/work-agent-manager'
 import { WorkAttachmentManager } from './services/work-attachment-manager'
 import { WorkTransferStore } from './services/work-transfer-store'
@@ -61,7 +62,10 @@ import { OmniSettingsManager, type OmniSettingsUpdate } from './services/omni-se
 import { OmniTaskStore } from './services/omni-task-store'
 import { OmniToolRouter } from './services/omni-tool-router'
 import { OmniController } from './services/omni-controller'
-import { OmniVoiceService } from './services/omni-voice-service'
+import { OmniVoiceService, resolveOmniSpeechHelperPath } from './services/omni-voice-service'
+import { ElevenLabsTTSProvider } from './services/elevenlabs-tts-provider'
+import { OmniSpeechOutput } from './services/omni-speech-output'
+import { OmniStreamingSpeech } from './services/omni-streaming-speech'
 import { OmniCursorService } from './services/omni-cursor-service'
 import { OmniComputerToolService } from './services/omni-computer-tool-service'
 import {
@@ -74,7 +78,17 @@ import { isOmniOverlayInvokeChannel } from './services/omni-overlay-channel-poli
 import { isGoogleWorkspaceConnector, ProviderPolicyManager } from './services/provider-policy-manager'
 import type { GitCloneProgress, OmniSettingsChanges } from '../shared/contracts'
 import type { AIUsageExportFormat, AIUsageQuery, AIUsageSettings } from '../shared/ai-usage-contracts'
-import type { OmniExecutionMode, OmniPermissionId, OmniPermissionsSnapshot, OmniSettings, OmniStartRequest } from '../shared/omni-contracts'
+import type { CreateOmniNotification, NotificationSettings, NotificationSnapshot } from '../shared/notification-contracts'
+import type {
+  OmniExecutionMode,
+  OmniPermissionId,
+  OmniPermissionsSnapshot,
+  OmniSettings,
+  OmniSpeechInputEvent,
+  OmniSpeechStartOptions,
+  OmniStartRequest,
+  OmniVoiceFinalizationReason
+} from '../shared/omni-contracts'
 import { OMNI_CURSOR_EMERGENCY_STOP_SHORTCUT } from '../shared/omni-cursor-contracts'
 import type {
   ToolAuthorizationDecision,
@@ -89,6 +103,14 @@ let omniOverlayWindow: BrowserWindow | null = null
 let omniTray: Tray | null = null
 let registeredOmniShortcut: string | null = null
 let registeredOmniEmergencyStop = false
+let registeredOmniVoiceEnter = false
+let registeredOmniVoiceEscape = false
+let activeOmniVoiceInvocation: {
+  sessionId: string
+  activationSource: OmniStartRequest['activationSource']
+  submitOnFinal: boolean
+  submitted: boolean
+} | null = null
 let pendingOmniActivation = false
 let omniOverlayActivationSource: OmniStartRequest['activationSource'] = 'overlay'
 let omniController: OmniController
@@ -110,6 +132,11 @@ const git = new GitManager()
 const credentials = new CredentialManager()
 const indexer = new WorkspaceIndexer()
 const diagnostics = new DiagnosticLogger(path.join(app.getPath('userData'), 'logs'))
+const notifications = new NotificationManager(path.join(app.getPath('userData'), 'notifications.json'), {
+  showNative: (title, body) => {
+    if (Notification.isSupported()) new Notification({ title, body }).show()
+  }
+})
 const aiUsage = new AIUsageManager(path.join(app.getPath('userData'), 'ai-usage.sqlite'))
 const ai = new AIManager(credentials, indexer, detectHardware, {
   settingsPath: path.join(app.getPath('userData'), 'ai-model-preferences.json'),
@@ -140,7 +167,76 @@ const codeAgentActivity = new CodeAgentActivityManager(path.join(app.getPath('us
 const omniSettings = new OmniSettingsManager(path.join(app.getPath('userData'), 'omni-settings.json'))
 const omniTasks = new OmniTaskStore(path.join(app.getPath('userData'), 'omni-tasks.json'))
 const omniVoice = new OmniVoiceService()
-omniVoice.onInputEvent((event) => broadcastOmni('omni:voice-input-event', event))
+const elevenlabsVoice = new ElevenLabsTTSProvider({
+  keychain: new SecureKeychainStore('com.omnicode.editor.elevenlabs'),
+  helperPath: resolveOmniSpeechHelperPath({
+    packaged: app.isPackaged, resourcesPath: process.resourcesPath, appPath: app.getAppPath()
+  })
+})
+const omniOutput = new OmniSpeechOutput(omniVoice, elevenlabsVoice, omniSettings)
+const streamingOmniSpeech = new Map<string, Promise<OmniStreamingSpeech | null>>()
+const activeOmniSpeechTasks = new Set<string>()
+const suppressedOmniSpeechTasks = new Set<string>()
+omniVoice.onInputEvent(handleOmniVoiceEvent)
+
+function cancelStreamingOmniSpeech(taskId?: string): void {
+  for (const [id, pending] of streamingOmniSpeech) {
+    if (taskId && id !== taskId) continue
+    streamingOmniSpeech.delete(id)
+    void pending.then((session) => session?.cancel()).catch(() => undefined)
+  }
+}
+
+function suppressOmniSpeech(taskId?: string): void {
+  if (taskId) suppressedOmniSpeechTasks.add(taskId)
+  else for (const id of activeOmniSpeechTasks) suppressedOmniSpeechTasks.add(id)
+  cancelStreamingOmniSpeech(taskId)
+}
+
+function pushOmniResponseDelta(taskId: string, delta: string): void {
+  if (suppressedOmniSpeechTasks.has(taskId)) return
+  let pending = streamingOmniSpeech.get(taskId)
+  if (!pending) {
+    pending = omniSettings.get().then(async (value) => {
+      if (!value.enabled || !value.voice.spokenResponses || value.voice.outputProvider !== 'elevenlabs' || !await omniOutput.connected()) return null
+      return new OmniStreamingSpeech(omniOutput, value.voice, {
+        start: (text) => broadcastOmni('omni:voice-output-event', { type: 'speaking', taskId, text }),
+        fallback: (reason) => broadcastOmni('omni:voice-output-event', { type: 'fallback', taskId, reason }),
+        finish: (interrupted) => broadcastOmni('omni:voice-output-event', { type: interrupted ? 'interrupted' : 'finished', taskId }),
+        error: () => broadcastOmni('omni:voice-output-event', { type: 'error', taskId })
+      })
+    })
+    streamingOmniSpeech.set(taskId, pending)
+  }
+  void pending.then((session) => session?.push(delta)).catch(() => undefined)
+}
+
+async function finishOmniResponseSpeech(taskId: string, text: string): Promise<void> {
+  if (suppressedOmniSpeechTasks.has(taskId)) {
+    cancelStreamingOmniSpeech(taskId)
+    suppressedOmniSpeechTasks.delete(taskId)
+    activeOmniSpeechTasks.delete(taskId)
+    return
+  }
+  const pending = streamingOmniSpeech.get(taskId)
+  if (pending) {
+    const session = await pending.catch(() => null)
+    if (session) {
+      try { await session.finish(text) }
+      finally {
+        if (streamingOmniSpeech.get(taskId) === pending) streamingOmniSpeech.delete(taskId)
+        suppressedOmniSpeechTasks.delete(taskId)
+        activeOmniSpeechTasks.delete(taskId)
+      }
+      return
+    }
+  }
+  try { await speakOmniResponse(taskId, text) }
+  finally {
+    suppressedOmniSpeechTasks.delete(taskId)
+    activeOmniSpeechTasks.delete(taskId)
+  }
+}
 
 function setOmniLaunchAtLogin(enabled: boolean): void {
   const desired = createOmniLoginItemSettings(true, enabled)
@@ -197,6 +293,7 @@ const workTools = new ToolRegistry(permissionManager)
 const workConnectors = new ConnectorManager()
 const browserConnector = new BrowserConnector()
 const codeAgentFocus = new Map<string, 'automatic' | 'when-needed' | 'never'>()
+const notifiedCodeTasks = new Set<string>()
 const codeBrowserConnector = new BrowserConnector({
   mode: 'code', allowLoopback: true, connectorId: 'code-browser',
   shouldShow: (taskId) => !taskId || codeAgentFocus.get(taskId) !== 'never'
@@ -218,7 +315,13 @@ const googleOAuth = new GoogleOAuthManager(
   new SecureKeychainStore('com.omnicode.editor.oauth'),
   { openExternal: (url) => shell.openExternal(url) }
 )
-const gmailConnector = new GmailConnector(googleOAuth, fetch, workTransfers, saveWorkTransfer)
+const gmailConnector = new GmailConnector(
+  googleOAuth,
+  fetch,
+  workTransfers,
+  saveWorkTransfer,
+  (diagnostic) => diagnostics.failure('gmail:api', new Error(JSON.stringify(diagnostic)))
+)
 const googleDriveConnector = new GoogleDriveConnector(googleOAuth, fetch, workTransfers, saveWorkTransfer)
 const providerPolicies = new ProviderPolicyManager({
   settingsPath: path.join(app.getPath('userData'), 'provider-data-policy.json'),
@@ -275,6 +378,7 @@ const codeAgent = new CodeAgentManager({
   },
   onTaskChanged: (senderId, task) => {
     if (mainWindow?.webContents.id === senderId && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send('agent:task-changed', task)
+    notifyCodeTask(task)
   },
   onEvent: (senderId, event) => {
     if (mainWindow?.webContents.id === senderId && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send('agent:event', event)
@@ -298,6 +402,11 @@ omniController = new OmniController({
   resumeTask: (taskId) => omniComputerToolService.resumeTask(taskId),
   onTaskChanged: (task) => {
     broadcastOmni('omni:task-changed', task)
+    if (task.status === 'failed' || task.status === 'stopped') {
+      cancelStreamingOmniSpeech(task.id)
+      suppressedOmniSpeechTasks.delete(task.id)
+      activeOmniSpeechTasks.delete(task.id)
+    }
     if (task.status === 'completed' || task.status === 'failed' || task.status === 'stopped') {
       void omniSettings.get()
         .then((value) => omniTasks.pruneExpired(value.privacy.activityRetentionDays))
@@ -305,8 +414,14 @@ omniController = new OmniController({
     }
   },
   onEvent: (event) => broadcastOmni('omni:event', event),
-  onSpeak: (taskId, text) => { void speakOmniResponse(taskId, text) },
-  onTaskStarted: (taskId, mode) => { codeAgentFocus.set(taskId, mode === 'invisible' ? 'never' : 'automatic') },
+  onSpeak: (taskId, text) => { void finishOmniResponseSpeech(taskId, text) },
+  onResponseDelta: pushOmniResponseDelta,
+  onTaskStarted: (taskId, mode) => {
+    suppressOmniSpeech()
+    void omniOutput.stop()
+    activeOmniSpeechTasks.add(taskId)
+    codeAgentFocus.set(taskId, mode === 'invisible' ? 'never' : 'automatic')
+  },
   onExecutionModeChanged: (taskId, mode) => {
     codeAgentFocus.set(taskId, mode === 'invisible' ? 'never' : 'automatic')
     if (mode === 'invisible') void omniComputerToolService.cleanupTask(taskId)
@@ -439,6 +554,7 @@ async function attachWorkContext(request: WorkAgentChatRequest): Promise<WorkAge
 
 function approvalTitle(request: ToolConfirmationRequest): string {
   if (request.toolId === 'gmail.send') return 'Send this email?'
+  if (request.toolId === 'gmail.send-draft') return 'Send this saved draft?'
   if (request.toolId === 'gmail.reply') return 'Send this reply?'
   if (request.toolId === 'gmail.draft') return 'Create this draft?'
   if (request.toolId === 'drive.trash') return 'Move this Drive item to trash?'
@@ -451,7 +567,11 @@ function displayText(value: unknown, maximum = 4_000): string {
 
 async function workApprovalDetails(request: ToolConfirmationRequest): Promise<WorkApprovalDetail[]> {
   const details: WorkApprovalDetail[] = []
-  const input = request.input
+  const input = request.toolId === 'gmail.send-draft'
+    ? await gmailConnector.resolveDraftForApproval(String(request.input.draftId))
+    : request.connectorId === 'gmail' && ['gmail.draft', 'gmail.send', 'gmail.reply'].includes(request.toolId)
+      ? await gmailConnector.resolveMessageForApproval(request.input)
+      : request.input
   const append = (label: string, value: unknown, multiline = false, maximum?: number): void => {
     const text = Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string').join(', ') : displayText(value, maximum)
     if (text) details.push({ label, value: text, ...(multiline ? { multiline: true } : {}) })
@@ -459,6 +579,7 @@ async function workApprovalDetails(request: ToolConfirmationRequest): Promise<Wo
   if (request.connectorId === 'gmail') {
     append('To', input.to)
     append('Cc', input.cc)
+    append('Bcc', input.bcc)
     append('Subject', input.subject, false, 998)
     append('Message', input.body, true, 131_072)
     if (typeof input.unread === 'boolean') append('New state', input.unread ? 'Unread' : 'Read')
@@ -546,7 +667,7 @@ function cancelWorkApprovals(senderId?: number): void {
 }
 
 async function nativeWorkConfirmation(sender: Electron.WebContents, request: WorkApprovalRequest): Promise<boolean> {
-  const isEmailSend = request.toolId === 'gmail.send' || request.toolId === 'gmail.reply'
+  const isEmailSend = ['gmail.send', 'gmail.send-draft', 'gmail.reply'].includes(request.toolId)
   const detailText = request.details.map((detail) => `${detail.label}: ${detail.value}`).join('\n')
   const options: Electron.MessageBoxOptions = {
     type: request.category === 'destructive' || request.risk === 'critical' ? 'warning' : 'question',
@@ -601,6 +722,187 @@ function broadcastOmni(channel: string, payload: unknown): void {
   if (omniOverlayWindow && !omniOverlayWindow.isDestroyed() && !omniOverlayWindow.webContents.isDestroyed()) {
     omniOverlayWindow.webContents.send(channel, payload)
   }
+}
+
+function clearOmniVoiceShortcuts(): void {
+  if (registeredOmniVoiceEnter) globalShortcut.unregister('Enter')
+  if (registeredOmniVoiceEscape) globalShortcut.unregister('Esc')
+  registeredOmniVoiceEnter = false
+  registeredOmniVoiceEscape = false
+}
+
+function finishActiveOmniVoice(reason: OmniVoiceFinalizationReason): void {
+  const active = activeOmniVoiceInvocation
+  if (!active) return
+  clearOmniVoiceShortcuts()
+  void omniVoice.stopInput(active.sessionId, reason)
+    .catch((error) => diagnostics.failure('omni:voice-finalize', error))
+}
+
+function cancelActiveOmniVoice(): void {
+  const active = activeOmniVoiceInvocation
+  if (!active) return
+  clearOmniVoiceShortcuts()
+  active.submitOnFinal = false
+  void omniVoice.cancelInput(active.sessionId)
+    .catch((error) => diagnostics.failure('omni:voice-cancel', error))
+}
+
+async function cancelOmniVoiceInput(sessionId: string): Promise<boolean> {
+  if (activeOmniVoiceInvocation?.sessionId === sessionId) {
+    activeOmniVoiceInvocation.submitOnFinal = false
+    clearOmniVoiceShortcuts()
+  }
+  return await omniVoice.cancelInput(sessionId)
+}
+
+function registerOmniVoiceShortcuts(): boolean {
+  clearOmniVoiceShortcuts()
+  try {
+    registeredOmniVoiceEnter = globalShortcut.register('Enter', () => finishActiveOmniVoice('ENTER'))
+    registeredOmniVoiceEscape = globalShortcut.register('Esc', cancelActiveOmniVoice)
+  } catch (error) {
+    void diagnostics.failure('omni:voice-shortcuts', error)
+  }
+  if (registeredOmniVoiceEnter && registeredOmniVoiceEscape) return true
+  clearOmniVoiceShortcuts()
+  return false
+}
+
+async function startOmniVoiceInput(
+  activationSource: OmniStartRequest['activationSource'],
+  options: OmniSpeechStartOptions = {}
+): Promise<{ sessionId: string }> {
+  suppressOmniSpeech()
+  await omniOutput.stop()
+  const saved = await omniSettings.get()
+  const started = await omniVoice.startInput({
+    locale: options.locale,
+    requireOnDevice: true,
+    finishSpeaking: saved.voice.finishSpeaking,
+    endOfSpeechDelayMs: saved.voice.endOfSpeechDelayMs,
+    submitOnFinal: options.submitOnFinal
+  })
+  activeOmniVoiceInvocation = {
+    sessionId: started.sessionId,
+    activationSource,
+    submitOnFinal: options.submitOnFinal !== false,
+    submitted: false
+  }
+  if (!registerOmniVoiceShortcuts()) {
+    const sessionId = started.sessionId
+    activeOmniVoiceInvocation = null
+    await omniVoice.cancelInput(sessionId).catch(() => undefined)
+    throw new Error('Omni could not temporarily register Enter and Escape for this voice session.')
+  }
+  return started
+}
+
+function handleOmniVoiceEvent(event: OmniSpeechInputEvent): void {
+  broadcastOmni('omni:voice-input-event', event)
+  if (event.type === 'diagnostic' && event.diagnostics) {
+    const detail = event.diagnostics
+    void diagnostics.lifecycle(
+      'omni-voice-session',
+      `Session ${event.sessionId}; input ${detail.inputDeviceName}; ${detail.sampleRate} Hz; ${detail.channelCount} channel(s); locale ${detail.locale}; on-device requested=${detail.onDeviceRequested}; supported=${detail.onDeviceSupported}; active=${detail.onDeviceActive}; duration=${detail.sessionDurationMs ?? 0} ms; speech-start=${detail.speechStartMs ?? -1} ms; final-silence=${detail.finalSilenceMs ?? 0} ms; partials=${detail.partialResultCount ?? 0}; reason=${detail.finalizationReason ?? 'pending'}.`
+    ).catch(() => undefined)
+  }
+  if (event.type === 'state' && event.state === 'FINALIZING_TRANSCRIPT') clearOmniVoiceShortcuts()
+  if (!['final', 'cancelled', 'error'].includes(event.type)) return
+  clearOmniVoiceShortcuts()
+  const invocation = activeOmniVoiceInvocation?.sessionId === event.sessionId ? activeOmniVoiceInvocation : null
+  if (invocation) activeOmniVoiceInvocation = null
+  if (event.type !== 'final' || !invocation?.submitOnFinal || invocation.submitted || !event.transcript?.trim()) return
+  invocation.submitted = true
+  void startOmniTask(event.transcript, invocation.activationSource).catch((error) => {
+    void diagnostics.failure('omni:voice-submit', error)
+    broadcastOmni('omni:voice-input-event', {
+      sessionId: event.sessionId,
+      type: 'error',
+      state: 'FAILED',
+      error: error instanceof Error ? error.message : 'Omni could not start the spoken request.'
+    } satisfies OmniSpeechInputEvent)
+  })
+}
+
+function broadcastNotifications(snapshot: NotificationSnapshot): void {
+  broadcastToMainWindow('notifications:changed', snapshot)
+}
+
+async function createNotification(value: CreateOmniNotification): Promise<NotificationSnapshot> {
+  const snapshot = await notifications.create(value)
+  broadcastNotifications(snapshot)
+  return snapshot
+}
+
+function notifyCodeTask(task: import('../shared/code-agent-contracts').CodeAgentTaskSummary): void {
+  if (!['completed', 'failed', 'stopped'].includes(task.status) || notifiedCodeTasks.has(task.id)) return
+  notifiedCodeTasks.add(task.id)
+  void codeAgentActivity.get(task.id).then(async (details) => {
+    const failed = task.status === 'failed'
+    const cancelled = task.status === 'stopped'
+    const validation = [...details.events].reverse().find((event) => event.kind === 'test' || event.kind === 'build')
+    const validationFailed = validation?.status === 'failed'
+    const validationRepresentsOutcome = Boolean(validation && (!failed || validationFailed))
+    const type = validationRepresentsOutcome && validation?.kind === 'test'
+      ? validationFailed ? 'TESTS_FAILED' : 'TESTS_COMPLETED'
+      : validationRepresentsOutcome && validation?.kind === 'build'
+        ? validationFailed ? 'BUILD_FAILED' : 'BUILD_COMPLETED'
+        : cancelled ? 'TASK_CANCELLED' : failed ? 'TASK_FAILED' : 'TASK_COMPLETED'
+    const title = validationRepresentsOutcome && validation?.kind === 'test'
+      ? validationFailed ? 'Tests failed' : 'Tests completed'
+      : validationRepresentsOutcome && validation?.kind === 'build'
+        ? validationFailed ? 'Build failed' : 'Build completed'
+        : cancelled ? 'Code task cancelled' : failed ? 'Code task failed' : 'Code task completed'
+    await createNotification({
+      type,
+      title,
+      description: validationRepresentsOutcome ? validation?.summary ?? task.title : (failed ? task.error ?? 'The Code Mode task failed.' : cancelled ? 'The Code Mode task was stopped.' : task.resultSummary ?? task.title),
+      sourceMode: 'code', severity: failed || validationFailed ? 'error' : cancelled ? 'warning' : 'success', taskId: task.id,
+      actionTarget: { mode: 'code', taskId: task.id }
+    })
+  }).catch((error) => diagnostics.failure('notifications:code-task', error))
+}
+
+async function notifyWorkOutcome(
+  requestId: string,
+  conversationId: string | undefined,
+  response: import('../shared/work-contracts').WorkAgentChatResponse
+): Promise<void> {
+  const target = { mode: 'work' as const, ...(conversationId ? { conversationId } : {}), taskId: requestId }
+  if (response.cancelled) {
+    await createNotification({
+      type: 'TASK_CANCELLED', title: 'Work task cancelled', description: 'The Work Mode request was stopped.',
+      sourceMode: 'work', severity: 'warning', ...(conversationId ? { conversationId } : {}), taskId: requestId, actionTarget: target
+    })
+    return
+  }
+  const email = [...response.toolActivities].reverse().find((activity) => ['gmail.send', 'gmail.send-draft', 'gmail.reply'].includes(activity.toolId))
+  const upload = [...response.toolActivities].reverse().find((activity) => ['drive.upload-text', 'drive.upload-transfer'].includes(activity.toolId))
+  const specialized = email ?? upload
+  if (specialized) {
+    const failed = specialized.status === 'failed'
+    const emailEvent = Boolean(email)
+    await createNotification({
+      type: emailEvent ? (failed ? 'EMAIL_FAILED' : 'EMAIL_SENT') : (failed ? 'DRIVE_UPLOAD_FAILED' : 'DRIVE_UPLOAD_COMPLETED'),
+      title: emailEvent ? (failed ? 'Email failed' : 'Email sent successfully') : (failed ? 'Drive upload failed' : 'Drive upload completed'),
+      description: specialized.summary ?? (failed ? 'The connected app action failed.' : 'The connected app action completed.'),
+      sourceMode: 'work', severity: failed ? 'error' : 'success', ...(conversationId ? { conversationId } : {}), taskId: requestId, actionTarget: target
+    })
+    return
+  }
+  const connectorFailure = [...response.toolActivities].reverse().find((activity) => activity.status === 'failed')
+  if (connectorFailure) {
+    await createNotification({
+      type: 'CONNECTOR_ERROR', title: `${connectorFailure.name} failed`, description: connectorFailure.summary ?? 'A connected app action failed.',
+      sourceMode: 'work', severity: 'error', ...(conversationId ? { conversationId } : {}), taskId: requestId, actionTarget: target
+    })
+    return
+  }
+  await createNotification({
+    type: 'TASK_COMPLETED', title: 'Work task completed', description: 'OmniCode finished your Work Mode request.',
+    sourceMode: 'work', severity: 'success', ...(conversationId ? { conversationId } : {}), taskId: requestId, actionTarget: target
+  })
 }
 
 async function recordWorkAction(entry: Omit<WorkActionHistoryEntry, 'id'>, sender?: Electron.WebContents): Promise<void> {
@@ -821,11 +1123,11 @@ function omniSettingsUpdateFromRenderer(value: unknown, acknowledgeFullAccess: u
 async function speakOmniResponse(taskId: string, text: string): Promise<void> {
   try {
     const [value, task] = await Promise.all([omniSettings.get(), omniController.get(taskId)])
-    if (!value.enabled || !value.voice.spokenResponses || task.status === 'stopped' || task.status === 'failed') return
+    if (suppressedOmniSpeechTasks.has(taskId) || !value.enabled || !value.voice.spokenResponses || task.status === 'stopped' || task.status === 'failed') return
     broadcastOmni('omni:voice-output-event', { type: 'speaking', taskId, text })
-    const result = await omniVoice.speak(text, {
-      rate: value.voice.speakingRate,
-      ...(value.voice.voiceId ? { voiceId: value.voice.voiceId } : {})
+    const result = await omniOutput.speak(text, value.voice)
+    if (result.fallbackReason) broadcastOmni('omni:voice-output-event', {
+      type: 'fallback', taskId, reason: result.fallbackReason
     })
     broadcastOmni('omni:voice-output-event', { type: result.status === 'interrupted' ? 'interrupted' : 'finished', taskId, text })
   } catch (error) {
@@ -1001,7 +1303,10 @@ async function applyOmniRuntimeSettings(value: OmniSettings): Promise<void> {
     }
   }
   updateOmniTray(value.enabled && value.menuBarItem)
-  if (!value.enabled) omniOverlayWindow?.hide()
+  if (!value.enabled) {
+    cancelActiveOmniVoice()
+    omniOverlayWindow?.hide()
+  }
   if (app.isPackaged) {
     const desired = createOmniLoginItemSettings(value.enabled, value.launchHelperAtLogin)
     if (shouldApplyOmniLoginItemSettings(app.getLoginItemSettings().openAtLogin, desired)) {
@@ -1075,6 +1380,7 @@ function createOmniOverlayWindow(): BrowserWindow {
 }
 
 async function showOmniOverlay(source: OmniStartRequest['activationSource']): Promise<void> {
+  if (source === 'global-shortcut') { suppressOmniSpeech(); await omniOutput.stop() }
   const settingsValue = await omniSettings.get()
   if (!settingsValue.enabled) {
     openMainForOmni()
@@ -1265,6 +1571,32 @@ function registerIpc(): void {
       throw new Error('The notification content is invalid or too long.')
     }
     if (Notification.isSupported()) new Notification({ title: title.trim(), body: body.trim() }).show()
+  })
+  handle('notifications:snapshot', () => notifications.snapshot())
+  handle('notifications:mark-read', async (_event, id: string, read?: boolean) => {
+    const snapshot = await notifications.markRead(id, read !== false)
+    broadcastNotifications(snapshot)
+    return snapshot
+  })
+  handle('notifications:mark-all-read', async () => {
+    const snapshot = await notifications.markAllRead()
+    broadcastNotifications(snapshot)
+    return snapshot
+  })
+  handle('notifications:remove', async (_event, id: string) => {
+    const snapshot = await notifications.remove(id)
+    broadcastNotifications(snapshot)
+    return snapshot
+  })
+  handle('notifications:clear', async () => {
+    const snapshot = await notifications.clear()
+    broadcastNotifications(snapshot)
+    return snapshot
+  })
+  handle('notifications:update-settings', async (_event, changes: Partial<Omit<NotificationSettings, 'version'>>) => {
+    const snapshot = await notifications.updateSettings(changes)
+    broadcastNotifications(snapshot)
+    return snapshot
   })
   handle('workspace:select-folder', async () => {
     const options: Electron.OpenDialogOptions = { properties: ['openDirectory', 'createDirectory'] }
@@ -1576,6 +1908,9 @@ function registerIpc(): void {
     if (activeWorkAgentRequests.has(requestId)) throw new Error('That Work request is already running.')
     const operation = { controller: new AbortController(), senderId: event.sender.id }
     activeWorkAgentRequests.set(requestId, operation)
+    const conversationId = typeof request?.conversationId === 'string' && WORK_REQUEST_ID_PATTERN.test(request.conversationId)
+      ? request.conversationId
+      : undefined
     try {
       const connected = new Set((await workConnectors.list())
         .filter((connector) => connector.status.state === 'connected')
@@ -1589,7 +1924,7 @@ function registerIpc(): void {
       const tools = request && typeof request.model === 'string' && modelCanUseWorkTools(request.provider, request.model, localModels)
         ? availableTools
         : []
-      return await workAgent.chat(
+      const response = await workAgent.chat(
         await attachWorkContext(request),
         tools,
         (toolRequest) => executeWorkTool(event, toolRequest, operation.controller.signal),
@@ -1598,9 +1933,7 @@ function registerIpc(): void {
           usageContext: {
             mode: 'work',
             feature: tools.length ? 'tool-planning' : 'chat',
-            conversationId: typeof request?.conversationId === 'string' && WORK_REQUEST_ID_PATTERN.test(request.conversationId)
-              ? request.conversationId
-              : undefined,
+            conversationId,
             taskId: requestId
           },
           providerPolicy,
@@ -1612,13 +1945,27 @@ function registerIpc(): void {
             if (operation.controller.signal.aborted || event.sender.isDestroyed()) return
             const payload: WorkAgentStreamEvent = { requestId, type: 'delta', delta }
             event.sender.send('work:agent:event', payload)
+          },
+          onToolActivity: (activity) => {
+            if (operation.controller.signal.aborted || event.sender.isDestroyed()) return
+            const payload: WorkAgentStreamEvent = { requestId, type: 'activity', activity }
+            event.sender.send('work:agent:event', payload)
           }
         }
       )
+      await notifyWorkOutcome(requestId, conversationId, response).catch((error) => diagnostics.failure('notifications:work-task', error))
+      return response
     } catch (error) {
       if (operation.controller.signal.aborted) {
-        return { content: '', toolActivities: [], toolCallCount: 0, cancelled: true }
+        const response: WorkAgentChatResponse = { content: '', toolActivities: [], toolCallCount: 0, cancelled: true }
+        await notifyWorkOutcome(requestId, conversationId, response).catch((cause) => diagnostics.failure('notifications:work-cancelled', cause))
+        return response
       }
+      await createNotification({
+        type: 'TASK_FAILED', title: 'Work task failed', description: error instanceof Error ? error.message : String(error),
+        sourceMode: 'work', severity: 'error', ...(conversationId ? { conversationId } : {}), taskId: requestId,
+        actionTarget: { mode: 'work', ...(conversationId ? { conversationId } : {}), taskId: requestId }
+      }).catch((cause) => diagnostics.failure('notifications:work-failed', cause))
       throw error
     } finally {
       if (activeWorkAgentRequests.get(requestId) === operation) activeWorkAgentRequests.delete(requestId)
@@ -1634,7 +1981,11 @@ function registerIpc(): void {
 
   handle('omni:settings:get', () => omniSettings.get())
   handle('omni:settings:update', async (_event, changes: unknown, acknowledgeFullAccess?: boolean) => {
-    const updated = await omniSettings.update(omniSettingsUpdateFromRenderer(changes, acknowledgeFullAccess))
+    const update = omniSettingsUpdateFromRenderer(changes, acknowledgeFullAccess)
+    if (update.voice?.outputProvider === 'elevenlabs' && !await omniOutput.connected()) {
+      throw new Error('Connect ElevenLabs before selecting it as the voice provider.')
+    }
+    const updated = await omniSettings.update(update)
     await applyOmniRuntimeSettings(updated)
     await omniTasks.pruneExpired(updated.privacy.activityRetentionDays)
     broadcastOmni('omni:settings-changed', updated)
@@ -1644,7 +1995,8 @@ function registerIpc(): void {
   handle('omni:task:pause', (_event, taskId: string) => omniController.pause(taskId))
   handle('omni:task:resume', (_event, taskId: string) => omniController.resume(taskId))
   handle('omni:task:stop', async (_event, taskId: string) => {
-    await omniVoice.stop()
+    suppressOmniSpeech(taskId)
+    await omniOutput.stop()
     return omniController.stop(taskId)
   })
   handle('omni:task:switch-execution', async (_event, taskId: string, mode: OmniExecutionMode) => {
@@ -1662,18 +2014,33 @@ function registerIpc(): void {
   handle('omni:permissions:open-settings', (_event, permissionId: OmniPermissionId) => macosPermissions.openSettings(permissionId))
   handle('omni:voice:availability', () => omniVoice.availability())
   handle('omni:voice:voices', () => omniVoice.voices())
-  handle('omni:voice:test', async () => {
-    const value = await omniSettings.get()
-    await omniVoice.speak("Hello. I'm Omni.", {
-      rate: value.voice.speakingRate,
-      ...(value.voice.voiceId ? { voiceId: value.voice.voiceId } : {})
-    })
+  handle('omni:voice:elevenlabs-connected', () => omniOutput.connected())
+  handle('omni:voice:elevenlabs-connect', (_event, key: string) => omniOutput.connect(key))
+  handle('omni:voice:elevenlabs-disconnect', async () => {
+    suppressOmniSpeech()
+    await omniOutput.disconnect()
+    const updated = await omniSettings.get()
+    broadcastOmni('omni:settings-changed', updated)
   })
-  handle('omni:voice:stop', () => omniVoice.stop())
+  handle('omni:voice:elevenlabs-voices', () => omniOutput.voices())
+  handle('omni:voice:elevenlabs-models', () => omniOutput.models())
+  handle('omni:voice:elevenlabs-preview', (_event, voiceId: string, modelId: string, settings: import('../shared/elevenlabs-contracts').ElevenLabsVoiceSettings) => {
+    suppressOmniSpeech()
+    return omniOutput.preview(voiceId, modelId, settings)
+  })
+  handle('omni:voice:test', async () => {
+    suppressOmniSpeech()
+    const value = await omniSettings.get()
+    await omniOutput.speak("Hello. I'm Omni.", value.voice)
+  })
+  handle('omni:voice:stop', () => {
+    suppressOmniSpeech()
+    return omniOutput.stop()
+  })
   handle('omni:voice:input-availability', () => omniVoice.inputAvailability())
-  handle('omni:voice:start-input', (_event, options) => omniVoice.startInput(options))
-  handle('omni:voice:stop-input', (_event, sessionId: string) => omniVoice.stopInput(sessionId))
-  handle('omni:voice:cancel-input', (_event, sessionId: string) => omniVoice.cancelInput(sessionId))
+  handle('omni:voice:start-input', (_event, options) => startOmniVoiceInput('main-window', options))
+  handle('omni:voice:stop-input', (_event, sessionId: string) => omniVoice.stopInput(sessionId, 'MANUAL'))
+  handle('omni:voice:cancel-input', (_event, sessionId: string) => cancelOmniVoiceInput(sessionId))
   handle('omni:cursor:status', async () => ({
     ...await omniCursor.permissions(),
     emergencyStop: registeredOmniEmergencyStop ? 'registered' as const : 'unavailable' as const,
@@ -1685,7 +2052,8 @@ function registerIpc(): void {
   handle('omni:overlay:pause', (_event, taskId: string) => omniController.pause(taskId))
   handle('omni:overlay:resume', (_event, taskId: string) => omniController.resume(taskId))
   handle('omni:overlay:stop', async (_event, taskId: string) => {
-    await omniVoice.stop()
+    suppressOmniSpeech(taskId)
+    await omniOutput.stop()
     return omniController.stop(taskId)
   })
   handle('omni:overlay:get', (_event, taskId: string) => omniController.get(taskId))
@@ -1696,12 +2064,17 @@ function registerIpc(): void {
   handle('omni:overlay:permissions-request', (_event, permissionId: OmniPermissionId) => macosPermissions.request(permissionId))
   handle('omni:overlay:permissions-open-settings', (_event, permissionId: OmniPermissionId) => macosPermissions.openSettings(permissionId))
   handle('omni:overlay:voice-input-availability', () => omniVoice.inputAvailability())
-  handle('omni:overlay:voice-start-input', (_event, options) => omniVoice.startInput(options))
-  handle('omni:overlay:voice-stop-input', (_event, sessionId: string) => omniVoice.stopInput(sessionId))
-  handle('omni:overlay:voice-cancel-input', (_event, sessionId: string) => omniVoice.cancelInput(sessionId))
-  handle('omni:overlay:voice-stop', () => omniVoice.stop())
+  handle('omni:overlay:voice-start-input', (_event, options) => startOmniVoiceInput(omniOverlayActivationSource, options))
+  handle('omni:overlay:voice-stop-input', (_event, sessionId: string) => omniVoice.stopInput(sessionId, 'MANUAL'))
+  handle('omni:overlay:voice-cancel-input', (_event, sessionId: string) => cancelOmniVoiceInput(sessionId))
+  handle('omni:overlay:voice-stop', () => {
+    suppressOmniSpeech()
+    return omniOutput.stop()
+  })
 
   handle('ai:ollama-status', () => ai.ollamaStatus())
+  handle('ai:ollama-settings', () => ai.ollamaSettings())
+  handle('ai:update-ollama-settings', (_event, next) => ai.updateOllamaSettings(next))
   handle('ai:models', () => ai.models())
   handle('ai:model-catalog', (_event, query?: string) => ai.modelCatalog(query))
   handle('ai:cloud-model-catalog', (_event, provider, query) => cloudModelCatalog.listModels(provider, query))
@@ -1710,9 +2083,8 @@ function registerIpc(): void {
   handle('ai:model-pulls', () => ai.modelPulls())
   handle('ai:pull-model', async (event, model: string) => {
     const catalog = await ai.modelCatalog()
-    const selected = catalog.find((item) => item.id === model && item.catalog)
-    if (!selected) throw new Error('Choose a model from OmniCode’s curated local catalog.')
-    const size = selected.approximateDownloadSize
+    const selected = catalog.find((item) => item.id === model)
+    const size = selected?.approximateDownloadSize
       ? selected.approximateDownloadSize >= 1024 ** 3
         ? `${(selected.approximateDownloadSize / 1024 ** 3).toFixed(1)} GB`
         : `${Math.round(selected.approximateDownloadSize / 1024 ** 2)} MB`
@@ -1724,19 +2096,35 @@ function registerIpc(): void {
       defaultId: 0,
       cancelId: 1,
       noLink: true,
-      message: `Download ${selected.name}?`,
-      detail: `Ollama will download approximately ${size} and store the model locally in your user account. Hardware guidance: ${selected.recommendation ?? 'compatibility unknown'}.`
+      message: `Download ${selected?.name ?? model}?`,
+      detail: `Ollama will download approximately ${size} and store the model locally in your user account. Hardware guidance: ${selected?.recommendation ?? 'compatibility unknown'}.`
     }
     const response = owner
       ? await dialog.showMessageBox(owner, options)
       : await dialog.showMessageBox(options)
     if (response.response !== 0) return { model, cancelled: true }
-    return ai.pullModel(model, (progress) => {
-      if (!event.sender.isDestroyed()) event.sender.send('ai:model-pull-progress', progress)
-    })
+    try {
+      const result = await ai.pullModel(model, (progress) => {
+        if (!event.sender.isDestroyed()) event.sender.send('ai:model-pull-progress', progress)
+      })
+      if (!result.cancelled) await createNotification({
+        type: 'MODEL_DOWNLOAD_COMPLETED', title: 'Model download completed', description: `${selected?.name ?? model} is ready to use.`,
+        sourceMode: 'system', severity: 'success'
+      })
+      return result
+    } catch (error) {
+      await createNotification({
+        type: 'DOWNLOAD_FAILED', title: 'Model download failed', description: error instanceof Error ? error.message : String(error),
+        sourceMode: 'system', severity: 'error'
+      }).catch((cause) => diagnostics.failure('notifications:model-download', cause))
+      throw error
+    }
   })
   handle('ai:cancel-model-pull', (_event, model: string) => ai.cancelModelPull(model))
-  handle('ai:load-model', (_event, model: string) => ai.loadModel(model))
+  handle('ai:load-model', async (_event, model: string) => {
+    await ai.loadModel(model)
+    await createNotification({ type: 'MODEL_LOADED', title: 'Model loaded', description: `${model} is loaded in Ollama.`, sourceMode: 'system', severity: 'success' })
+  })
   handle('ai:unload-model', (_event, model: string) => ai.unloadModel(model))
   handle('ai:delete-model', async (event, model: string) => {
     const options: Electron.MessageBoxOptions = {
@@ -1756,17 +2144,33 @@ function registerIpc(): void {
     await ai.deleteModel(model)
     return true
   })
-  handle('ai:chat', (_event, request) => ai.chat({
-    ...request,
-    usageContext: {
-      mode: 'code',
-      feature: ['chat', 'code-completion', 'inline-edit', 'workspace-analysis'].includes(request?.usageContext?.feature)
-        ? request.usageContext.feature
-        : 'chat'
-    },
-    workspacePath: request.workspacePath ? assertCurrentWorkspace(request.workspacePath) : undefined,
-    attachedPaths: Array.isArray(request.attachedPaths) ? request.attachedPaths.map((target: string) => fileSystem.resolveAuthorizedPath(target)) : undefined
-  }))
+  handle('ai:chat', async (_event, request) => {
+    const feature = ['chat', 'code-completion', 'inline-edit', 'workspace-analysis'].includes(request?.usageContext?.feature)
+      ? request.usageContext.feature
+      : 'chat'
+    const taskId = typeof request?.usageContext?.taskId === 'string' && WORK_REQUEST_ID_PATTERN.test(request.usageContext.taskId)
+      ? request.usageContext.taskId
+      : undefined
+    try {
+      const response = await ai.chat({
+        ...request,
+        usageContext: { mode: 'code', feature, ...(taskId ? { taskId } : {}) },
+        workspacePath: request.workspacePath ? assertCurrentWorkspace(request.workspacePath) : undefined,
+        attachedPaths: Array.isArray(request.attachedPaths) ? request.attachedPaths.map((target: string) => fileSystem.resolveAuthorizedPath(target)) : undefined
+      })
+      if (feature === 'chat' && taskId) await createNotification({
+        type: 'TASK_COMPLETED', title: 'Code chat completed', description: 'OmniCode finished generating the Code Mode response.',
+        sourceMode: 'code', severity: 'success', taskId, actionTarget: { mode: 'code' }
+      }).catch((error) => diagnostics.failure('notifications:code-chat', error))
+      return response
+    } catch (error) {
+      if (feature === 'chat' && taskId) await createNotification({
+        type: 'TASK_FAILED', title: 'Code chat failed', description: error instanceof Error ? error.message : String(error),
+        sourceMode: 'code', severity: 'error', taskId, actionTarget: { mode: 'code' }
+      }).catch((cause) => diagnostics.failure('notifications:code-chat-failed', cause))
+      throw error
+    }
+  })
   handle('ai:set-credential', (_event, provider, apiKey: string) => ai.setCredential(provider, apiKey))
   handle('ai:has-credential', (_event, provider) => ai.hasCredential(provider))
   handle('ai:test-provider-connection', (_event, provider) => ai.testProviderConnection(provider))
@@ -1893,6 +2297,7 @@ app.on('will-quit', (event) => {
   finalCleanupStarted = true
   if (registeredOmniShortcut) globalShortcut.unregister(registeredOmniShortcut)
   if (registeredOmniEmergencyStop) globalShortcut.unregister(OMNI_CURSOR_EMERGENCY_STOP_SHORTCUT)
+  clearOmniVoiceShortcuts()
   omniTray?.destroy()
   omniTray = null
   ai.shutdown()
@@ -1901,6 +2306,7 @@ app.on('will-quit', (event) => {
   void Promise.allSettled([
     omniController.stopAll(),
     omniVoice.dispose(),
+    omniOutput.stop(),
     server.stop(),
     fileSystem.unwatch(),
     workTransfers.clear(),

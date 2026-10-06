@@ -1,43 +1,49 @@
 # OmniCode Release Readiness
 
-Last updated: 2026-09-24
+Last updated: 2026-10-01
 
 ## Overall Status
 
 **NOT READY for a signed public release.**
 
-OmniCode 0.9.0 is ready for controlled Intel macOS Sonoma testing as an
-unsigned internal build. Its Apple Silicon package is structurally verified,
-but still requires execution on matching hardware. The AI usage/cost system,
+OmniCode 0.9.0 is ready for controlled macOS testing as an internal build. A
+native Apple Silicon app and DMG now pass architecture, strict bundle-signature,
+mounted-image equivalence, packaged Code/Work, real zsh PTY, localhost, Omni,
+Cursor-helper, and Speech-helper checks on an Apple M6 Mac. The validated build
+is deliberately ad-hoc signed and unnotarized, so Gatekeeper still rejects a
+quarantined/downloaded copy; it is a diagnostic artifact, not a public release.
+The AI usage/cost system,
 conditional Google
 Workspace provider policy, separate connected-data consent, existing compact
 Omni overlay and macOS permissions, Code/Work surfaces, and shared backends pass
 the current automated gates. Developer ID signing, notarization, clean-TCC
 interactive prompt coverage, a live verified Paid Gemini Workspace workflow,
-missing service credentials/models, and arm64 runtime execution remain explicit
-release gates.
+missing service credentials/models, and a stable Apple distribution identity
+remain explicit release gates.
 
-The stabilization matrix currently records **267 of 295 behaviors passing
-(90.5%)**. Nineteen are externally blocked, three are accurately not
-implemented, and six are partially verified. No blocked, partial, or absent
+The stabilization matrix currently records **269 of 295 behaviors passing
+(91.2%)**. Eighteen are externally blocked, three are accurately not
+implemented, and five are partially verified. No blocked, partial, or absent
 capability is counted as passing.
 
 ## Test Summary
 
 | Result | Count | Meaning |
 | --- | ---: | --- |
-| Tests passed | 267 | Tracked behavior met the stated expectation |
+| Tests passed | 269 | Tracked behavior met the stated expectation |
 | Tests failed | 0 | No tracked behavior currently has a failing result |
-| Tests blocked | 19 | Credential, service, billing/reconciliation, signing, permission, safe-data, runtime, repository, or matching hardware required |
+| Tests blocked | 18 | Credential, service, billing/reconciliation, signing, safe-data, runtime, repository, or matching hardware required |
 | Tests not run / not implemented | 3 | Accurately absent behavior is not presented as complete |
-| Tests partially run | 6 | Safe or platform-dependent portions pass; a remaining real-world gate is documented |
+| Tests partially run | 5 | Safe or platform-dependent portions pass; a remaining real-world gate is documented |
 
-Automated regression result: **623 passed, 1 intentionally skipped, 0 failed**
-across 74 files (73 passing and one skipped). The skipped native Keychain test
-is excluded from the ordinary run because it changes the user's login Keychain;
-that boundary has separate disposable-credential evidence. TypeScript checking,
-the 3,123-module multi-entry production build, x86_64 and arm64 native helper
-builds, and both architecture-specific packages pass.
+Automated regression result: **701 passed, 7 intentionally skipped, 0 failed**
+across 80 files (78 passing and two skipped). The native Keychain test is
+excluded from the ordinary run because it changes the user's login Keychain;
+the real Ollama integration suite is separately gated because it depends on a
+running local service and model. TypeScript checking,
+the 3,123-module multi-entry production build, native arm64 helper build, and
+the current native Apple Silicon diagnostic package pass. Historical x64
+package evidence remains recorded separately.
 
 Packaged Intel evidence includes:
 
@@ -52,18 +58,35 @@ Packaged Intel evidence includes:
 - idempotent disabled login-item synchronization with no repeated unsigned-build
   stderr on the final isolated-profile smoke.
 
+Current Apple Silicon evidence includes:
+
+- Apple M6 host, arm64 Node/Electron/active `node-pty`, and arm64 Cursor/Speech
+  helpers;
+- strict recursive bundle verification after a complete outer-bundle ad-hoc
+  seal (the prior unsigned electron-builder output failed this check);
+- packaged Code/Omni smoke with real zsh PTY, localhost access controls,
+  navigation denial, TTS, and helper readiness;
+- packaged Work smoke with persistence, Managed Browser, Gmail/Drive tool
+  registration, result previews, and zero renderer errors;
+- `en-US` on-device Speech was requested, supported, and active through the
+  system-default `Shresht’s AirPods` input at 48,000 Hz mono; both permissions,
+  real partial/final text, Auto, Enter, override, long, empty, and reuse flows
+  were exercised;
+- a verified, read-only mounted DMG whose app is filesystem-equivalent to the
+  prepackaged app.
+
 ## Subsystems
 
 | Subsystem | Readiness | Evidence / limitation |
 | --- | --- | --- |
 | Editor | ✅ Ready | Real Monaco editing, tabs, dirty state, save/autosave, shortcuts, conflicts, languages, and resizing pass existing packaged/unit gates |
 | Filesystem | ✅ Ready | Real scoped create/open/rename/move/duplicate/trash/dialog operations match disk state and workspace boundaries |
-| Terminal | ✅ Ready | Final 0.8.0 x64 package launched zsh in the selected workspace and captured the exact smoke marker; PTY architecture is correct in both packages |
+| Terminal | ✅ Ready | Current arm64 package launched zsh in the selected workspace and captured the exact smoke marker; the active packaged `node-pty` binary is arm64 |
 | Run / Compile | 🟡 Installed tools ready | Python, Node, C, C++, Swift, Java, npm, failures, stdout/stderr, and exit status pass; unavailable host runtimes remain external |
 | Local Server | ✅ Ready | Final package served public files, denied sensitive paths, selected a valid port, and stopped cleanly |
 | Git | ✅ Ready | Disposable repository init/status/diff/stage/unstage/commit/branch/clone/fetch/pull/push paths pass existing real integration gates |
 | GitHub | 🔵 Blocked for authenticated writes | Public clone works; a safe writable remote plus HTTPS/SSH credentials is required for authenticated mutation evidence |
-| Ollama | 🔵 Blocked for real inference | Honest absent/stopped handling passes; Ollama and an installed model are not available on this host |
+| Ollama | 🟡 Simple local tools verified | Ollama 0.34.4 and `phi3:mini` are live on this host. Settings/model switching, streaming, one Work ToolRegistry turn, and one complete Omni `runtime.detect` workflow pass; the latest strict live suite passed 3/6 because Phi-3 is not reliable for broader multi-step sequencing |
 | OpenAI | 🔵 Blocked for live success | Adapter, Keychain, request shaping with `store: false`, invalid-auth, and redaction pass; valid account access is unavailable |
 | Claude | 🔵 Blocked for live success | Adapter, Keychain, request/error/redaction paths pass; valid account access is unavailable |
 | Gemini | 🟡 Account/provider dependent | Prior real API-key and model workflows pass; transient provider availability and account quota remain external |
@@ -75,8 +98,8 @@ Packaged Intel evidence includes:
 | Diff System | ✅ Ready | Create/modify/delete proposals, accept/reject, filesystem match, undo, and traversal denial pass |
 | Settings | ✅ Ready | Private atomic persistence, corruption recovery, real Omni permission actions, setup rerun, and provider/permission state pass |
 | Keychain | ✅ Ready | Save/read/restart/update/delete passed with disposable credentials; secrets remain out of renderer state, logs, workspace, and Git |
-| macOS Integration | 🟡 Internal-build ready | Menus, dialogs, shortcuts, overlay, supported permission requests, Settings routing, and return refresh are implemented; public TCC stability requires signing |
-| Production Build | 🟡 Unsigned release candidate | Both 0.9.0 DMG/ZIP sets pass integrity, version, icon, Applications link, and Electron/helper/node-pty architecture checks; x64 passed a two-launch isolated-profile soak with zero renderer errors |
+| macOS Integration | 🟡 Internal-build ready | Menus, dialogs, shortcuts, overlay, supported permission requests, Settings routing, and return refresh are implemented; the current arm64 app runs locally, but public TCC identity stability requires Developer ID signing/notarization |
+| Production Build | 🟡 Ad-hoc diagnostic only | The current arm64 and cross-built x64 app/DMG pairs each pass 48 validation checks with 7 expected trust warnings and 0 structural/signature failures. Arm64 runtime/voice smokes pass; the x64 artifact still requires real Intel runtime testing. Gatekeeper rejects both because they have no Developer ID or notary ticket |
 
 ## Omni 0.7.0 Verification
 
@@ -91,9 +114,10 @@ Packaged Intel evidence includes:
   `window.omnicode` API.
 - Thirteen waveform bars render; normalized native microphone amplitude is
   bounded and throttled before IPC.
-- Permission-needed, listening, understanding, working, speaking, completed,
-  and failure states are implemented; successful results auto-dismiss only
-  after work/speech ends.
+- Permission-needed, starting, listening, finishing-transcript, thinking,
+  working, speaking, completed, cancelled, and failure states are implemented;
+  successful results auto-dismiss only after work/speech ends. Partial text is
+  replaced live and kept inside a fixed-height scrolling region.
 - Reduce Motion disables waveform animation. The live overlay renderer logged
   no errors.
 
@@ -107,6 +131,9 @@ Packaged Intel evidence includes:
   after decline opens the exact Accessibility pane.
 - Speech authorization is requested independently from recognizer/locale asset
   availability.
+- The command-line Speech helper embeds stable identity
+  `com.omnicode.editor.speech-helper` plus Microphone/Speech purpose strings,
+  and retains only the audio-input entitlement after package resealing.
 - Automation remains accurately per target, and Files & Folders remains
   user-selection scoped; neither is shown as a fake universal grant.
 - Settings-return activation performs one refresh and broadcast without a
@@ -116,6 +143,26 @@ Packaged Intel evidence includes:
 
 ## Release Artifacts
 
+Current architecture-specific diagnostic artifacts:
+
+| Target | Artifact | Size | SHA-256 |
+| --- | --- | ---: | --- |
+| Apple Silicon ad-hoc diagnostic installer | `dist/release-arm64/OmniCode-0.9.0-arm64.dmg` | 142,640,256 bytes | `1c048247aa0c9972ea0a215dec870460acad8c7d0c42ac12d011866bdcd91728` |
+| Intel ad-hoc diagnostic installer (cross-built) | `dist/release-x64/OmniCode-0.9.0-x64.dmg` | 149,360,847 bytes | `eb2106e9234d0afdbcc37dbc2933295679ab8809573cd24c13bdd545fc314695` |
+
+These artifacts were built with the restored external publisher-credential
+source. Both packages contain the required trusted-main publisher fields, do
+not contain the private JSON document, and do not depend on the development
+Mac's absolute credentials path.
+
+The current Intel artifact is a validated x86_64 cross-build. Rosetta 2 is not
+installed on this Apple Silicon host, so the current artifact has not received
+a runtime smoke; a real Intel Mac remains the required native execution gate.
+
+The following checksums are historical repository records. Those artifacts
+were not present after the migration and were not regenerated by the current
+audit:
+
 | Target | Artifact | Size | SHA-256 |
 | --- | --- | ---: | --- |
 | Intel installer | `dist/OmniCode-0.9.0-x64.dmg` | 147,430,062 bytes | `6f8197f45c1947a75f6a6b8e7ba3b1036017c17d4e35cd0f1fb3d1c6aafcbf33` |
@@ -123,21 +170,24 @@ Packaged Intel evidence includes:
 | Apple Silicon installer | `dist/OmniCode-0.9.0-arm64.dmg` | 143,755,104 bytes | `217195f2f30ac8360c37dfc93df23ae35ee488cc89f73065a0c5dea408b7c7d4` |
 | Apple Silicon archive | `dist/OmniCode-0.9.0-arm64.zip` | 141,754,291 bytes | `14a64f4a612e4f9910b17af1f66371ae40f243342e77832cb516ea48f8a6f86f` |
 
-Checksums are recorded in `dist/OmniCode-0.9.0-SHA256SUMS.txt` and revalidated
-against all four artifacts after both architecture builds completed.
+Their checksums were recorded in `dist/OmniCode-0.9.0-SHA256SUMS.txt` during the
+earlier Intel-host audit.
 
 ## Remaining Problems
 
 1. **Apple signing/notarization:** no Developer ID Application identity or
-   notarization credentials are installed. These internal builds can require
-   an explicit user trust action and cannot be called public-release-ready.
-2. **Apple Silicon execution:** the Electron executable, Cursor helper, Speech
-   helper, and `node-pty` bundle are all arm64 and the DMG/ZIP verify, but the
-   app has not run on Apple Silicon hardware in this audit.
+   notarization credentials are installed. The current ad-hoc artifact is
+   structurally sound but is rejected after quarantine because it has no trusted
+   Apple distribution identity or notary ticket.
+2. **Google OAuth external verification:** the build input and packaged
+   publisher configuration are repaired. Google verification/production status
+   and any external consent-screen review remain outside the package build.
 3. **Interactive privacy matrix:** real clean-TCC Allow, Deny, later recovery,
    System Settings return, and restart-required behavior must be exercised for
-   each applicable permission on a signed stable build. The current host lacks
-   the `en-US` on-device Speech asset, so real transcription is blocked.
+   each applicable permission on a signed stable build. This host reports the
+   `en-US` on-device Speech recognizer available and microphone granted, but
+   Speech remains `not-determined` and no input device is connected, so real
+   transcription is unverified.
 4. **Post-quit activation:** resident shortcut and launch-at-login work are
    implemented; there is no separately signed native helper after explicit
    Command-Q.
@@ -155,7 +205,10 @@ against all four artifacts after both architecture builds completed.
 
 ## Conclusion
 
-OmniCode 0.9.0 is a verified **unsigned internal Intel release candidate** with
-a structurally verified Apple Silicon counterpart. It is not ready to be
-labeled a signed/notarized public macOS release until the remaining Apple,
-matching-hardware, permission, and external-service gates above are completed.
+OmniCode 0.9.0 has verified **architecture-specific ad-hoc diagnostic builds**.
+The native arm64 app runs locally; the cross-built x64 app is structurally and
+cryptographically valid but still needs real Intel execution. Quarantined
+copies are expected to show Apple's unverified-malware warning. Neither is ready
+to be labeled a signed/notarized public macOS release until the Apple identity,
+notarization, permission, OAuth-input, runtime, and external-service gates above
+are completed.

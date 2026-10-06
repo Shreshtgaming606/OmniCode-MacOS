@@ -102,7 +102,8 @@ export function OmniMode({ active }: { active: boolean }) {
   const [voiceInput, setVoiceInput] = useState<OmniSpeechInputAvailability>({
     available: false, providerId: 'macos-speech', reason: 'Checking on-device speech recognition…',
     microphonePermission: 'unavailable', speechRecognitionPermission: 'unavailable', onDevice: false,
-    streaming: false, locale: 'en-US', supportedLocales: []
+    streaming: false, locale: 'en-US', supportedLocales: [], inputDeviceName: 'Checking…',
+    inputDeviceTransport: 'Unknown', sampleRate: 0, channelCount: 0
   })
   const [voiceSessionId, setVoiceSessionId] = useState<string | null>(null)
   const [cursorStatus, setCursorStatus] = useState<OmniCursorRuntimeStatus>({
@@ -113,6 +114,7 @@ export function OmniMode({ active }: { active: boolean }) {
   const [requestText, setRequestText] = useState('')
   const [modelDraft, setModelDraft] = useState('')
   const [controllerAvailable, setControllerAvailable] = useState(false)
+  const [appVersion, setAppVersion] = useState('')
   const [setupStep, setSetupStep] = useState(0)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -132,7 +134,8 @@ export function OmniMode({ active }: { active: boolean }) {
       window.omnicode.omni.voice.inputAvailability().catch(() => ({
         available: false, providerId: 'macos-speech', reason: 'On-device speech recognition is unavailable.',
         microphonePermission: 'unavailable' as const, speechRecognitionPermission: 'unavailable' as const,
-        onDevice: false, streaming: false, locale: 'en-US', supportedLocales: []
+        onDevice: false, streaming: false, locale: 'en-US', supportedLocales: [], inputDeviceName: 'Unavailable',
+        inputDeviceTransport: 'Unknown', sampleRate: 0, channelCount: 0
       })),
       window.omnicode.omni.cursor.status().catch(() => ({
         accessibility: 'unavailable' as const, nativeHelper: 'unavailable' as const,
@@ -151,6 +154,7 @@ export function OmniMode({ active }: { active: boolean }) {
         window.omnicode.omni.settings.get(), window.omnicode.omni.tasks.list(),
         window.omnicode.omni.voice.voices().catch(() => [] as OmniInstalledVoice[]), refreshEnvironment()
       ])
+      void window.omnicode.app.version().then(setAppVersion).catch(() => undefined)
       setSettings(nextSettings); setModelDraft(nextSettings.model.modelId); setHistory(tasks); setInstalledVoices(nextVoices)
       setModels(await fetchOmniModels(nextSettings.model.provider).catch(() => [])); setControllerAvailable(true)
       const current = tasks.find((candidate) => !isTerminalOmniStatus(candidate.status)) ?? tasks[0]
@@ -183,6 +187,9 @@ export function OmniMode({ active }: { active: boolean }) {
       if (event.type === 'listening') setVoiceSessionId(event.sessionId)
       if ((event.type === 'partial' || event.type === 'final') && event.transcript !== undefined) setRequestText(event.transcript)
       if (event.type === 'final' || event.type === 'cancelled') setVoiceSessionId((current) => current === event.sessionId ? null : current)
+      if (event.type === 'final' && !event.transcript?.trim()) {
+        setError(presentOmniError(event.reason === 'TIMEOUT' ? 'No speech detected.' : 'I didn’t hear anything.'))
+      }
       if (event.type === 'error') {
         setVoiceSessionId((current) => current === event.sessionId ? null : current)
         setError(presentOmniError(event.error ?? 'Voice recognition failed.'))
@@ -201,8 +208,13 @@ export function OmniMode({ active }: { active: boolean }) {
       return
     }
     const refresh = () => void refreshEnvironment().catch(() => undefined)
+    refresh()
+    const interval = window.setInterval(refresh, 5_000)
     window.addEventListener('focus', refresh)
-    return () => window.removeEventListener('focus', refresh)
+    return () => {
+      window.clearInterval(interval)
+      window.removeEventListener('focus', refresh)
+    }
   }, [active, refreshEnvironment, voiceSessionId])
 
   const run = useCallback(async <T,>(operation: () => Promise<T>): Promise<T | undefined> => {
@@ -260,13 +272,19 @@ export function OmniMode({ active }: { active: boolean }) {
   const toggleVoiceInput = useCallback(async (submitWhenStopped = true) => {
     if (voiceSessionId) {
       const result = await run(() => window.omnicode.omni.voice.stopInput(voiceSessionId)); setVoiceSessionId(null)
-      if (result?.transcript) { setRequestText(result.transcript); if (submitWhenStopped && settings?.setupCompleted) await startTask(result.transcript) }
+      if (result?.transcript) setRequestText(result.transcript)
       return
     }
     setRequestText('')
-    const started = await run(() => window.omnicode.omni.voice.startInput({ locale: voiceInput.locale, requireOnDevice: true }))
+    const started = await run(() => window.omnicode.omni.voice.startInput({
+      locale: voiceInput.locale,
+      requireOnDevice: true,
+      finishSpeaking: settings?.voice.finishSpeaking ?? 'auto',
+      endOfSpeechDelayMs: settings?.voice.endOfSpeechDelayMs,
+      submitOnFinal: submitWhenStopped && settings?.setupCompleted === true
+    }))
     if (started) setVoiceSessionId(started.sessionId)
-  }, [run, settings?.setupCompleted, startTask, voiceInput.locale, voiceSessionId])
+  }, [run, settings?.setupCompleted, settings?.voice.endOfSpeechDelayMs, settings?.voice.finishSpeaking, voiceInput.locale, voiceSessionId])
 
   const controlTask = useCallback(async (action: 'pause' | 'resume' | 'stop') => {
     if (!task) return
@@ -291,7 +309,7 @@ export function OmniMode({ active }: { active: boolean }) {
     onFinish={() => void updateSettings({ enabled: true, setupCompleted: true })}
   />
 
-  return <OmniDashboard active={active} settings={settings} task={task} history={history} models={providerModels}
+  return <OmniDashboard active={active} appVersion={appVersion} settings={settings} task={task} history={history} models={providerModels}
     modelDraft={modelDraft} controllerAvailable={controllerAvailable} voiceInput={voiceInput} voiceOutput={voiceOutput}
     voiceSessionId={voiceSessionId} requestText={requestText} cursorReady={cursorReady} busy={busy} loading={loading}
     error={error} historyOpen={historyOpen} onDismissError={() => setError(null)} onRetry={() => void load()}
@@ -391,7 +409,7 @@ function SetupVoice({ settings, input, output, sessionId, transcript, voices, bu
   transcript: string; voices: OmniInstalledVoice[]; busy: boolean
   onUpdate(changes: OmniSettingsChanges): Promise<OmniSettings | undefined>; onVoice(): void; onVoiceTest(): void
 }) {
-  return <div className="omni-setup-step"><div className="omni-setup-title"><span><Mic /></span><div><p className="omni-kicker">VOICE</p><h1>Make sure Omni can hear you</h1><p>Speech stays on this Mac. Test input and choose the voice Omni uses for spoken responses.</p></div></div>
+  return <div className="omni-setup-step"><div className="omni-setup-title"><span><Mic /></span><div><p className="omni-kicker">VOICE</p><h1>Make sure Omni can hear you</h1><p>Microphone audio stays on this Mac. Test input and choose the voice Omni uses for spoken responses in Settings.</p></div></div>
     <div className={`omni-mic-test${sessionId ? ' listening' : ''}`}><button type="button" onClick={onVoice} disabled={busy || (!input.available && !sessionId)} aria-label={sessionId ? 'Stop microphone test' : 'Start microphone test'}>{sessionId ? <Square /> : <Mic />}</button>
       <span><strong>{sessionId ? 'Listening…' : input.available ? 'Microphone ready' : 'Voice input unavailable'}</strong><small>{transcript || input.reason || 'Press the microphone and speak a test request.'}</small></span>
       <i aria-hidden="true">{Array.from({ length: 18 }, (_, index) => <b key={index} />)}</i></div>
@@ -472,11 +490,11 @@ function Choice({ selected, disabled = false, icon, title, detail, onClick }: { 
 }
 
 function OmniDashboard({
-  active, settings, task, history, models, modelDraft, controllerAvailable, voiceInput, voiceOutput, voiceSessionId,
+  active, appVersion, settings, task, history, models, modelDraft, controllerAvailable, voiceInput, voiceOutput, voiceSessionId,
   requestText, cursorReady, busy, loading, error, historyOpen, onDismissError, onRetry, onProvider, onModel,
   onExecution, onApproval, onRequest, onStart, onVoice, onControl, onHistory, onCloseHistory, onSelectHistory
 }: {
-  active: boolean; settings: OmniSettings; task: OmniTask | null; history: OmniTaskSummary[]; models: AIModel[]; modelDraft: string
+  active: boolean; appVersion: string; settings: OmniSettings; task: OmniTask | null; history: OmniTaskSummary[]; models: AIModel[]; modelDraft: string
   controllerAvailable: boolean; voiceInput: OmniSpeechInputAvailability; voiceOutput: OmniVoiceAvailability; voiceSessionId: string | null
   requestText: string; cursorReady: boolean; busy: boolean; loading: boolean; error: PresentedError | null; historyOpen: boolean
   onDismissError(): void; onRetry(): void; onProvider(provider: AIProviderId): Promise<void>; onModel(model: string): void
@@ -523,7 +541,7 @@ function OmniDashboard({
             <span className="omni-core-ticks" /><span className="omni-core-center">{busy || ['planning', 'transcribing', 'working'].includes(currentStatus) ? <LoaderCircle /> : <AudioWaveform />}</span></div>
           <div className="omni-core-copy" role="status" aria-live="polite"><span>OMNI</span><h1 id="omni-core-state">{state.title}</h1><p>{state.detail}</p></div>
           <div className="omni-core-signals"><span data-ready={voiceInput.available}><Mic />{voiceSessionId ? 'Listening now' : voiceInput.available ? 'Voice input ready' : 'Voice needs attention'}</span>
-            <span data-ready={voiceOutput.available}><Sparkles />{voiceOutput.available ? 'On-device speech' : 'Speech unavailable'}</span>
+            <span data-ready={voiceOutput.available}><Sparkles />{voiceOutput.available ? 'System voice available' : 'System voice unavailable'}</span>
             <span data-ready={execution === 'invisible' || cursorReady}>{execution === 'cursor' ? <MousePointer2 /> : <Zap />}{execution === 'cursor' ? 'Cursor mode' : 'Invisible mode'}</span></div>
         </section>
 
@@ -542,7 +560,7 @@ function OmniDashboard({
       </section></aside>
     </div>
 
-    <footer className="omni-dashboard-footer"><span><AudioWaveform />OmniCode</span><small>v0.5.1</small><i /><span data-ready={controllerAvailable}><b />Omni {controllerAvailable ? 'ready' : 'offline'}</span><small>Do more with your voice.</small></footer>
+    <footer className="omni-dashboard-footer"><span><AudioWaveform />OmniCode</span><small>{appVersion ? `v${appVersion}` : 'Version unavailable'}</small><i /><span data-ready={controllerAvailable}><b />Omni {controllerAvailable ? 'ready' : 'offline'}</span><small>Do more with your voice.</small></footer>
     {historyOpen && <PreviousTasks tasks={history} onClose={onCloseHistory} onSelect={onSelectHistory} />}
   </section>
 }

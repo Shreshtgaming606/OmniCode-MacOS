@@ -11,6 +11,7 @@ import {
   createDefaultOmniSettings,
   OMNI_LIMITS
 } from '../../shared/omni-contracts'
+import type { ElevenLabsVoiceSettings } from '../../shared/elevenlabs-contracts'
 import type { AIProviderId } from '../../shared/contracts'
 import { OMNI_CURSOR_EMERGENCY_STOP_SHORTCUT } from '../../shared/omni-cursor-contracts'
 import type { WorkApprovalMode } from '../../shared/tool-contracts'
@@ -40,7 +41,7 @@ function clone(value: OmniSettings): OmniSettings {
   return {
     ...value,
     activation: { ...value.activation },
-    voice: { ...value.voice },
+    voice: { ...value.voice, elevenlabsSettings: { ...value.voice.elevenlabsSettings } },
     model: { ...value.model },
     privacy: { ...value.privacy }
   }
@@ -86,6 +87,38 @@ export function validateOmniSettings(value: unknown): OmniSettings {
     throw new Error('Omni speaking rate is invalid.')
   }
   if (typeof voice.spokenResponses !== 'boolean') throw new Error('Omni spoken response setting is invalid.')
+  const finishSpeaking = voice.finishSpeaking === undefined ? 'auto' : voice.finishSpeaking
+  if (finishSpeaking !== 'auto' && finishSpeaking !== 'enter') throw new Error('Omni finish-speaking mode is invalid.')
+  const endOfSpeechDelayMs = voice.endOfSpeechDelayMs === undefined ? 1_600 : voice.endOfSpeechDelayMs
+  if (!Number.isSafeInteger(endOfSpeechDelayMs) || (endOfSpeechDelayMs as number) < 1_200 ||
+      (endOfSpeechDelayMs as number) > 2_500) {
+    throw new Error('Omni end-of-speech delay is invalid.')
+  }
+  const defaults = createDefaultOmniSettings().voice
+  const outputProvider = voice.outputProvider ?? defaults.outputProvider
+  if (outputProvider !== 'system' && outputProvider !== 'elevenlabs') throw new Error('Omni voice provider is invalid.')
+  const elevenlabsVoiceId = validateBoundedText(voice.elevenlabsVoiceId ?? '', 'ElevenLabs voice', 128, true)
+  const elevenlabsModelId = validateBoundedText(voice.elevenlabsModelId ?? '', 'ElevenLabs model', 128, true)
+  const candidateSettings = voice.elevenlabsSettings ?? defaults.elevenlabsSettings
+  if (!candidateSettings || typeof candidateSettings !== 'object' || Array.isArray(candidateSettings)) {
+    throw new Error('Omni ElevenLabs voice settings are invalid.')
+  }
+  const controls = candidateSettings as Record<string, unknown>
+  const bounded = (key: keyof ElevenLabsVoiceSettings, min: number, max: number): number => {
+    const value = controls[key]
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max) {
+      throw new Error(`Omni ElevenLabs ${key} is invalid.`)
+    }
+    return value
+  }
+  const elevenlabsSettings: ElevenLabsVoiceSettings = {
+    stability: bounded('stability', 0, 1),
+    similarityBoost: bounded('similarityBoost', 0, 1),
+    style: bounded('style', 0, 1),
+    speed: bounded('speed', 0.7, 1.2)
+  }
+  const fallbackToSystem = voice.fallbackToSystem ?? true
+  if (typeof fallbackToSystem !== 'boolean') throw new Error('Omni ElevenLabs fallback setting is invalid.')
   if (!record.model || typeof record.model !== 'object' || Array.isArray(record.model)) throw new Error('Omni model settings are invalid.')
   const model = record.model as Record<string, unknown>
   if (typeof model.provider !== 'string' || !PROVIDERS.has(model.provider as AIProviderId)) throw new Error('Omni model provider is invalid.')
@@ -125,7 +158,14 @@ export function validateOmniSettings(value: unknown): OmniSettings {
     voice: {
       voiceId,
       speakingRate: voice.speakingRate,
-      spokenResponses: voice.spokenResponses
+      spokenResponses: voice.spokenResponses,
+      finishSpeaking,
+      endOfSpeechDelayMs: endOfSpeechDelayMs as number,
+      outputProvider,
+      elevenlabsVoiceId,
+      elevenlabsModelId,
+      elevenlabsSettings,
+      fallbackToSystem
     },
     model: {
       provider: model.provider as AIProviderId,
@@ -167,7 +207,10 @@ export class OmniSettingsManager {
       ...(changes.launchHelperAtLogin !== undefined ? { launchHelperAtLogin: changes.launchHelperAtLogin } : {}),
       ...(changes.menuBarItem !== undefined ? { menuBarItem: changes.menuBarItem } : {}),
       ...(changes.activation ? { activation: { ...current.activation, ...changes.activation } } : {}),
-      ...(changes.voice ? { voice: { ...current.voice, ...changes.voice } } : {}),
+      ...(changes.voice ? { voice: {
+        ...current.voice, ...changes.voice,
+        elevenlabsSettings: { ...current.voice.elevenlabsSettings, ...changes.voice.elevenlabsSettings }
+      } } : {}),
       ...(changes.model ? { model: { ...current.model, ...changes.model } } : {}),
       ...(changes.executionMode !== undefined ? { executionMode: changes.executionMode } : {}),
       ...(changes.approvalMode !== undefined ? { approvalMode: changes.approvalMode } : {}),

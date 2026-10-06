@@ -83,8 +83,9 @@ surface.
 
 Current non-capabilities are equally important:
 
-- push-to-talk exists, but the current Mac cannot complete recognition until a
-  compatible on-device macOS Speech asset is installed;
+- push-to-talk and on-device Speech support exist, but physical acceptance is
+  blocked until the GUI is unlocked, Speech permission is granted, and a real
+  input device (the target AirPods) is connected;
 - no local “Hey Omni” detector or wake helper;
 - no signed lightweight helper that can activate Omni after explicit app quit;
 - no native screen/AX-element observation or semantic element targeting;
@@ -353,16 +354,17 @@ the helper work below.
   are implemented through a fixed `/usr/bin/say` provider.
 - A fixed-protocol Swift helper implements explicit push-to-talk with
   `AVAudioEngine` and `SFSpeechRecognizer`, on-device-only recognition, bounded
-  text events, cancellation, and no raw-audio persistence. No local wake engine
-  is shipped.
+  live partial/final text events, energy-plus-recognition endpoint detection,
+  Auto/Enter completion, last-word finalization, device diagnostics,
+  cancellation, and no raw-audio persistence. No local wake engine is shipped.
 
 Evidence: provider/helper lifecycle, protocol, redaction, cancellation, status,
-and UI tests pass; the packaged helper carries the required usage descriptions
-and audio entitlement; a fresh-profile production UI audit accurately reported
-the current unavailable on-device `en-US` asset without fake readiness.
-Remaining gate: install that macOS asset and run real grant/deny/partial/final
-microphone tests, audible packaged TTS settings/task flow, offline wake,
-false-activation soak, and zero pre-wake network traffic.
+state-transition, finalization-race, five-session reuse, settings, and UI tests
+pass. The helper embeds a stable identity plus privacy plist and carries the
+narrow audio entitlement; native arm64 execution and x86_64 cross-build/signature
+verification pass. Remaining gate: reconnect the AirPods, grant Speech in an
+unlocked GUI, and run real Auto/Enter/partial/final/empty/route-change tests,
+plus offline wake, false-activation soak, and zero pre-wake network traffic.
 
 ### Phase 4 — structured Cursor Mode — foundation implemented
 
@@ -408,8 +410,9 @@ secure-field blocking, and real Apple Silicon runtime verification.
 - The CGEvent foundation exists, but no semantic AX/ScreenCaptureKit observation
   path, helper-owned emergency-stop event tap, or signed production helper exists yet.
 - No bundled, licensed, measured local “Hey Omni” wake model exists yet.
-- The current Mac lacks the on-device Speech asset required by the implemented
-  push-to-talk provider, so live transcript accuracy remains externally blocked.
+- The current Mac reports on-device Speech support, but live transcript accuracy
+  remains blocked while Speech authorization is not determined and no system
+  input microphone is connected.
 - No lightweight signed helper can activate Omni after an explicit application
   quit; the implemented shortcut/overlay require the Electron process to be
   resident or started by the packaged login/background path.

@@ -1,13 +1,15 @@
 import { Fragment, useEffect, useState } from 'react'
-import { AudioWaveform, CheckCircle2, ExternalLink, FolderClosed, Globe2, KeyRound, LoaderCircle, Mail, Mic, MousePointer2, Plug, RefreshCw, Shield, Trash2, Unplug, X, Zap } from 'lucide-react'
-import type { AIModel, AIProviderConnectionStatus, AIProviderId, ProviderDataPolicy, ThemePreference, WorkspaceSettings } from '../../../shared/contracts'
+import { AudioWaveform, Bell, CheckCircle2, ExternalLink, FolderClosed, Globe2, KeyRound, LoaderCircle, Mail, Mic, MousePointer2, Plug, RefreshCw, Shield, Trash2, Unplug, X, Zap } from 'lucide-react'
+import type { AIModel, AIProviderConnectionStatus, AIProviderId, OllamaStatus, ProviderDataPolicy, ThemePreference, WorkspaceSettings } from '../../../shared/contracts'
 import type { AIModelDescriptor, CloudAIProviderId } from '../../../shared/model-contracts'
-import type { OmniPermissionId, OmniPermissionsSnapshot, OmniSettings } from '../../../shared/omni-contracts'
+import type { OmniPermissionId, OmniPermissionsSnapshot, OmniSettings, OmniSpeechInputAvailability } from '../../../shared/omni-contracts'
 import type { ConnectorDescriptor, WorkApprovalMode, WorkPermissionSettings } from '../../../shared/tool-contracts'
+import type { NotificationSettings } from '../../../shared/notification-contracts'
 import { googleAccountSummary } from '../lib/google-account-status'
 import { WORK_APPROVAL_MODES, WORK_APPROVAL_MODE_COPY } from '../lib/work-approval-mode'
 import { FullAccessWarning } from './work/FullAccessWarning'
 import { AIUsageDashboard } from './AIUsageDashboard'
+import { ElevenLabsVoiceSettings } from './omni/ElevenLabsVoiceSettings'
 
 type CloudProvider = Exclude<AIProviderId, 'ollama'>
 const PROVIDERS: Array<{ id: CloudProvider; name: string; placeholder: string }> = [
@@ -94,6 +96,11 @@ export function SettingsPanel({
   const [statusError, setStatusError] = useState(false)
   const [workspaceJson, setWorkspaceJson] = useState('{}')
   const [localModels, setLocalModels] = useState<AIModel[]>([])
+  const [ollamaStatus, setOllamaStatus] = useState<OllamaStatus | null>(null)
+  const [ollamaEndpoint, setOllamaEndpoint] = useState('http://127.0.0.1:11434')
+  const [ollamaBusy, setOllamaBusy] = useState<'checking' | 'refreshing' | 'pulling' | 'selecting' | 'removing' | null>('checking')
+  const [ollamaError, setOllamaError] = useState('')
+  const [ollamaPullModel, setOllamaPullModel] = useState('')
   const [cloudModels, setCloudModels] = useState<Partial<Record<CloudProvider, AIModelDescriptor[]>>>({})
   const [cloudModelsBusy, setCloudModelsBusy] = useState<CloudProvider | null>(null)
   const [cloudModelErrors, setCloudModelErrors] = useState<Partial<Record<CloudProvider, string>>>({})
@@ -108,8 +115,11 @@ export function SettingsPanel({
   const [omniSettings, setOmniSettings] = useState<OmniSettings | null>(null)
   const [omniPermissions, setOmniPermissions] = useState<OmniPermissionsSnapshot | null>(null)
   const [omniVoices, setOmniVoices] = useState<Array<{ id: string; name: string; locale: string }>>([])
+  const [omniVoiceInput, setOmniVoiceInput] = useState<OmniSpeechInputAvailability | null>(null)
+  const [omniOnDeviceActive, setOmniOnDeviceActive] = useState(false)
   const [omniBusy, setOmniBusy] = useState(false)
   const [omniPermissionBusy, setOmniPermissionBusy] = useState<OmniPermissionId | null>(null)
+  const [notificationSettings, setNotificationSettings] = useState<NotificationSettings | null>(null)
   useEffect(() => {
     const dismiss = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape') return
@@ -120,6 +130,18 @@ export function SettingsPanel({
     window.addEventListener('keydown', dismiss, true)
     return () => window.removeEventListener('keydown', dismiss, true)
   }, [fullAccessTarget, onClose])
+  useEffect(() => {
+    let active = true
+    void window.omnicode.notifications.snapshot().then((snapshot) => {
+      if (active) setNotificationSettings(snapshot.settings)
+    }).catch((cause) => {
+      if (active) { setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause)) }
+    })
+    const remove = window.omnicode.notifications.onChanged((snapshot) => {
+      if (active) setNotificationSettings(snapshot.settings)
+    })
+    return () => { active = false; remove() }
+  }, [])
 
   const refreshCloudModels = async (provider: CloudProvider, forceRefresh = false): Promise<void> => {
     setCloudModelsBusy(provider)
@@ -174,10 +196,29 @@ export function SettingsPanel({
     return () => { active = false }
   }, [])
   useEffect(() => {
-    void window.omnicode.ai.models().then((models) => {
+    let active = true
+    void window.omnicode.notifications.snapshot().then((snapshot) => { if (active) setNotificationSettings(snapshot.settings) }).catch((cause) => {
+      if (active) { setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause)) }
+    })
+    const remove = window.omnicode.notifications.onChanged((snapshot) => { if (active) setNotificationSettings(snapshot.settings) })
+    return () => { active = false; remove() }
+  }, [])
+  useEffect(() => {
+    let active = true
+    void Promise.all([
+      window.omnicode.ai.ollamaSettings(),
+      window.omnicode.ai.ollamaStatus(),
+      window.omnicode.ai.models()
+    ]).then(([settings, nextStatus, models]) => {
+      if (!active) return
+      setOllamaEndpoint(settings.endpoint)
+      setOllamaStatus(nextStatus)
       setLocalModels(models.filter((model) => model.installed !== false))
       if (autocompleteProvider === 'ollama' && !autocompleteModel && models[0]) onAutocompleteModel(models[0].id)
-    }).catch(() => undefined)
+    }).catch((cause) => {
+      if (active) setOllamaError(cause instanceof Error ? cause.message : String(cause))
+    }).finally(() => { if (active) setOllamaBusy(null) })
+    return () => { active = false }
   }, [])
   useEffect(() => {
     void refreshConnectors(true)
@@ -199,19 +240,25 @@ export function SettingsPanel({
     void Promise.all([
       window.omnicode.omni.settings.get(),
       window.omnicode.omni.permissions.status(),
-      window.omnicode.omni.voice.voices().catch(() => [])
-    ]).then(([nextSettings, nextPermissions, voices]) => {
+      window.omnicode.omni.voice.voices().catch(() => []),
+      window.omnicode.omni.voice.inputAvailability().catch(() => null)
+    ]).then(([nextSettings, nextPermissions, voices, input]) => {
       if (!active) return
       setOmniSettings(nextSettings)
       setOmniPermissions(nextPermissions)
       setOmniVoices(voices)
+      setOmniVoiceInput(input)
     }).catch((cause) => {
       if (!active) return
       setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause))
     })
     const unsubscribe = window.omnicode.omni.settings.onChanged((next) => { if (active) setOmniSettings(next) })
     const unsubscribePermissions = window.omnicode.omni.permissions.onChanged((next) => { if (active) setOmniPermissions(next) })
-    return () => { active = false; unsubscribe(); unsubscribePermissions() }
+    const unsubscribeVoice = window.omnicode.omni.voice.onInputEvent((event) => {
+      if (event.type === 'diagnostic' && event.diagnostics) setOmniOnDeviceActive(event.diagnostics.onDeviceActive)
+      if (event.type === 'final' || event.type === 'cancelled' || event.type === 'error') setOmniOnDeviceActive(false)
+    })
+    return () => { active = false; unsubscribe(); unsubscribePermissions(); unsubscribeVoice() }
   }, [])
   useEffect(() => {
     const provider = omniSettings?.model.provider
@@ -277,6 +324,68 @@ export function SettingsPanel({
     } catch (cause) {
       setCredentialErrors((current) => ({ ...current, [provider]: cause instanceof Error ? cause.message : String(cause) }))
     } finally { setCredentialBusy((current) => ({ ...current, [provider]: undefined })) }
+  }
+  const refreshOllama = async (busy: 'checking' | 'refreshing' = 'refreshing'): Promise<void> => {
+    if (ollamaBusy && ollamaBusy !== 'checking') return
+    setOllamaBusy(busy); setOllamaError('')
+    try {
+      const [nextStatus, models] = await Promise.all([
+        window.omnicode.ai.ollamaStatus(),
+        window.omnicode.ai.models()
+      ])
+      setOllamaStatus(nextStatus)
+      setLocalModels(models.filter((model) => model.installed !== false))
+    } catch (cause) {
+      setOllamaError(cause instanceof Error ? cause.message : String(cause))
+    } finally { setOllamaBusy(null) }
+  }
+  const saveAndTestOllama = async (): Promise<void> => {
+    if (ollamaBusy) return
+    setOllamaBusy('checking'); setOllamaError('')
+    try {
+      const saved = await window.omnicode.ai.updateOllamaSettings({ endpoint: ollamaEndpoint })
+      setOllamaEndpoint(saved.endpoint)
+      const [nextStatus, models] = await Promise.all([
+        window.omnicode.ai.ollamaStatus(),
+        window.omnicode.ai.models()
+      ])
+      setOllamaStatus(nextStatus)
+      setLocalModels(models.filter((model) => model.installed !== false))
+    } catch (cause) {
+      setOllamaError(cause instanceof Error ? cause.message : String(cause))
+    } finally { setOllamaBusy(null) }
+  }
+  const selectOllamaModel = async (model: string): Promise<void> => {
+    if (ollamaBusy) return
+    setOllamaBusy('selecting'); setOllamaError('')
+    try {
+      const preferences = await window.omnicode.ai.selectModel(model)
+      setLocalModels((current) => current.map((item) => ({ ...item, selected: item.id === preferences.selectedModel })))
+    } catch (cause) { setOllamaError(cause instanceof Error ? cause.message : String(cause)) }
+    finally { setOllamaBusy(null) }
+  }
+  const pullOllamaModel = async (): Promise<void> => {
+    const model = ollamaPullModel.trim()
+    if (!model || ollamaBusy) return
+    setOllamaBusy('pulling'); setOllamaError('')
+    try {
+      const result = await window.omnicode.ai.pullModel(model)
+      if (!result.cancelled) {
+        setOllamaPullModel('')
+        const models = await window.omnicode.ai.models()
+        setLocalModels(models.filter((item) => item.installed !== false))
+      }
+    } catch (cause) { setOllamaError(cause instanceof Error ? cause.message : String(cause)) }
+    finally { setOllamaBusy(null) }
+  }
+  const removeOllamaModel = async (model: string): Promise<void> => {
+    if (ollamaBusy) return
+    setOllamaBusy('removing'); setOllamaError('')
+    try {
+      const deleted = await window.omnicode.ai.deleteModel(model)
+      if (deleted) setLocalModels((current) => current.filter((item) => item.id !== model))
+    } catch (cause) { setOllamaError(cause instanceof Error ? cause.message : String(cause)) }
+    finally { setOllamaBusy(null) }
   }
   const configureGeminiWorkspace = async (plan: 'paid' | 'free'): Promise<void> => {
     if (policyBusy) return
@@ -368,6 +477,26 @@ export function SettingsPanel({
     catch (cause) { setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause)) }
     finally { setOmniBusy(false) }
   }
+  const updateNotifications = async (changes: Partial<Omit<NotificationSettings, 'version'>>): Promise<void> => {
+    try { setNotificationSettings((await window.omnicode.notifications.updateSettings(changes)).settings) }
+    catch (cause) { setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause)) }
+  }
+  const updateNativeNotifications = async (enabled: boolean): Promise<void> => {
+    if (enabled) {
+      try {
+        const permission = await window.omnicode.omni.permissions.request('notifications')
+        setOmniPermissions(await window.omnicode.omni.permissions.status())
+        if (permission.state !== 'granted') {
+          setStatusError(true)
+          setStatus('macOS notification permission was not granted. The in-app Notification Center will continue to work.')
+        }
+      } catch (cause) {
+        setStatusError(true)
+        setStatus(cause instanceof Error ? cause.message : String(cause))
+      }
+    }
+    await updateNotifications({ nativeMacOS: enabled })
+  }
   const omniModelOptions = omniSettings?.model.provider === 'ollama'
     ? localModels.map((model) => ({ id: model.id, name: model.name }))
     : omniSettings ? (cloudModels[omniSettings.model.provider] ?? []).map((model) => ({ id: model.id, name: model.displayName })) : []
@@ -375,13 +504,39 @@ export function SettingsPanel({
     <div className="settings-panel">
       <header><div><h1>Settings</h1><p>User settings · stored locally</p></div><button onClick={onClose} title="Close settings"><X /></button></header>
       <div className="settings-content">
-        <nav><a href="#appearance">Appearance</a><a href="#files">Files & Autosave</a><a href="#providers">AI Providers</a><a href="#ai-usage">AI Usage & Cost</a><a href="#autocomplete">AI Autocomplete</a><a href="#omni">Omni</a><a href="#work-mode">Work Mode</a><a href="#connected-apps">Connected Apps</a><a href="#workspace">Workspace</a><a href="#permissions">Permissions & Privacy</a></nav>
+        <nav><a href="#appearance">Appearance</a><a href="#files">Files & Autosave</a><a href="#notifications">Notifications</a><a href="#providers">AI Providers</a><a href="#ai-usage">AI Usage & Cost</a><a href="#autocomplete">AI Autocomplete</a><a href="#omni">Omni</a><a href="#work-mode">Work Mode</a><a href="#connected-apps">Connected Apps</a><a href="#workspace">Workspace</a><a href="#permissions">Permissions & Privacy</a></nav>
         <main>
           <section id="appearance"><h2>Appearance</h2><p>Choose how OmniCode follows macOS.</p>
             <div className="segmented">{(['system', 'dark', 'light'] as ThemePreference[]).map((item) => <button className={theme === item ? 'active' : ''} key={item} onClick={() => onTheme(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}</div>
           </section>
           <section id="files"><h2>Files & Autosave</h2><label className="setting-toggle"><span><strong>Autosave</strong><small>Save changed files after a short delay.</small></span><input type="checkbox" checked={autosave} onChange={(event) => onAutosave(event.target.checked)} /></label></section>
-          <section id="providers"><h2>AI Providers</h2><p>Credentials are written to macOS Keychain and never to a workspace or log.</p>
+          <section id="notifications"><h2>Notifications</h2><p>Keep important task outcomes visible in OmniCode and optionally mirror them to macOS.</p>
+            {!notificationSettings ? <div className="omni-settings-loading"><LoaderCircle className="spin" />Loading notification settings…</div> : <div className="notification-settings-list">
+              <label className="setting-toggle"><span><strong><Bell />In-app notifications</strong><small>Store recent outcomes in Notification Center. Activity inside conversations is always available.</small></span><input type="checkbox" checked={notificationSettings.inApp} onChange={(event) => void updateNotifications({ inApp: event.target.checked })} /></label>
+              <label className="setting-toggle"><span><strong>macOS notifications</strong><small>Show native alerts only for important completions and failures, never individual tool actions.</small></span><input type="checkbox" checked={notificationSettings.nativeMacOS} onChange={(event) => void updateNativeNotifications(event.target.checked)} /></label>
+              <label className="setting-toggle"><span><strong>Background task completion</strong><small>Notify when a task finishes after you navigate elsewhere.</small></span><input type="checkbox" checked={notificationSettings.backgroundCompletions} onChange={(event) => void updateNotifications({ backgroundCompletions: event.target.checked })} /></label>
+              <label className="setting-toggle"><span><strong>Failures</strong><small>Notify when a task, connector, build, test, or download fails.</small></span><input type="checkbox" checked={notificationSettings.failures} onChange={(event) => void updateNotifications({ failures: event.target.checked })} /></label>
+              <label className="setting-toggle"><span><strong>Email sent</strong><small>Notify after Gmail confirms that a message or reply was sent.</small></span><input type="checkbox" checked={notificationSettings.emailSent} onChange={(event) => void updateNotifications({ emailSent: event.target.checked })} /></label>
+              <label className="setting-toggle"><span><strong>Builds finish</strong><small>Notify after Code Mode build activity completes or fails.</small></span><input type="checkbox" checked={notificationSettings.buildFinished} onChange={(event) => void updateNotifications({ buildFinished: event.target.checked })} /></label>
+            </div>}
+          </section>
+          <section id="providers"><h2>AI Providers</h2><p>Credentials are written to macOS Keychain and never to a workspace or log. Ollama runs locally and does not require an API key.</p>
+            <div className="ollama-provider-setting" aria-label="Ollama provider settings" aria-busy={!!ollamaBusy}>
+              <div className="ollama-provider-heading"><div><Plug /><span><strong>Ollama · local</strong><small>{ollamaBusy === 'checking' ? 'Checking' : ollamaStatus?.state === 'connected' ? 'Connected' : ollamaStatus?.state === 'not-running' ? 'Not running' : ollamaStatus ? 'Unreachable' : 'Checking'}</small></span></div>{ollamaStatus?.version && <code>v{ollamaStatus.version}</code>}</div>
+              <label className="ollama-endpoint"><strong>Server</strong><input aria-label="Ollama server endpoint" value={ollamaEndpoint} disabled={!!ollamaBusy} onChange={(event) => setOllamaEndpoint(event.target.value)} /><small>Loopback HTTP only. Default: http://127.0.0.1:11434</small></label>
+              <div className="ollama-provider-actions"><button type="button" disabled={!!ollamaBusy || !ollamaEndpoint.trim()} onClick={() => void saveAndTestOllama()}>{ollamaBusy === 'checking' ? <LoaderCircle className="spin" /> : <Zap />}Test Connection</button><button type="button" disabled={!!ollamaBusy} onClick={() => void refreshOllama()}>{ollamaBusy === 'refreshing' ? <LoaderCircle className="spin" /> : <RefreshCw />}Refresh Models</button></div>
+              <p className={`ollama-provider-status state-${ollamaStatus?.state ?? 'checking'}`}>{ollamaStatus?.message ?? 'Checking the configured local Ollama service…'}</p>
+              <div className="ollama-installed-models"><div className="ollama-model-heading"><strong>Installed Models</strong><span>{localModels.length}</span></div>
+                {!localModels.length && <p className="ollama-empty">No installed models were detected. Start Ollama, refresh the list, or pull a model below.</p>}
+                {localModels.map((model) => <article key={model.id} className={model.selected ? 'selected' : ''}>
+                  <div><strong>{model.name}</strong><code>{model.id}</code><small>{[model.parameterSize, model.quantization, model.family, model.size ? `${(model.size / 1024 ** 3).toFixed(1)} GB` : '', model.modelCapabilities?.toolMode === 'native' ? 'Native tools' : model.modelCapabilities?.toolMode === 'structured' ? 'Structured tool adapter' : 'Chat only'].filter(Boolean).join(' · ')}</small></div>
+                  <button type="button" disabled={!!ollamaBusy || model.selected} onClick={() => void selectOllamaModel(model.id)}>{model.selected ? 'In use' : 'Use Model'}</button>
+                  <button type="button" className="icon-button danger" title={`Remove ${model.name}`} disabled={!!ollamaBusy} onClick={() => void removeOllamaModel(model.id)}><Trash2 /></button>
+                </article>)}
+              </div>
+              <div className="ollama-pull-model"><label><strong>Pull Model</strong><input aria-label="Ollama model to pull" placeholder="for example, qwen3:8b" value={ollamaPullModel} disabled={!!ollamaBusy} onChange={(event) => setOllamaPullModel(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void pullOllamaModel() }} /></label><button type="button" disabled={!!ollamaBusy || !ollamaPullModel.trim()} onClick={() => void pullOllamaModel()}>{ollamaBusy === 'pulling' ? 'Downloading…' : 'Pull Model'}</button><small>Installed models are discovered automatically. A native confirmation shows before any download.</small></div>
+              {ollamaError && <p className="provider-error" role="alert">{ollamaError}</p>}
+            </div>
             {PROVIDERS.map((provider) => <Fragment key={provider.id}><div className="provider-setting" aria-busy={!!credentialBusy[provider.id]}>
               <div><KeyRound /><span><strong>{provider.name}</strong><small>{credentialBusy[provider.id] ? <><LoaderCircle className="spin" />{credentialBusy[provider.id] === 'saving' ? 'Saving and testing…' : credentialBusy[provider.id] === 'testing' ? 'Testing connection…' : 'Removing…'}</> : credentialErrors[provider.id] ? 'Keychain needs attention' : stored[provider.id] === null ? 'Checking Keychain…' : connections[provider.id]?.state === 'connected' ? <><CheckCircle2 /> Connected</> : connections[provider.id]?.state === 'authentication-failed' ? 'Authentication failed' : connections[provider.id]?.state === 'unavailable' ? 'Stored · Connection unavailable' : stored[provider.id] ? 'Credential stored · Not tested' : 'Not configured'}</small></span></div>
               <input aria-label={`${provider.name} API key`} type="password" autoComplete="off" disabled={!!credentialBusy[provider.id]} value={keys[provider.id]} placeholder={stored[provider.id] ? 'Replace saved credential' : provider.placeholder} onChange={(event) => setKeys((current) => ({ ...current, [provider.id]: event.target.value }))} onKeyDown={(event) => { if (event.key === 'Enter' && keys[provider.id].trim()) void saveKey(provider.id) }} />
@@ -438,8 +593,15 @@ export function SettingsPanel({
               </div>
               <div className="omni-settings-group"><h3><Mic />Voice</h3>
                 <label className="setting-toggle"><span><strong>Spoken responses</strong><small>Let Omni read concise task responses aloud.</small></span><input type="checkbox" disabled={omniBusy} checked={omniSettings.voice.spokenResponses} onChange={(event) => void updateOmni({ voice: { spokenResponses: event.target.checked } })} /></label>
-                <div className="omni-settings-fields"><label><strong>macOS voice</strong><select disabled={omniBusy} value={omniSettings.voice.voiceId} onChange={(event) => void updateOmni({ voice: { voiceId: event.target.value } })}><option value="">System Default</option>{omniVoices.map((voice) => <option key={`${voice.id}-${voice.locale}`} value={voice.id}>{voice.name} · {voice.locale}</option>)}</select></label>
-                  <button type="button" disabled={omniBusy} onClick={() => void window.omnicode.omni.voice.test().catch((cause) => { setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause)) })}><AudioWaveform />Test Voice</button></div>
+                <label className="omni-settings-select"><strong>Finish speaking</strong><select disabled={omniBusy} value={omniSettings.voice.finishSpeaking} onChange={(event) => void updateOmni({ voice: { finishSpeaking: event.target.value as 'auto' | 'enter' } })}><option value="auto">Automatically</option><option value="enter">Press Enter</option></select><small>Enter is always available as an immediate finish shortcut while Omni is listening. Escape cancels.</small></label>
+                <label className="omni-settings-select"><strong>Microphone</strong><select disabled value="system-default"><option value="system-default">System Default — {omniVoiceInput?.inputDeviceName ?? 'Checking…'}</option></select><small>{omniVoiceInput?.channelCount
+                  ? `${omniVoiceInput.inputDeviceTransport} · ${Math.round(omniVoiceInput.sampleRate).toLocaleString()} Hz · ${omniVoiceInput.channelCount} channel${omniVoiceInput.channelCount === 1 ? '' : 's'}`
+                  : omniVoiceInput?.reason ?? 'Omni follows the current macOS system input device.'}</small></label>
+                <div className="omni-settings-shortcut"><span><strong>On-device Speech</strong><small>{omniOnDeviceActive ? 'Active for the current voice session' : omniVoiceInput?.onDevice ? 'Available · required when listening' : 'Unavailable for the selected locale'}</small></span><b>{omniOnDeviceActive ? 'Active' : omniVoiceInput?.onDevice ? 'Available' : 'Unavailable'}</b></div>
+                <details className="omni-settings-advanced"><summary>Advanced</summary><label className="omni-settings-select"><strong>End-of-speech delay</strong><select disabled={omniBusy || omniSettings.voice.finishSpeaking !== 'auto'} value={omniSettings.voice.endOfSpeechDelayMs} onChange={(event) => void updateOmni({ voice: { endOfSpeechDelayMs: Number(event.target.value) } })}><option value={1200}>1.2 seconds</option><option value={1600}>1.6 seconds</option><option value={2000}>2.0 seconds</option><option value={2500}>2.5 seconds</option></select><small>Used only after real speech has begun. Natural pauses shorter than this do not submit.</small></label></details>
+                <ElevenLabsVoiceSettings voice={omniSettings.voice} busy={omniBusy} onUpdate={(voice) => updateOmni({ voice })} />
+                {omniSettings.voice.outputProvider === 'system' && <div className="omni-settings-fields"><label><strong>macOS voice</strong><select disabled={omniBusy} value={omniSettings.voice.voiceId} onChange={(event) => void updateOmni({ voice: { voiceId: event.target.value } })}><option value="">System Default</option>{omniVoices.map((voice) => <option key={`${voice.id}-${voice.locale}`} value={voice.id}>{voice.name} · {voice.locale}</option>)}</select></label>
+                  <button type="button" disabled={omniBusy} onClick={() => void window.omnicode.omni.voice.test().catch((cause) => { setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause)) })}><AudioWaveform />Test Voice</button></div>}
               </div>
               <div className="omni-settings-group"><h3><Zap />Activation</h3>
                 <div className="omni-settings-shortcut"><span><strong>Global shortcut</strong><small>Activate Omni from anywhere</small></span><kbd>⌘</kbd><kbd>⇧</kbd><kbd>Space</kbd></div>
@@ -502,7 +664,7 @@ export function SettingsPanel({
                   {(connector.id === 'gmail' || connector.id === 'google-drive') && <small className="settings-connector-note">Google revocation disconnects both Gmail and Drive from OmniCode.</small>}
                   <label className="settings-connector-approval"><strong>Action approval</strong><select disabled={permissionBusy} value={workPermissions.connectorOverrides[connector.id] ?? ''} onChange={(event) => void setConnectorWorkPermission(connector.id, event.target.value ? event.target.value as WorkApprovalMode : null)}><option value="">Use global · {WORK_APPROVAL_MODE_COPY[workPermissions.globalMode].shortLabel}</option>{WORK_APPROVAL_MODES.map((mode) => <option value={mode} key={mode}>{WORK_APPROVAL_MODE_COPY[mode].label}</option>)}</select><small>{workPermissions.connectorOverrides[connector.id] ? `Overrides the global setting for ${connector.name}.` : 'Follows the global Work Mode setting.'}</small></label>
                   <div className="settings-connector-actions">
-                    {(connector.id === 'gmail' || connector.id === 'google-drive') && <button type="button" onClick={() => void window.omnicode.app.openExternal('https://omnicode.steampirate.life/privacy/').catch((cause) => setConnectorError(cause instanceof Error ? cause.message : String(cause)))}><ExternalLink />View Privacy Policy</button>}
+                    {(connector.id === 'gmail' || connector.id === 'google-drive') && <button type="button" onClick={() => void window.omnicode.app.openExternal('https://omnicode.omnicoretech.org/privacy/').catch((cause) => setConnectorError(cause instanceof Error ? cause.message : String(cause)))}><ExternalLink />View Privacy Policy</button>}
                     {(connector.id === 'gmail' || connector.id === 'google-drive') && connected && <button type="button" onClick={() => void window.omnicode.app.openExternal('https://myaccount.google.com/connections').catch((cause) => setConnectorError(cause instanceof Error ? cause.message : String(cause)))}><ExternalLink />Manage Google Connection</button>}
                     <button type="button" disabled={busy} className={connected ? 'disconnect' : 'primary-button'} onClick={() => void toggleConnector(connector)}>{busy ? <LoaderCircle className="spin" /> : connected ? <Unplug /> : <Plug />}{busy ? 'Working…' : connected && (connector.id === 'gmail' || connector.id === 'google-drive') ? 'Disconnect Google' : connected ? 'Disconnect' : reconnect ? 'Reconnect' : 'Connect'}</button>
                   </div>
@@ -543,9 +705,9 @@ export function SettingsPanel({
               </article>
             })}</div>
             <div className="settings-connector-actions">
-              <button type="button" onClick={() => void window.omnicode.app.openExternal('https://omnicode.steampirate.life/privacy/').catch((cause) => { setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause)) })}><ExternalLink />Privacy Policy</button>
-              <button type="button" onClick={() => void window.omnicode.app.openExternal('https://omnicode.steampirate.life/terms/').catch((cause) => { setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause)) })}><ExternalLink />Terms of Service</button>
-              <button type="button" onClick={() => void window.omnicode.app.openExternal('https://omnicode.steampirate.life/about/').catch((cause) => { setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause)) })}><ExternalLink />About OmniCode</button>
+              <button type="button" onClick={() => void window.omnicode.app.openExternal('https://omnicode.omnicoretech.org/privacy/').catch((cause) => { setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause)) })}><ExternalLink />Privacy Policy</button>
+              <button type="button" onClick={() => void window.omnicode.app.openExternal('https://omnicode.omnicoretech.org/terms/').catch((cause) => { setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause)) })}><ExternalLink />Terms of Service</button>
+              <button type="button" onClick={() => void window.omnicode.app.openExternal('https://omnicode.omnicoretech.org/about/').catch((cause) => { setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause)) })}><ExternalLink />About OmniCode</button>
             </div>
           </section>
         </main>

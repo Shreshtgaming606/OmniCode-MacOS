@@ -1,6 +1,6 @@
 # Omni macOS Permissions
 
-Last updated: 2026-09-23
+Last updated: 2026-09-30
 
 ## Boundary
 
@@ -16,7 +16,8 @@ not call native APIs, read TCC, or grant themselves access.
 Normalized states are `not-determined`, `requesting`, `granted`, `denied`,
 `restricted`, `unavailable`, `requires-settings`, and `requires-restart`.
 Authorization state is separate from feature availability; an authorized Speech
-framework can still lack the selected locale's on-device recognition asset.
+framework can still lack the selected locale's on-device recognition asset or a
+usable current input device.
 
 ## Capability map
 
@@ -35,7 +36,10 @@ framework can still lack the selected locale's on-device recognition asset.
 
 The production bundle identifier remains `com.omnicode.editor`. The app carries
 the hardened-runtime audio-input entitlement and the required Microphone/Speech
-usage descriptions. Microphone,
+usage descriptions. The native speech command-line tool embeds its own stable
+`com.omnicode.editor.speech-helper` identifier and the two purpose strings in a
+Mach-O Info.plist section, then receives only the audio-input entitlement.
+Microphone,
 Accessibility, screen capture, notification, and login-item requests originate
 from the resident OmniCode application process wherever Electron exposes the
 supported API. Apple Speech and audio capture remain in the fixed bundled Swift

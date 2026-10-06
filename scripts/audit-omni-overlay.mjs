@@ -70,6 +70,7 @@ const original = await main.evaluate('return await window.omnicode.omni.settings
 
 try {
   await main.evaluate(`return await window.omnicode.omni.settings.update({ enabled: true, setupCompleted: true })`)
+  const cursorRuntime = await main.evaluate(`return await window.omnicode.omni.cursor.status()`)
   await main.evaluate('return await window.omnicode.omni.activation.showOverlay()')
 
   const overlayTarget = await targetsWhenReady((target) => target.url.includes('omni-overlay.html'))
@@ -119,7 +120,7 @@ try {
     }
 
     await overlay.evaluate('return await window.omniOverlay.activation.hide()')
-    console.log(JSON.stringify({ ...result, reducedMotion, screenshotPath, runtimeErrors: unexpectedErrors }, null, 2))
+    console.log(JSON.stringify({ ...result, reducedMotion, cursorRuntime, screenshotPath, runtimeErrors: unexpectedErrors }, null, 2))
   } finally {
     overlay.socket.close()
   }

@@ -156,6 +156,39 @@ describe('OllamaProgressParser', () => {
 })
 
 describe('AIManager model lifecycle', () => {
+  it('persists a loopback Ollama endpoint and reports an evidence-based connection state', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'omnicode-ollama-settings-'))
+    const settingsPath = path.join(root, 'ai-model-preferences.json')
+    const requests: string[] = []
+    try {
+      const manager = new AIManager(new CredentialManager(), new WorkspaceIndexer(), TEST_HARDWARE, {
+        settingsPath,
+        fetch: (async (input) => {
+          requests.push(String(input))
+          return String(input).endsWith('/api/version')
+            ? Response.json({ version: 'test-version' })
+            : Response.json({ models: [] })
+        }) as typeof fetch
+      })
+
+      await expect(manager.updateOllamaSettings({ endpoint: 'http://localhost:11555/' }))
+        .resolves.toEqual({ endpoint: 'http://localhost:11555' })
+      await expect(manager.ollamaStatus()).resolves.toMatchObject({
+        state: 'connected',
+        endpoint: 'http://localhost:11555',
+        version: 'test-version'
+      })
+      expect(requests).toEqual(expect.arrayContaining([
+        'http://localhost:11555/api/version',
+        'http://localhost:11555/api/tags'
+      ]))
+      expect(JSON.parse(await fs.readFile(settingsPath, 'utf8'))).toMatchObject({ ollamaEndpoint: 'http://localhost:11555' })
+      await expect(manager.updateOllamaSettings({ endpoint: 'https://remote.example.com' })).rejects.toThrow(/loopback/iu)
+    } finally {
+      await fs.rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('merges Ollama memory state and sends explicit load and unload requests', async () => {
     const requests: Array<{ url: string; body?: Record<string, unknown> }> = []
     const fetchMock = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -193,6 +226,38 @@ describe('AIManager model lifecycle', () => {
     ])
   })
 
+  it('derives installed-model capabilities from Ollama show metadata without hard-coding the model', async () => {
+    const manager = new AIManager(new CredentialManager(), new WorkspaceIndexer(), TEST_HARDWARE, {
+      fetch: (async (input) => {
+        const url = String(input)
+        if (url.endsWith('/api/tags')) return Response.json({ models: [{ name: 'local-test:latest', size: 2_000 }] })
+        if (url.endsWith('/api/ps')) return Response.json({ models: [] })
+        if (url.endsWith('/api/show')) return Response.json({
+          capabilities: ['completion'],
+          details: { family: 'test', parameter_size: '4B', quantization_level: 'Q4_0' },
+          model_info: { 'test.context_length': 8192 }
+        })
+        return Response.json({})
+      }) as typeof fetch
+    })
+
+    const model = (await manager.models()).find((item) => item.id === 'local-test:latest')
+    expect(model).toMatchObject({
+      toolUse: true,
+      parameterSize: '4B',
+      contextWindow: 8192,
+      modelCapabilities: {
+        supportsTools: true,
+        supportsNativeTools: false,
+        supportsStructuredOutput: true,
+        supportsStreaming: true,
+        supportsVision: false,
+        supportsEmbeddings: false,
+        toolMode: 'structured'
+      }
+    })
+  })
+
   it.each([
     {
       installed: false,
@@ -209,7 +274,14 @@ describe('AIManager model lifecycle', () => {
       TEST_HARDWARE,
       { fetch: (async () => { throw new TypeError('fetch failed') }) as typeof fetch }
     )
-    manager.ollamaStatus = async () => ({ installed, available: false })
+    manager.ollamaStatus = async () => ({
+      installed,
+      available: false,
+      state: installed ? 'not-running' : 'unreachable',
+      endpoint: 'http://127.0.0.1:11434',
+      message: 'Unavailable for test.',
+      checkedAt: new Date(0).toISOString()
+    })
 
     await expect(manager.chat({
       provider: 'ollama',

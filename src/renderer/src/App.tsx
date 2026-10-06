@@ -23,9 +23,11 @@ import { ToolsView } from './components/ToolsView'
 import { ModeSwitcher } from './components/modes/ModeSwitcher'
 import { OmniMode } from './components/omni/OmniMode'
 import { WorkMode } from './components/work/WorkMode'
+import { NotificationCenter } from './components/notifications/NotificationCenter'
 import { fileName, flattenFiles, languageDefinitionForPath, languageForPath } from './lib/languages'
 import { storedAgentPermission, storedAIProvider, storedAppMode, storedModelName, storedTheme } from './lib/preferences'
 import type { AppMode } from '../../shared/work-contracts'
+import type { OmniNotification } from '../../shared/notification-contracts'
 
 type Activity = 'explorer' | 'search' | 'source' | 'run' | 'models' | 'tools'
 type PanelTab = 'terminal' | 'output' | 'problems' | 'runlog'
@@ -161,6 +163,7 @@ export function App() {
   const [sidebarWidth, setSidebarWidth] = useState(260)
   const [aiWidth, setAiWidth] = useState(380)
   const [panelHeight, setPanelHeight] = useState(250)
+  const [notificationTarget, setNotificationTarget] = useState<{ mode: AppMode; conversationId?: string; taskId?: string } | null>(null)
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
   const documentsRef = useRef<OpenDocument[]>(documents)
   const autocompleteSettingsRef = useRef({ enabled: aiAutocomplete, provider: autocompleteProvider, model: autocompleteModel })
@@ -188,6 +191,19 @@ export function App() {
     localStorage.setItem('omnicode.appMode', mode)
     setAppMode(mode)
   }, [appMode])
+
+  const navigateNotification = useCallback((notification: OmniNotification): void => {
+    const target = notification.actionTarget ?? (notification.sourceMode === 'system' ? undefined : {
+      mode: notification.sourceMode,
+      ...(notification.conversationId ? { conversationId: notification.conversationId } : {}),
+      ...(notification.taskId ? { taskId: notification.taskId } : {})
+    })
+    if (!target) return
+    localStorage.setItem('omnicode.appMode', target.mode)
+    setAppMode(target.mode)
+    setNotificationTarget({ ...target })
+    if (target.mode === 'code') setAiVisible(true)
+  }, [])
 
   const reportError = useCallback((cause: unknown): void => {
     const message = cause instanceof Error ? cause.message : String(cause)
@@ -983,6 +999,7 @@ export function App() {
         <button className="run-menu" title="Run configurations" onClick={() => { setActivity('run'); setSidebarVisible(true) }}><ChevronDown /></button>
         <div className="titlebar-layout"><button className={sidebarVisible ? 'active' : ''} title="Primary sidebar" onClick={() => setSidebarVisible((value) => !value)}><Files /></button><button className={panelVisible ? 'active' : ''} title="Bottom panel" onClick={() => setPanelVisible((value) => !value)}><PanelBottom /></button><button className={aiVisible ? 'active' : ''} title="AI sidebar" onClick={() => setAiVisible((value) => !value)}><Sparkles /></button></div>
       </> : <ModeTitlebarLabel mode={appMode} />}
+      <NotificationCenter onNavigate={navigateNotification} />
     </header>
     <div className="mode-content">
     <div className={`code-mode-host${appMode === 'code' ? '' : ' mode-hidden'}`} aria-hidden={appMode !== 'code'}>
@@ -1033,11 +1050,11 @@ export function App() {
           </div>
         </section></>
       </main>
-      {aiVisible && <><div className="resize-handle vertical ai-resizer" onPointerDown={(event) => startResize('ai', event)} /><div style={{ width: aiWidth, minWidth: aiWidth }}><AIChat key={workspacePath ?? 'no-workspace'} workspacePath={workspacePath} defaultProvider={workspaceChatProvider} defaultModel={workspaceChatModel} activeFile={activePath ?? undefined} openFiles={documents.map((document) => document.path)} selectedCode={() => { const selection = editorRef.current?.getSelection(); const model = editorRef.current?.getModel(); return selection && model && !selection.isEmpty() ? model.getValueInRange(selection) : '' }} terminalOutput={terminalOutput} problems={problems.map((problem) => `${problem.startLineNumber}:${problem.startColumn} ${problem.message}`).join('\n')} gitChanges={gitStatus?.changes.map((change) => `${change.indexStatus}${change.workingTreeStatus} ${change.path}`).join('\n') ?? ''} permission={permission} prepareWorkspace={saveAllDocuments} onReviewProposal={setDiffProposalId} onRunAgentCommand={runAgentCommand} onOpenSettings={() => setShowSettings(true)} /></div></>}
+      {aiVisible && <><div className="resize-handle vertical ai-resizer" onPointerDown={(event) => startResize('ai', event)} /><div style={{ width: aiWidth, minWidth: aiWidth }}><AIChat key={workspacePath ?? 'no-workspace'} workspacePath={workspacePath} defaultProvider={workspaceChatProvider} defaultModel={workspaceChatModel} notificationTaskId={notificationTarget?.mode === 'code' ? notificationTarget.taskId : undefined} activeFile={activePath ?? undefined} openFiles={documents.map((document) => document.path)} selectedCode={() => { const selection = editorRef.current?.getSelection(); const model = editorRef.current?.getModel(); return selection && model && !selection.isEmpty() ? model.getValueInRange(selection) : '' }} terminalOutput={terminalOutput} problems={problems.map((problem) => `${problem.startLineNumber}:${problem.startColumn} ${problem.message}`).join('\n')} gitChanges={gitStatus?.changes.map((change) => `${change.indexStatus}${change.workingTreeStatus} ${change.path}`).join('\n') ?? ''} permission={permission} prepareWorkspace={saveAllDocuments} onReviewProposal={setDiffProposalId} onRunAgentCommand={runAgentCommand} onOpenSettings={() => setShowSettings(true)} /></div></>}
     </div>
     <footer className="status-bar"><button title="Git branch"><GitBranch />{gitStatus?.isRepository ? gitStatus.branch : 'No Git'}</button><button onClick={() => { setPanelVisible(true); setPanelTab('problems') }}><CircleAlert />{problems.length}</button><span className="status-spacer" /><button title={serverState.running ? 'Open local server (stop it from the Run menu)' : 'Open Run view'} onClick={() => serverState.running && serverState.url ? void window.omnicode.server.open() : (setActivity('run'), setSidebarVisible(true))}>{serverState.running ? <><Server className="server-on" /> {serverState.name ?? 'Running'}{serverState.port ? ` :${serverState.port}` : ''}</> : <><Server /> Server off</>}</button>{activeRuntime && <button title={activeRuntime.installed ? `${activeRuntime.path ?? activeRuntime.command}${activeRuntime.version ? ` · ${activeRuntime.version}` : ''}` : activeRuntime.guidance} onClick={() => { setActivity('tools'); setSidebarVisible(true) }}><Boxes />{activeRuntime.name}: {activeRuntime.installed ? 'Ready' : 'Missing'}</button>}<span title={aiAutocomplete ? `${autocompleteProvider}: ${autocompleteModel || 'automatic local model'}` : 'AI autocomplete is disabled'}><Sparkles /> {aiAutocomplete ? 'Autocomplete on' : 'Autocomplete off'}</span><span><Cpu /> {ollamaState.status === 'ready' ? 'Local AI' : 'AI optional'}</span><span>UTF-8</span><span>Ln {cursor.line}, Col {cursor.column}</span><span>{activeLanguage?.displayName ?? 'Plain Text'}</span></footer>
     </div>
-    <div className={`work-mode-host${appMode === 'work' ? '' : ' mode-hidden'}`} aria-hidden={appMode !== 'work'}><WorkMode active={appMode === 'work'} onOpenSettings={() => setShowSettings(true)} onError={reportError} onRequireAttention={() => changeAppMode('work')} requestText={requestTextInput} /></div>
+    <div className={`work-mode-host${appMode === 'work' ? '' : ' mode-hidden'}`} aria-hidden={appMode !== 'work'}><WorkMode active={appMode === 'work'} targetConversationId={notificationTarget?.mode === 'work' ? notificationTarget.conversationId : undefined} onOpenSettings={() => setShowSettings(true)} onError={reportError} onRequireAttention={() => changeAppMode('work')} requestText={requestTextInput} /></div>
     <div className={`omni-mode-host${appMode === 'omni' ? '' : ' mode-hidden'}`} aria-hidden={appMode !== 'omni'}><OmniMode active={appMode === 'omni'} /></div>
     </div>
     {palette && <div className="palette-backdrop" onMouseDown={() => setPalette(null)}><div className="palette" onMouseDown={(event) => event.stopPropagation()}><div><Command /><input autoFocus value={paletteQuery} onChange={(event) => setPaletteQuery(event.target.value)} placeholder={palette === 'commands' ? 'Type a command' : 'Search files by name'} /></div><div className="palette-results">{palette === 'commands' ? commands.filter(([label]) => label.toLowerCase().includes(paletteQuery.toLowerCase())).map(([label, action]) => <button key={label} onClick={() => { setPalette(null); action() }}><Command /><span>{label}</span></button>) : allFiles.filter((file) => file.path.toLowerCase().includes(paletteQuery.toLowerCase())).slice(0, 100).map((file) => <button key={file.path} onClick={() => { setPalette(null); void openFile(file.path) }}><FileCode2 /><span><strong>{file.name}</strong><small>{file.path.replace(`${workspacePath}/`, '')}</small></span></button>)}</div></div></div>}

@@ -120,7 +120,7 @@ describe('AIManager tool turns', () => {
     await expect(ai.toolTurn({ provider: 'ollama', ...base })).resolves.toMatchObject({
       calls: [{ toolId: 'browser.open', input: { url: 'https://example.com/' } }]
     })
-    expect(captured[0]?.stream).toBe(false)
+    expect(captured.at(-1)?.stream).toBe(false)
   })
 
   it('uses Ollama-native arguments and tool_name fields on the result round', async () => {
@@ -142,7 +142,7 @@ describe('AIManager tool turns', () => {
       { role: 'tool', callId: 'local-call-1', name: 'omni_0_browser_open', content: '{"ok":true}' }
     ] })
 
-    const messages = captured[0]?.messages as Array<Record<string, unknown>>
+    const messages = captured.at(-1)?.messages as Array<Record<string, unknown>>
     const assistant = messages.find((message) => message.role === 'assistant')
     const result = messages.find((message) => message.role === 'tool')
     expect(assistant).toMatchObject({
@@ -150,6 +150,142 @@ describe('AIManager tool turns', () => {
     })
     expect(result).toMatchObject({ role: 'tool', tool_name: 'omni_0_browser_open', content: '{"ok":true}' })
     expect(result).not.toHaveProperty('tool_call_id')
+  })
+
+  it.each(['stop', 'length'])('returns an empty terminal Ollama turn after a completed tool result (%s)', async (doneReason) => {
+    const ai = new AIManager(new CredentialManager(), new WorkspaceIndexer(), hardware, {
+      fetch: (async () => Response.json({ message: { content: '', tool_calls: [] }, done_reason: doneReason })) as typeof fetch
+    })
+    const messages = [
+      ...base.messages,
+      { role: 'assistant-tool' as const, content: '', calls: [{
+        callId: 'local-call-1', name: 'omni_0_browser_open', toolId: 'browser.open', input: { url: 'https://example.com/' }
+      }] },
+      { role: 'tool' as const, callId: 'local-call-1', name: 'omni_0_browser_open', content: '{"ok":true}' }
+    ]
+
+    await expect(ai.toolTurn({ provider: 'ollama', ...base, messages })).resolves.toEqual({
+      content: '', calls: [], stopReason: doneReason
+    })
+  })
+
+  it('rejects an empty initial Ollama turn when there is no completed tool result', async () => {
+    const ai = new AIManager(new CredentialManager(), new WorkspaceIndexer(), hardware, {
+      fetch: (async () => Response.json({ message: { content: '', tool_calls: [] }, done_reason: 'stop' })) as typeof fetch
+    })
+
+    await expect(ai.toolTurn({ provider: 'ollama', ...base }))
+      .rejects.toThrow('Ollama returned no text or tool call (stop)')
+  })
+
+  it('uses the constrained structured adapter when Ollama declares completion without native tools', async () => {
+    const captured: Array<Record<string, unknown>> = []
+    const ai = new AIManager(new CredentialManager(), new WorkspaceIndexer(), hardware, {
+      fetch: (async (input, init) => {
+        const url = String(input)
+        const body = typeof init?.body === 'string' ? JSON.parse(init.body) as Record<string, unknown> : {}
+        captured.push({ url, ...body })
+        if (url.endsWith('/api/show')) return Response.json({ capabilities: ['completion'] })
+        return Response.json({
+          done_reason: 'stop',
+          message: { content: '{"action":"tool_call","tool":"omni_0_browser_open","arguments":{"url":"https://example.com/"}}' }
+        })
+      }) as typeof fetch
+    })
+
+    await expect(ai.toolTurn({ provider: 'ollama', ...base })).resolves.toMatchObject({
+      calls: [{ toolId: 'browser.open', input: { url: 'https://example.com/' } }],
+      stopReason: 'stop'
+    })
+    const turn = captured.at(-1)
+    expect(turn).toHaveProperty('format')
+    expect(turn).not.toHaveProperty('tools')
+    expect(JSON.stringify(turn?.messages)).toContain('constrained structured-tool protocol')
+  })
+
+  it('allows one bounded repair after malformed structured Ollama output', async () => {
+    let turns = 0
+    const ai = new AIManager(new CredentialManager(), new WorkspaceIndexer(), hardware, {
+      fetch: (async (input) => {
+        if (String(input).endsWith('/api/show')) return Response.json({ capabilities: ['completion'] })
+        turns++
+        return Response.json({ message: { content: turns === 1 ? 'not-json' : '{"action":"final","content":"Recovered safely."}' } })
+      }) as typeof fetch
+    })
+
+    await expect(ai.toolTurn({ provider: 'ollama', ...base })).resolves.toMatchObject({
+      content: 'Recovered safely.',
+      calls: []
+    })
+    expect(turns).toBe(2)
+  })
+
+  it('constrains structured Omni planning to the required registered plan tool first', async () => {
+    const planTool: ToolDescriptor = {
+      ...tool,
+      id: 'omni.update-plan',
+      name: 'Update Omni plan',
+      connectorId: 'omni',
+      inputSchema: {
+        type: 'object',
+        properties: { reasoningSummary: { type: 'string', minLength: 1 } },
+        required: ['reasoningSummary'],
+        additionalProperties: false
+      }
+    }
+    const captured: Array<Record<string, unknown>> = []
+    const ai = new AIManager(new CredentialManager(), new WorkspaceIndexer(), hardware, {
+      fetch: (async (input, init) => {
+        if (String(input).endsWith('/api/show')) return Response.json({ capabilities: ['completion'] })
+        captured.push(JSON.parse(String(init?.body)) as Record<string, unknown>)
+        return Response.json({ message: { content: '{"action":"tool_call","tool":"omni_0_omni_update-plan","arguments":{"reasoningSummary":"Inspect safely."}}' } })
+      }) as typeof fetch
+    })
+
+    await expect(ai.toolTurn({ provider: 'ollama', ...base, tools: [planTool, tool] })).resolves.toMatchObject({
+      calls: [{ toolId: 'omni.update-plan', input: { reasoningSummary: 'Inspect safely.' } }]
+    })
+    const format = captured[0]?.format as { properties?: Record<string, { enum?: string[] }> }
+    expect(format.properties?.action?.enum).toEqual(['tool_call'])
+    expect(format.properties?.tool?.enum).toEqual(['omni_0_omni_update-plan'])
+  })
+
+  it('forces a final response when the structured model repeats an already completed exact call', async () => {
+    const captured: Array<Record<string, unknown>> = []
+    let turns = 0
+    const ai = new AIManager(new CredentialManager(), new WorkspaceIndexer(), hardware, {
+      fetch: (async (input, init) => {
+        if (String(input).endsWith('/api/show')) return Response.json({ capabilities: ['completion'] })
+        captured.push(JSON.parse(String(init?.body)) as Record<string, unknown>)
+        turns++
+        return Response.json({ message: { content: turns === 1
+          ? '{"action":"tool_call","tool":"omni_0_browser_open","arguments":{"url":"https://example.com/"}}'
+          : '{"action":"final","content":"Example Domain"}' } })
+      }) as typeof fetch
+    })
+    const messages = [
+      ...base.messages,
+      { role: 'assistant-tool' as const, content: '', calls: [{
+        callId: 'completed-call', name: 'omni_0_browser_open', toolId: 'browser.open', input: { url: 'https://example.com/' }
+      }] },
+      { role: 'tool' as const, callId: 'completed-call', name: 'omni_0_browser_open', content: '{"title":"Example Domain"}' }
+    ]
+
+    await expect(ai.toolTurn({ provider: 'ollama', ...base, messages })).resolves.toMatchObject({ content: 'Example Domain', calls: [] })
+    const repairedFormat = captured[1]?.format as { properties?: Record<string, { enum?: string[] }> }
+    expect(repairedFormat.properties?.action?.enum).toEqual(['final'])
+    expect(turns).toBe(2)
+  })
+
+  it('does not map an invented structured Ollama tool name onto a registered tool', async () => {
+    const ai = new AIManager(new CredentialManager(), new WorkspaceIndexer(), hardware, {
+      fetch: (async (input) => String(input).endsWith('/api/show')
+        ? Response.json({ capabilities: ['completion'] })
+        : Response.json({ message: { content: '{"action":"tool_call","tool":"shell_exec","arguments":{"command":"rm -rf /"}}' } })) as typeof fetch
+    })
+
+    const result = await ai.toolTurn({ provider: 'ollama', ...base })
+    expect(result.calls[0]).toMatchObject({ name: 'shell_exec', toolId: undefined })
   })
 
   it('never maps a model-invented function name onto a registered tool', async () => {

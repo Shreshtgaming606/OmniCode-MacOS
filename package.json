@@ -1,6 +1,6 @@
 {
   "name": "omnicode",
-  "version": "0.9.0",
+  "version": "0.1.0",
   "description": "A native macOS code editor with local and cloud AI assistance.",
   "main": "./out/main/index.js",
   "author": "OmniCode contributors",
@@ -20,8 +20,11 @@
     "test:watch": "vitest --configLoader runner",
     "dist": "npm run build && electron-builder --mac",
     "dist:dir": "npm run build && electron-builder --mac --dir",
-    "dist:x64": "npm_config_arch=x64 npm run build && electron-builder --mac --x64",
-    "dist:arm64": "npm_config_arch=arm64 npm run build && electron-builder --mac --arm64",
+    "dist:x64": "OMNICODE_TARGET_ARCH=x64 npm run build && electron-builder --mac --x64",
+    "dist:arm64": "OMNICODE_TARGET_ARCH=arm64 npm run build && electron-builder --mac --arm64",
+    "dist:arm64:adhoc": "node scripts/build-macos-arm64-adhoc.mjs",
+    "dist:x64:adhoc": "node scripts/build-macos-x64-adhoc.mjs",
+    "validate:mac": "node scripts/validate-macos-build.mjs",
     "rebuild:native": "electron-rebuild -f -w node-pty"
   },
   "dependencies": {
@@ -70,8 +73,8 @@
         "to": "omni-native/omnicode-cursor-helper"
       },
       {
-        "from": "out/native/omnicode-speech-helper",
-        "to": "omni-native/omnicode-speech-helper"
+        "from": "out/native/omnicode-speech-helper.app",
+        "to": "omni-native/omnicode-speech-helper.app"
       }
     ],
     "mac": {
@@ -79,6 +82,7 @@
       "icon": "build/icon.icns",
       "minimumSystemVersion": "14.0",
       "target": ["dmg", "zip"],
+      "forceCodeSigning": true,
       "hardenedRuntime": true,
       "entitlements": "build/entitlements.mac.plist",
       "gatekeeperAssess": false,

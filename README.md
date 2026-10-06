@@ -9,6 +9,9 @@ This repository builds a real Electron desktop application. File, process,
 terminal, Git, credential, and provider operations run behind a sandboxed,
 typed preload boundary; the React renderer has no direct Node.js access.
 
+Current prerelease: [OmniCode Beta v1 0.1.0 downloads](https://omnicode.omnicoretech.org/download/)
+and [GitHub release](https://github.com/Shreshtgaming606/OmniCode-MacOS/releases/tag/v0.1.0).
+
 ## What is included
 
 - Native macOS menus, dialogs, Finder actions, file associations, drag and drop,
@@ -147,22 +150,22 @@ npm run dist:arm64
 Artifacts are written to `dist/` with names such as:
 
 ```text
-OmniCode-0.9.0-x64.dmg
-OmniCode-0.9.0-x64.zip
-OmniCode-0.9.0-arm64.dmg
-OmniCode-0.9.0-arm64.zip
+OmniCode-0.1.0-x64.dmg
+OmniCode-0.1.0-x64.zip
+OmniCode-0.1.0-arm64.dmg
+OmniCode-0.1.0-arm64.zip
 ```
 
 `node-pty` contains native code, so each artifact must contain the matching CPU
 slice. Smoke-test Intel output on Intel hardware and Apple silicon output on
 Apple silicon before public distribution.
 
-Local artifacts can be built without an Apple Developer account. They remain
-unsigned, so macOS may ask the user to confirm the first launch: in Finder,
-Control-click OmniCode and choose **Open**. Public distribution requires a
-Developer ID Application certificate, Apple notarization, and stapling. The
-package already uses a stable bundle identifier and Hardened Runtime so signing
-can be added without changing application behavior.
+Local diagnostic artifacts can be ad-hoc signed without an Apple Developer
+account, but they are not Developer ID-signed or notarized. macOS Gatekeeper may
+block first launch. After reviewing the app's source and checksum, users may
+use macOS Privacy & Security to allow it; do not disable system-wide security
+protections. A fully trusted public release still requires Developer ID
+signing, Apple notarization, and stapling.
 
 ## Using OmniCode
 
@@ -225,11 +228,20 @@ brew install ollama
 ollama serve
 ```
 
-Open the Models view in OmniCode to download a recommended coding model. Model
-downloads show live progress and can be canceled. The hardware panel ranks
-models from recommended to not recommended based on memory, CPU architecture,
-and optional GPU information. Local prompts and attachments go only to the
-loopback Ollama service.
+Open **Settings → AI Providers → Ollama · local** to test or change the safe
+loopback endpoint, refresh automatically detected installed models, select a
+model, or pull/remove a model with confirmation. The Models view additionally
+offers the curated coding catalog and load/unload controls. Downloads show live
+progress and can be canceled. The hardware panel ranks models from recommended
+to not recommended based on memory, CPU architecture, and optional GPU
+information. Local prompts and attachments go only to the configured loopback
+Ollama service.
+
+Ollama models participate in the same ToolRegistry, permission, and approval
+pipeline as cloud models. Native function calling is used only when Ollama
+declares it. Completion-only models may use a schema-constrained structured
+adapter; small models can still be unreliable on multi-step work. See
+`docs/development/OMNICODE_OLLAMA_PROVIDER.md` for capabilities and live tests.
 
 ### Cloud providers
 

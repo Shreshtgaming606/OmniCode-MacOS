@@ -1,323 +1,291 @@
 # Omni Voice Architecture
 
-Last updated: 2026-09-22
+Last updated: 2026-10-04
 
-Status: **Real macOS speech output and the native push-to-talk stack are
-implemented; live recognition is host-blocked by a missing on-device Speech
-asset, and local wake activation is unavailable**
+Status: **Deterministic push-to-talk, live partial transcripts, Auto/Enter
+finalization, device diagnostics, and real on-device Apple Speech wiring are
+implemented and exercised with the system-default AirPods microphone in an
+unlocked graphical session. Wake-word activation remains unavailable.**
 
-## Current repository reality
+## 2026-10-01 live acceptance evidence
 
-OmniCode now contains provider-neutral voice contracts and a real
-`TextToSpeechProvider` in `src/main/services/omni-voice-service.ts`.
-`MacOSSayTextToSpeechProvider`:
+- macOS reported `Shresht’s AirPods` as the Bluetooth system-default input;
+  the active `AVAudioEngine` capture format was 48,000 Hz, mono.
+- Microphone and Speech Recognition permissions were both granted. The real
+  `en-US` request reported on-device requested, supported, and active.
+- Auto mode preserved a time request through seven partials and finalized once
+  after 1.713 seconds of silence. A longer multi-clause request produced 22
+  partial updates over 11.724 seconds and finalized once after 1.676 seconds.
+- Press Enter mode waited through 3.886 seconds of silence, then finalized only
+  when Enter was pressed. Auto-mode Enter override finalized after 903 ms of
+  silence, before the automatic threshold, without a later duplicate submit.
+- A 12.042-second no-speech Auto session timed out without creating an AI task.
+  Empty Enter sessions likewise created no task and showed the retry UI.
+- More than five consecutive sessions used unique IDs, released their helper
+  processes, carried no stale transcript, and produced no duplicate model
+  submission. Real standalone TTS enumeration, interruption, and completion
+  also passed.
+- Manual AirPods disconnect during an active capture and a frame-by-frame
+  recording of the partial-text animation remain unperformed. The observed
+  partial counts and final task text prove the native streaming path, but model
+  or tool quality is reported separately from transcription quality.
 
-- invokes only the fixed `/usr/bin/say` executable with `shell: false`;
-- sends bounded speech text over stdin rather than process arguments;
-- enumerates installed macOS voices using `say -v ?`;
-- validates voice identifiers and speaking rate;
-- strips embedded `say` control commands and redacts credential-like text;
-- bounds captured process output;
-- supports AbortSignal cancellation, explicit Stop, superseding speech, and
-  disposal without allowing an older utterance to become current again.
+## Current implementation
 
-The main process exposes availability, installed-voice listing, and Stop through
-typed Omni IPC. When spoken responses are enabled, the controller's safe final
-result can be spoken; stopping a task also stops speech. The full Omni UI shows
-real output availability and installed voice choices rather than claiming input
-support.
-
-`MacOSSpeechToTextProvider` now launches the fixed
-`omnicode-speech-helper` executable. The helper uses `AVAudioEngine` and
-`SFSpeechRecognizer`, requires on-device recognition, emits bounded text-only
-partial/final events, caps sessions at 60 seconds, and supports Stop/Cancel.
-The main process owns the session and exposes only typed status/control/events;
-the push-to-talk UI cannot show Listening until native capture reports ready.
-There is still no audio-input device selector or “Hey Omni” detector.
-
-The main Electron session continues to reject renderer media permission
-requests. The renderer has no `getUserMedia`, `MediaRecorder`, or Web Speech
-implementation. The helper is ad-hoc signed during local builds with the
-audio-input entitlement, while the app package includes both microphone and
-Speech Recognition usage descriptions. Developer ID signing/notarization and
-stable public TCC identity remain external release requirements.
-
-The model catalog deliberately filters audio/transcription/TTS model products
-from ordinary chat selectors in `src/main/services/model-catalog-manager.ts`.
-That is not a voice implementation and must not be treated as one.
-
-## Design goals
-
-- Voice is one input/output surface for the same main-process OmniController.
-- Wake-word processing is local and never uploads continuous pre-wake audio.
-- Voice capture begins only after explicit shortcut activation or a local wake
-  event.
-- Speech providers are replaceable; Omni is not coupled to a cloud vendor.
-- Partial transcript, cancellation, interruption, and final transcript are
-  first-class states.
-- The helper and UI show microphone state clearly.
-- Spoken output is concise and human-facing; detailed tool activity stays in
-  Activity.
-- No raw audio is persisted by default.
-
-## Provider contracts
-
-The trusted main process should own narrow interfaces similar to:
+Voice is an input surface for the existing `OmniController`; it is not a
+separate agent. A successful session follows this path:
 
 ```text
-SpeechToTextProvider
-  capabilities() -> onDevice, streaming, supportedLocales
-  start(options, signal) -> partial/final transcript events
-  stop() -> final transcript or cancelled state
-
-TextToSpeechProvider
-  voices() -> bounded installed voice metadata
-  speak(text, options, signal) -> started/finished/interrupted events
-  stop()
-
-WakeWordProvider
-  start(model, signal) -> local wake events
-  pause()
-  stop()
-  metrics() -> bounded CPU/false-trigger diagnostics
+Cmd+Shift+Space
+  -> compact Omni overlay
+  -> signed omnicode-speech-helper.app bundle
+  -> AVAudioEngine system-default input
+  -> SFSpeechRecognizer partial results
+  -> sustained silence or temporary Enter shortcut
+  -> stop audio + endAudio()
+  -> final transcript
+  -> existing OmniController / selected provider / ToolRegistry
+  -> result
+  -> optional System Voice or ElevenLabs text-to-speech
 ```
 
-Provider implementations run in trusted main/native/helper code. The current
-TTS provider runs in the main process; a sandboxed renderer receives only
-availability, installed voice labels, and bounded errors. It never receives a
-process handle, raw microphone frame, or direct permission handle.
+The renderer never receives raw audio or native process handles. The helper
+emits bounded amplitude, state, partial-transcript, final-transcript, and safe
+diagnostic events over newline-delimited JSON. Audio is not written to disk.
 
-## Command voice flow
+## Session state machine
+
+`OmniVoiceSessionMachine` is the main-process lifecycle guard for one spoken
+request. Shared user-facing states are:
 
 ```text
-shortcut or local wake event
-  -> stop/duck current TTS
-  -> show overlay and Listening state
-  -> start microphone capture
-  -> emit bounded partial transcript
-  -> voice activity/end-of-utterance detection or explicit Stop Listening
-  -> finalize transcript
-  -> discard command audio
-  -> OmniController plans and briefly acknowledges
-  -> tools execute through PermissionManager
-  -> concise result is rendered and optionally spoken
+IDLE
+STARTING
+LISTENING
+SPEECH_DETECTED
+WAITING_FOR_END
+FINALIZING_TRANSCRIPT
+THINKING
+WORKING
+SPEAKING
+COMPLETED
+CANCELLED
+FAILED
 ```
 
-The controller, not the speech provider, decides what the transcript means and
-whether a task may run. Transcription text is untrusted user input and follows
-the same validation limits as typed requests.
+The native helper owns the capture-side states through transcript finalization.
+The existing Omni task and speech-output events drive Thinking, Working, and
+Speaking in the overlay after submission. `finalizeOnce()` ensures Enter,
+silence, a Speech-framework final result, and timeout cannot produce more than
+one finalization or model submission.
 
-## Initial speech-to-text provider — implemented
+The overlay does not add transcript approval or per-step approval controls.
+Existing security-sensitive tool approvals remain owned by the existing
+permission architecture.
 
-The initial implementation is a small Swift service using
-`AVAudioEngine` and `SFSpeechRecognizer`:
+## End-of-speech behavior
 
-- request microphone and Speech Recognition permissions only when the user
-  enables or invokes voice;
-- report `not-determined`, `granted`, `denied`, `restricted`, and unavailable
-  states without pretending success;
-- use `shouldReportPartialResults` for responsive transcripts;
-- when the UI labels recognition as local, require on-device recognition and
-  fail clearly if the selected locale/device does not support it;
-- do not silently fall back from an on-device selection to a paid or cloud
-  service;
-- cap transcript duration and text size;
-- stop the audio engine and release the device on completion, cancellation,
-  screen lock, helper disable, or application shutdown.
+Settings expose two modes under **Settings → Omni → Voice → Finish speaking**:
 
-Chromium Web Speech is not the primary provider because service availability,
-network behavior, and packaged Electron support are not controlled enough for
-the promised privacy boundary. A local Whisper-compatible provider can be
-added behind the same interface later, but it must be measured for model size,
-latency, memory, and battery before being offered.
+- **Automatically** (default): allow 12 seconds for speech to begin, then
+  finalize after configurable sustained silence (default 1.6 seconds; supported
+  range 1.2–2.5 seconds).
+- **Press Enter**: continue listening through pauses until Enter is pressed,
+  subject to the five-minute safety cap.
 
-## Text-to-speech provider — implemented
+Enter is also an immediate finish override in Automatically mode. Escape
+cancels and discards the transcript. Electron global shortcuts for Enter and
+Esc are registered only after native capture is ready and are removed as soon
+as finalization or cancellation begins. They do not remain active outside a
+voice session.
 
-The initial implementation uses macOS's installed `/usr/bin/say` service
-through a fixed-executable, no-shell process adapter. It supports installed
-voice discovery, bounded rate selection, Stop, task cancellation, and immediate
-supersession. Passing text on stdin plus strict argument validation prevents
-model content from becoming shell or `say` command syntax.
+The native endpoint detector uses both actual microphone energy and recognition
+activity:
 
-A future native `AVSpeechSynthesizer` service may replace this provider behind
-the same contract if the helper architecture needs lower-latency callbacks. It
-is not required to represent the current TTS feature honestly.
+- it first establishes a bounded adaptive noise floor;
+- energy must remain above the voice threshold long enough to count as speech;
+- a non-empty partial result also proves speech began;
+- sub-300 ms quiet periods only move the UI toward Waiting for End;
+- only sustained quiet matching the configured delay finalizes Auto mode;
+- initial silence never sends an empty prompt.
 
-Spoken content rules:
+There is one 100 ms endpoint monitor, rather than unrelated timers competing to
+submit the request.
 
-- acknowledge a meaningful task with a short public course of action;
-- speak occasional meaningful updates for long tasks, not every tool call;
-- speak completion or the exact blocking reason;
-- never speak passwords, tokens, API keys, cookies, authorization headers,
-  private keys, or content marked sensitive;
-- do not read a long terminal log, email body, webpage, or document unless the
-  user explicitly requested it;
-- honor Voice Responses Off immediately.
+## Partial and final transcripts
 
-Starting another utterance stops and supersedes the current speech generation;
-an older completion cannot clear the new active utterance. A future microphone
-activation must stop or duck TTS before capture begins.
+`SFSpeechAudioBufferRecognitionRequest.shouldReportPartialResults` is enabled.
+Each partial replaces the prior partial in the compact overlay, so recognition
+corrections do not appear as duplicate messages. The transcript area wraps,
+keeps a fixed maximum height, and scrolls to the newest text instead of growing
+the overlay.
 
-## “Hey Omni” wake phrase
+Finalization uses this order:
 
-Wake activation is optional and defaults to off. Settings are:
+```text
+stop accepting microphone buffers
+  -> stop AVAudioEngine and remove its tap
+  -> call recognitionRequest.endAudio()
+  -> keep the recognition task alive for a final result
+  -> use the final transcript (with a 2.5 second fallback)
+  -> clean up recognition objects
+  -> submit non-empty text once
+```
 
-- Off
-- Shortcut only
-- Hey Omni + shortcut
+This prevents the last word from being cut off, particularly on Bluetooth
+routes. Empty Auto timeouts show “No speech detected.” Empty Enter submissions
+show “I didn’t hear anything.” Neither starts an AI request.
 
-A real local detector is required before the third option can be enabled. The
-repository currently has no engine/model, so this is an implementation and
-verification gate, not a CSS/settings-only task.
+## Audio devices and AirPods
 
-The local wake provider must:
+The helper queries CoreAudio for the current system-default input and reports:
 
-- run in the lightweight signed helper, not a visible renderer;
-- use a bundled, licensed, architecture-compatible model;
-- process low-bandwidth frames locally;
-- keep only a short in-memory rolling buffer when technically needed;
-- discard pre-wake frames and never add them to logs/history;
-- make no network requests before activation;
-- expose a visible microphone indicator and Pause Wake Word action;
-- stop on user disable, logout, screen lock where appropriate, or helper exit;
-- avoid running a general speech recognizer or large local model while idle.
+- device name;
+- transport (including Bluetooth/Bluetooth LE);
+- capture sample rate;
+- input channel count.
 
-Before enablement, onboarding must explain that the microphone is locally
-monitored for the phrase, ordinary transcription starts only after activation,
-and the setting can be disabled at any time.
+Settings show an honest disabled selector labelled **System Default —
+&lt;device&gt;**. OmniCode does not pretend it can select a device that
+`AVAudioEngine` was not configured to select. Starting a new session follows
+the then-current macOS default input, including AirPods connected after
+OmniCode launched.
 
-## Privacy and data lifetime
+During capture, the helper observes both the CoreAudio default-input property
+and `AVAudioEngineConfigurationChange`. A removed device, changed route, zero
+channel format, sample-rate change, or channel-count change fails the session
+with “Microphone disconnected or changed. Try the voice request again.” The
+next activation creates a fresh engine and follows the new default route.
 
-| Data | Allowed lifetime | Persistence |
-| --- | --- | --- |
-| Pre-wake PCM frames | Minimum rolling detection window | Never |
-| Activated command audio | Until final transcript/cancel | Never by default |
-| Partial transcript | Current activation | No history until finalized |
-| Final user transcript | According to Omni chat-history setting | Bounded, redacted where required |
-| Spoken response text | Existing safe response/task history | No separate voice log |
-| Voice/locale/speed settings | User preference | Private validated global settings |
-| Provider diagnostics | Bounded status/error category | Never raw audio or secrets |
+Bluetooth is given extra final-result time after `endAudio()`; capture does not
+use partial-result timing alone as a silence signal. A real AirPods session must
+still verify actual startup latency, partial latency, format, and endpoint
+tuning on the target Mac.
 
-Temporary audio or model files must not be placed in a workspace. If a local
-engine requires a temporary file, it must live under private application data,
-use restrictive permissions, and be deleted on success, cancellation, crash
-recovery, and startup cleanup.
+## On-device recognition and permissions
 
-## Permissions and packaging
+`MacOSSpeechToTextProvider` always starts recognition with
+`requireOnDevice: true`. The helper checks
+`supportsOnDeviceRecognition` before capture and sets
+`requiresOnDeviceRecognition = true` on the real request. It fails closed if
+the selected locale cannot run on device; there is no silent cloud fallback.
 
-Voice requires:
+“Available” in Settings means the API reports support. “Active” is shown only
+after a real capture session returns diagnostics confirming on-device mode was
+requested, supported, and active. Support alone is not recorded as a completed
+on-device test.
 
+The native speech-helper app bundle carries an `Info.plist` with:
+
+- stable identifier `com.omnicode.editor.speech-helper`;
 - `NSMicrophoneUsageDescription`;
-- `NSSpeechRecognitionUsageDescription` for Apple Speech;
-- the hardened-runtime audio-input entitlement for every process that captures
-  microphone audio;
-- signed nested helper/native code with stable identities.
+- `NSSpeechRecognitionUsageDescription`.
 
-Do not broadly allow `media` permission in `session.defaultSession`. Native
-capture is preferred. If a future trusted renderer needs media, grant only the
-exact audio request from the exact Omni surface and continue rejecting camera,
-screen, managed-browser, iframe, and remote-origin requests.
+It is then signed with the narrow audio-input entitlement and hardened-runtime
+option. This gives the helper a stable privacy identity and ensures development
+permission requests do not depend on the stock Electron development bundle’s
+plist. Packaged OmniCode also carries both usage descriptions in the outer app
+plist. The separate helper bundle identity is important for stable macOS
+privacy permissions.
 
-The helper architecture and login lifecycle are documented in
-`OMNI_BACKGROUND_SERVICE.md`.
+Microphone and Speech Recognition requests still use the established
+`MacOSPermissionManager`. Denied/restricted states point to System Settings and
+are not repeatedly re-prompted or bypassed.
 
-## User-visible states and errors
+## Native helper lifecycle and signing
 
-The voice subsystem maps native/provider state to:
+`scripts/build-omni-speech-helper.mjs`:
 
-- Idle
-- Listening
-- Transcribing
-- Speaking
-- Interrupted
-- Permission Required
-- Unavailable
-- Failed
+1. validates the helper plist with `plutil`;
+2. compiles Swift for `OMNICODE_TARGET_ARCH` (`arm64` or `x86_64`) with
+   AVFoundation, CoreAudio, and Speech;
+3. copies the helper `Info.plist` into the app bundle and applies executable permissions;
+4. ad-hoc signs the helper with hardened runtime and the audio-input
+   entitlement.
 
-Examples of honest errors:
+The macOS packaging scripts copy the helper to
+`Contents/Resources/omni-native`, restore its narrow signature after
+electron-builder’s recursive signing pass, and reseal the outer app last.
+`validate-macos-build.mjs` verifies architecture, strict code signing, stable
+helper identity, bundled privacy keys, and the audio-input entitlement.
 
-- “Microphone permission is disabled. Open System Settings to enable it.”
-- “On-device speech recognition is unavailable for this language.”
-- “The microphone is in use by another application.”
-- “Wake phrase detection stopped because the helper exited.”
+Ad-hoc signing is still local diagnostic distribution, not Developer ID
+signing or notarization. Stable public Gatekeeper/TCC behavior remains a release
+gate until a Developer ID identity and notarization are available.
 
-No generic “Listening” state may be shown until audio capture has actually
-started.
+## Text-to-speech
 
-## Settings
+`MacOSSayTextToSpeechProvider` invokes only `/usr/bin/say` with `shell: false`,
+sends bounded redacted text through stdin, validates voice/rate arguments,
+supports cancellation and supersession, and never allows model text to become
+shell syntax. Voice input first stops current TTS to avoid capturing Omni’s own
+response. `OmniSpeechOutput` now selects this System Voice provider or optional
+ElevenLabs output. ElevenLabs audio is streamed as PCM into the existing signed
+native helper without temporary audio files. Connection, voice browsing,
+preview, Keychain storage, speech chunking, fallback, and live-test limits are
+documented in [OMNI_ELEVENLABS.md](./OMNI_ELEVENLABS.md).
 
-The global main-process settings store currently validates:
+## Privacy and diagnostics
 
-- installed TTS voice identifier;
-- speaking speed within a safe bounded range;
-- spoken responses on/off;
-- activation mode;
-- local-only wake-processing policy metadata.
+The helper records no audio. The model normally receives only the finalized
+text. Partial transcripts are current-session UI state and are not persisted as
+separate history items.
 
-Voice input device selection and a usable wake enablement setting await their
-corresponding concrete providers. The current push-to-talk locale is `en-US`.
+Development diagnostics contain only session ID, input-device name/transport,
+sample rate, channel count, locale, on-device requested/supported/active flags,
+duration, speech-start offset, final-silence duration, partial-result count,
+and finalization reason. Full transcript text and microphone audio are not
+written to diagnostics.
 
-The helper receives only the settings it needs. It never receives provider API
-keys or OAuth tokens.
+## Automated coverage
 
-## Test gates
+Focused tests cover:
 
-### Automated
+- legal and illegal state transitions;
+- partial transcript correction/replacement protocol;
+- Enter, silence, timeout, cancellation, and Speech-framework final reasons;
+- one-winner finalization races;
+- empty cancellation without a submit-worthy transcript;
+- startup failure recovery and five rapid consecutive sessions;
+- microphone-route/helper failure propagation;
+- device and on-device diagnostics;
+- finish-mode and silence-delay settings validation/migration;
+- permission not-determined, denied, and refresh behavior;
+- temporary session cleanup;
+- helper privacy/signing build configuration;
+- existing TTS interruption, redaction, argument validation, and cleanup.
 
-Passing TTS coverage verifies availability, installed-voice parsing and bounds,
-fixed executable/no-shell invocation, stdin text, invalid voice/rate rejection,
-redaction, embedded-command removal, provider failures, AbortSignal
-cancellation, explicit Stop, concurrent speech supersession, and disposal.
-`/usr/bin/say -v ?` was also invoked on the host to verify the real installed
-voice format used by the parser. The current complete serial run passed 70
-files with 601 tests and one intentionally skipped native-Keychain file/test. A
-built-app live smoke queried the real TTS availability and installed macOS voice
-list through the production preload/main-process route.
+The physical Speech framework, actual partial text, audio energy, and Bluetooth
+timing cannot be honestly proven by mocked tests.
 
-Focused tests now cover helper-path resolution, non-macOS unavailability,
-permission/capability parsing, explicit authorization before recognizer
-availability, amplitude and text event streaming, Stop/final ordering, service
-listening/partial/final events, and the typed UI fallback. A real native probe
-compiled and ad-hoc signed the x86_64 helper, returned an accurate authorization
-state, and separately reported the missing `en-US` on-device asset. The
-dedicated permission command no longer lets that missing asset prevent the real
-macOS authorization workflow, while recognition itself still fails closed with
-`on-device-unavailable` rather than silently using a network recognizer. Real
-microphone capture and transcript accuracy remain blocked by the missing host
-asset.
-The speech and Cursor helpers also cross-compile and ad-hoc signature-verify as
-arm64; the development outputs were restored to x86_64 afterward. Matching-
-hardware arm64 execution is still untested.
+## Required real acceptance tests
 
-### Packaged real-world
+Run these in an unlocked graphical macOS session with the desired AirPods shown
+as the real system-default input:
 
-- microphone grant, denial, revocation, and restart;
-- a real spoken “what time is it?” task;
-- partial and final transcript accuracy in a quiet room;
-- Stop Listening and task Stop;
-- TTS voice/speed/off settings;
-- user interruption while Omni speaks;
-- activation from foreground, background, minimized, and another Space;
-- wake enabled/disabled behavior;
-- false-activation and idle-resource soak;
-- network observation proving no pre-wake upload;
-- screen lock/unlock and audio-device removal;
-- Intel and Apple Silicon helper/native slices.
+1. grant Speech Recognition when macOS prompts;
+2. Auto: speak “What time is it on this Mac?” with a short natural pause;
+3. Enter mode: pause several seconds, confirm no auto-submit, then press Enter;
+4. Auto Enter override before silence fires;
+5. longer multi-clause request with pauses and visible evolving partial text;
+6. Auto initial-silence timeout and empty Enter;
+7. five consecutive sessions with no stale text, recognizers, shortcuts, or
+   duplicate submissions;
+8. an actual Omni tool request and optional TTS response;
+9. manual AirPods disconnect/input-route change during capture.
 
-## Current blockers
+Record transcription and agent outcomes separately. A model/tool failure does
+not prove speech recognition failed, and a correct transcript alone does not
+prove the agent result succeeded.
 
-- The current Mac lacks the `en-US` on-device Apple Speech asset, so the native
-  provider correctly remains unavailable until the asset is installed.
-- The first invocation of a nested helper in the unsigned x64 package can time
-  out during macOS provenance evaluation; an immediate retry passed. Stable
-  cold behavior remains part of the Developer ID signing/notarization gate.
-- No local wake-word engine/model has been selected, licensed, bundled, or
-  measured.
-- Developer ID signing/notarization is unavailable on the current build host;
-  stable public TCC/helper verification therefore remains blocked.
-- Apple Silicon native execution still requires matching hardware testing.
+## Known limitations
 
-Push-to-talk remains marked partially working until its real microphone tests
-pass; wake activation remains unavailable. macOS speech output may be described
-as available within the current fixed-executable provider limits; a packaged
-audible settings/task workflow is still required for release completion.
+- Wake-word/“Hey Omni” support is still unavailable; no licensed local wake
+  model is bundled.
+- Device selection is system-default only.
+- Ad-hoc builds are not notarized public releases.
+- An x86_64 helper can be cross-compiled and signature-verified on Apple
+  Silicon, but cannot be executed without Rosetta or an Intel Mac.
+- The 2026-10-01 ARM64 and x64 0.9.0 diagnostic DMGs include this voice change
+  and pass strict nested-signature, architecture, mounted-image, and checksum
+  validation. They remain ad-hoc signed and unnotarized.

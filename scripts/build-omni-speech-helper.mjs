@@ -1,4 +1,4 @@
-import { chmod, mkdir } from 'node:fs/promises'
+import { chmod, copyFile, mkdir, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -8,16 +8,32 @@ if (process.platform !== 'darwin') throw new Error('The Omni speech helper can o
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const source = path.join(projectRoot, 'native', 'omni-speech-helper', 'main.swift')
 const entitlements = path.join(projectRoot, 'build', 'entitlements.omni-speech.plist')
+const infoPlist = path.join(projectRoot, 'build', 'omni-speech-helper.Info.plist')
 const outputDirectory = path.join(projectRoot, 'out', 'native')
-const output = path.join(outputDirectory, 'omnicode-speech-helper')
-const requestedArchitecture = process.env.npm_config_arch || process.env.OMNICODE_TARGET_ARCH || process.arch
+const outputBundle = path.join(outputDirectory, 'omnicode-speech-helper.app')
+const contentsDirectory = path.join(outputBundle, 'Contents')
+const executableDirectory = path.join(contentsDirectory, 'MacOS')
+const output = path.join(executableDirectory, 'omnicode-speech-helper')
+const outputInfoPlist = path.join(contentsDirectory, 'Info.plist')
+const legacyOutput = path.join(outputDirectory, 'omnicode-speech-helper')
+const requestedArchitecture = process.env.OMNICODE_TARGET_ARCH || process.env.npm_config_arch || process.arch
 const targetArchitecture = requestedArchitecture === 'x64' ? 'x86_64' : requestedArchitecture === 'arm64' ? 'arm64' : null
 if (!targetArchitecture) throw new Error(`Unsupported Omni speech helper architecture: ${requestedArchitecture}`)
 
-await mkdir(outputDirectory, { recursive: true })
+await rm(outputBundle, { recursive: true, force: true })
+await rm(legacyOutput, { force: true })
+await mkdir(executableDirectory, { recursive: true })
+const plistValidation = spawnSync('/usr/bin/plutil', ['-lint', infoPlist], {
+  cwd: projectRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30_000, windowsHide: true
+})
+if (plistValidation.error) throw plistValidation.error
+if (plistValidation.status !== 0) {
+  const diagnostic = String(plistValidation.stderr || plistValidation.stdout || 'Info.plist validation failed.').trim().slice(0, 8_000)
+  throw new Error(`The Omni speech helper Info.plist is invalid:\n${diagnostic}`)
+}
 const compilation = spawnSync('xcrun', [
   'swiftc', '-target', `${targetArchitecture}-apple-macos14.0`, source, '-o', output,
-  '-framework', 'AVFoundation', '-framework', 'Speech'
+  '-framework', 'AVFoundation', '-framework', 'CoreAudio', '-framework', 'Speech'
 ], {
   cwd: projectRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 5 * 60_000, windowsHide: true
 })
@@ -28,8 +44,9 @@ if (compilation.status !== 0) {
 }
 
 await chmod(output, 0o755)
+await copyFile(infoPlist, outputInfoPlist)
 const signing = spawnSync('/usr/bin/codesign', [
-  '--force', '--sign', '-', '--timestamp=none', '--options', 'runtime', '--entitlements', entitlements, output
+  '--force', '--sign', '-', '--timestamp=none', '--options', 'runtime', '--entitlements', entitlements, outputBundle
 ], {
   cwd: projectRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000, windowsHide: true
 })
@@ -39,4 +56,4 @@ if (signing.status !== 0) {
   throw new Error(`Could not ad-hoc sign the Omni speech helper for ${targetArchitecture}:\n${diagnostic}`)
 }
 
-console.log(`Built and ad-hoc signed Omni speech helper for ${targetArchitecture}.`)
+console.log(`Built and ad-hoc signed Omni speech helper app bundle for ${targetArchitecture}.`)

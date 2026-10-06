@@ -17,7 +17,11 @@ function dependencies(overrides: Partial<MacOSPermissionDependencies> = {}): Mac
       onDevice: true,
       streaming: true,
       locale: 'en-US',
-      supportedLocales: ['en-US']
+      supportedLocales: ['en-US'],
+      inputDeviceName: 'System Default',
+      inputDeviceTransport: 'Unknown',
+      sampleRate: 0,
+      channelCount: 0
     })),
     requestSpeechRecognition: vi.fn(async () => 'granted' as const),
     notificationsSupported: () => true,
@@ -42,7 +46,11 @@ describe('MacOSPermissionManager', () => {
         onDevice: false,
         streaming: true,
         locale: 'en-US',
-        supportedLocales: ['en-US']
+        supportedLocales: ['en-US'],
+        inputDeviceName: 'System Default',
+        inputDeviceTransport: 'Unknown',
+        sampleRate: 0,
+        channelCount: 0
       })
     }))
 
@@ -60,7 +68,8 @@ describe('MacOSPermissionManager', () => {
       speechStatus: async () => ({
         available: state === 'granted', providerId: 'macos-speech', microphonePermission: state,
         speechRecognitionPermission: 'not-determined', onDevice: true, streaming: true,
-        locale: 'en-US', supportedLocales: ['en-US']
+        locale: 'en-US', supportedLocales: ['en-US'], inputDeviceName: 'System Default',
+        inputDeviceTransport: 'Unknown', sampleRate: 0, channelCount: 0
       })
     }))
 
@@ -75,7 +84,8 @@ describe('MacOSPermissionManager', () => {
       speechStatus: async () => ({
         available: false, providerId: 'macos-speech', microphonePermission: 'denied',
         speechRecognitionPermission: 'not-determined', onDevice: true, streaming: true,
-        locale: 'en-US', supportedLocales: ['en-US']
+        locale: 'en-US', supportedLocales: ['en-US'], inputDeviceName: 'System Default',
+        inputDeviceTransport: 'Unknown', sampleRate: 0, channelCount: 0
       }),
       openExternal
     }))

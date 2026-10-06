@@ -152,11 +152,9 @@ export interface WorkAgentChatResponse {
   cancelled?: boolean
 }
 
-export interface WorkAgentStreamEvent {
-  requestId: string
-  type: 'delta'
-  delta: string
-}
+export type WorkAgentStreamEvent =
+  | { requestId: string; type: 'delta'; delta: string }
+  | { requestId: string; type: 'activity'; activity: WorkToolActivity }
 
 export interface RecoverWorkConversationStoreResult {
   recovered: boolean

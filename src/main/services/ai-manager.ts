@@ -7,6 +7,7 @@ import type {
   AIChatResponse,
   AIMessage,
   AIModel,
+  AIModelCapabilities,
   AIModelPreferences,
   AIModelRecommendation,
   AIProviderId,
@@ -14,6 +15,7 @@ import type {
   HardwareInfo,
   OllamaPullProgress,
   OllamaPullResult,
+  OllamaProviderSettings,
   OllamaStatus
 } from '../../shared/contracts'
 import type { JsonValue, ToolDescriptor, ToolValueSchema } from '../../shared/tool-contracts'
@@ -73,6 +75,19 @@ interface RunningOllamaModel {
   model?: string
   size?: number
   size_vram?: number
+}
+
+interface OllamaShowResponse {
+  capabilities?: unknown
+  details?: InstalledOllamaModel['details']
+  model_info?: Record<string, unknown>
+}
+
+interface OllamaStructuredToolResponse {
+  action?: unknown
+  tool?: unknown
+  arguments?: unknown
+  content?: unknown
 }
 
 interface OllamaPullWireMessage {
@@ -624,6 +639,134 @@ function ollamaToolMessages(system: string, messages: AIToolConversationMessage[
   return output
 }
 
+function ollamaDeclaredCapabilities(show: OllamaShowResponse | undefined): AIModelCapabilities | undefined {
+  if (!Array.isArray(show?.capabilities)) return undefined
+  const declared = new Set(show.capabilities.filter((value): value is string => typeof value === 'string').map((value) => value.toLowerCase()))
+  const completion = declared.has('completion')
+  const nativeTools = declared.has('tools')
+  const structuredTools = completion && !nativeTools
+  return {
+    supportsTools: nativeTools || structuredTools,
+    supportsNativeTools: nativeTools,
+    supportsStructuredOutput: completion,
+    supportsStreaming: completion,
+    supportsVision: declared.has('vision'),
+    supportsEmbeddings: declared.has('embedding') || declared.has('embeddings'),
+    toolMode: nativeTools ? 'native' : structuredTools ? 'structured' : 'none'
+  }
+}
+
+function ollamaStructuredToolSchema(tools: WireTool[], requireToolCall = false, requireFinal = false): Record<string, unknown> {
+  return {
+    type: 'object',
+    properties: {
+      action: { type: 'string', enum: requireFinal ? ['final'] : requireToolCall ? ['tool_call'] : ['tool_call', 'final'] },
+      tool: { type: 'string', enum: tools.map(({ name }) => name) },
+      arguments: tools.length === 1 ? tools[0]!.descriptor.inputSchema : { type: 'object' },
+      content: { type: 'string' }
+    },
+    required: requireFinal ? ['action', 'content'] : requireToolCall ? ['action', 'tool', 'arguments'] : ['action'],
+    additionalProperties: false
+  }
+}
+
+function completedToolSuccessfully(messages: AIToolConversationMessage[], toolId: string): boolean {
+  const callIds = new Set(messages.flatMap((message) => message.role === 'assistant-tool'
+    ? message.calls.filter((call) => call.toolId === toolId).map((call) => call.callId)
+    : []))
+  return messages.some((message) => {
+    if (message.role !== 'tool' || !callIds.has(message.callId)) return false
+    try {
+      const parsed = JSON.parse(message.content) as { ok?: unknown }
+      return parsed?.ok !== false
+    } catch {
+      return true
+    }
+  })
+}
+
+function ollamaStructuredInstructions(tools: WireTool[]): string {
+  const catalog = tools.map(({ descriptor, name }) => JSON.stringify({
+    name,
+    description: descriptor.description,
+    parameters: descriptor.inputSchema
+  })).join('\n')
+  return [
+    'This Ollama model does not expose native function calling. Use OmniCode\'s constrained structured-tool protocol.',
+    'Return exactly one JSON object matching the response schema. Do not wrap it in Markdown.',
+    'To request an action, return {"action":"tool_call","tool":"<listed wire name>","arguments":{...}}.',
+    'To finish, return {"action":"final","content":"<answer>"}.',
+    'Never invent a tool name. Use only the listed tools. Tool arguments must match that tool\'s schema.',
+    'Never claim that an action or inspection happened unless a TOOL_RESULT confirms it.',
+    'After a successful TOOL_RESULT, do not repeat the same call. Request the next distinct tool only if needed, otherwise return a final answer.',
+    'After a failed TOOL_RESULT, choose a safe recovery tool when one exists; otherwise explain the failure in a final answer.',
+    'Available tools:',
+    catalog
+  ].join('\n')
+}
+
+function ollamaStructuredToolMessages(
+  system: string,
+  messages: AIToolConversationMessage[],
+  tools: WireTool[],
+  repair?: string
+): Array<Record<string, unknown>> {
+  const output: Array<Record<string, unknown>> = [{
+    role: 'system',
+    content: `${system}\n\n${ollamaStructuredInstructions(tools)}${repair ? `\n\n${repair}` : ''}`
+  }]
+  for (const message of messages) {
+    if (message.role === 'user' || message.role === 'assistant') {
+      output.push({ role: message.role, content: message.content })
+    } else if (message.role === 'assistant-tool') {
+      for (const call of message.calls) {
+        output.push({
+          role: 'assistant',
+          content: JSON.stringify({ action: 'tool_call', tool: call.name, arguments: call.input })
+        })
+      }
+    } else if (message.role === 'tool') {
+      let failed = false
+      try {
+        const result = JSON.parse(message.content) as { ok?: unknown }
+        failed = result?.ok === false
+      } catch { /* A non-JSON result remains authoritative but has no machine-readable failure flag. */ }
+      output.push({
+        role: 'user',
+        content: `TOOL_RESULT ${message.name} (authoritative; the requested call has finished)\n${message.content}${failed ? '\nThe call failed. If another listed tool can safely fulfill the original request, recover with that tool instead of stopping.' : ''}`
+      })
+    }
+  }
+  return output
+}
+
+function parseOllamaStructuredToolResponse(
+  content: string,
+  tools: WireTool[]
+): { content: string; calls: AIToolCall[] } {
+  let parsed: OllamaStructuredToolResponse
+  try {
+    parsed = JSON.parse(content) as OllamaStructuredToolResponse
+  } catch {
+    throw new Error('Ollama returned malformed JSON for a structured tool turn.')
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Ollama returned an invalid structured tool response.')
+  }
+  if (parsed.action === 'final') {
+    if (typeof parsed.content !== 'string' || !parsed.content.trim()) {
+      throw new Error('Ollama returned a final structured response without answer text.')
+    }
+    return { content: parsed.content, calls: [] }
+  }
+  if (parsed.action !== 'tool_call' || typeof parsed.tool !== 'string') {
+    throw new Error('Ollama returned an unknown structured tool action.')
+  }
+  const call = normalizedCall(parsed.tool, parsed.arguments, randomUUID(), tools)
+  if (!call) throw new Error('Ollama returned an invalid structured tool name.')
+  return { content: '', calls: [call] }
+}
+
 function anthropicToolMessages(messages: AIToolConversationMessage[]): Array<Record<string, unknown>> {
   const output: Array<Record<string, unknown>> = []
   for (let index = 0; index < messages.length; index++) {
@@ -752,12 +895,13 @@ function googleToolMessages(messages: AIToolConversationMessage[]): Array<Record
 
 export class AIManager {
   readonly #settingsPath?: string
-  readonly #ollamaBaseUrl: string
+  #ollamaBaseUrl: string
   readonly #fetch: typeof fetch
   readonly #usage?: AIUsageManager
   readonly #onUsageError: (error: unknown) => void
   readonly #confirmLargeRequest?: (estimate: AICostEstimate) => Promise<boolean>
   readonly #activePulls = new Map<string, ActivePull>()
+  readonly #ollamaShowCache = new Map<string, OllamaShowResponse>()
   #preferences?: AIModelPreferences
   #preferenceWrite: Promise<void> = Promise.resolve()
 
@@ -840,33 +984,67 @@ export class AIManager {
     return this.indexer.relevant(query, 8, root).map((file) => file.relativePath)
   }
 
+  async #ollamaUrl(): Promise<string> {
+    await this.modelPreferences()
+    return this.#ollamaBaseUrl
+  }
+
+  async ollamaSettings(): Promise<OllamaProviderSettings> {
+    return { endpoint: await this.#ollamaUrl() }
+  }
+
+  async updateOllamaSettings(settings: OllamaProviderSettings): Promise<OllamaProviderSettings> {
+    if (!settings || typeof settings.endpoint !== 'string' || settings.endpoint.length > 2_048) {
+      throw new Error('Enter a valid local Ollama endpoint.')
+    }
+    const endpoint = normalizeOllamaBaseUrl(settings.endpoint.trim())
+    const current = await this.modelPreferences()
+    await this.#savePreferences({ ...current, ollamaEndpoint: endpoint })
+    this.#ollamaBaseUrl = endpoint
+    this.#ollamaShowCache.clear()
+    return { endpoint }
+  }
+
   async ollamaStatus(): Promise<OllamaStatus> {
+    const endpoint = await this.#ollamaUrl()
     const [runtime, apiVersion, tagsAvailable] = await Promise.all([
       detectRuntimeTool('ollama'),
       fetchJson<{ version?: string }>(
         this.#fetch,
-        `${this.#ollamaBaseUrl}/api/version`,
+        `${endpoint}/api/version`,
         undefined,
         1_500
       ).catch(() => undefined),
       fetchJson<{ models?: InstalledOllamaModel[] }>(
         this.#fetch,
-        `${this.#ollamaBaseUrl}/api/tags`,
+        `${endpoint}/api/tags`,
         undefined,
         1_500
       ).then(() => true).catch(() => false)
     ])
+    const installed = Boolean(runtime.installed || apiVersion?.version || tagsAvailable)
+    const available = Boolean(apiVersion || tagsAvailable)
+    const state = available ? 'connected' : installed ? 'not-running' : 'unreachable'
     return {
-      installed: Boolean(runtime.installed || apiVersion?.version || tagsAvailable),
-      available: Boolean(apiVersion || tagsAvailable),
+      installed,
+      available,
+      state,
+      endpoint,
+      message: state === 'connected'
+        ? 'Connected to the local Ollama service.'
+        : state === 'not-running'
+          ? 'Ollama is installed, but the local service is not running.'
+          : 'The configured local Ollama endpoint is unreachable.',
+      checkedAt: new Date().toISOString(),
       version: apiVersion?.version ?? runtime.version
     }
   }
 
   async #installedTags(): Promise<InstalledOllamaModel[]> {
+    const endpoint = await this.#ollamaUrl()
     const response = await fetchJson<{ models?: InstalledOllamaModel[] }>(
       this.#fetch,
-      `${this.#ollamaBaseUrl}/api/tags`,
+      `${endpoint}/api/tags`,
       undefined,
       3_000
     )
@@ -874,13 +1052,28 @@ export class AIManager {
   }
 
   async #runningModels(): Promise<RunningOllamaModel[]> {
+    const endpoint = await this.#ollamaUrl()
     const response = await fetchJson<{ models?: RunningOllamaModel[] }>(
       this.#fetch,
-      `${this.#ollamaBaseUrl}/api/ps`,
+      `${endpoint}/api/ps`,
       undefined,
       3_000
     )
     return Array.isArray(response.models) ? response.models : []
+  }
+
+  async #showModel(model: string): Promise<OllamaShowResponse | undefined> {
+    const key = model.toLowerCase()
+    const cached = this.#ollamaShowCache.get(key)
+    if (cached) return cached
+    const endpoint = await this.#ollamaUrl()
+    const response = await fetchJson<OllamaShowResponse>(this.#fetch, `${endpoint}/api/show`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model })
+    }, 10_000).catch(() => undefined)
+    if (response) this.#ollamaShowCache.set(key, response)
+    return response
   }
 
   async models(): Promise<AIModel[]> {
@@ -897,6 +1090,10 @@ export class AIManager {
     const installedById = new Map(
       installed.map((model) => [installedModelId(model).toLowerCase(), model])
     )
+    const showById = new Map((await Promise.all(installed.map(async (model) => {
+      const id = installedModelId(model)
+      return [id.toLowerCase(), await this.#showModel(id)] as const
+    }))).filter((entry): entry is readonly [string, OllamaShowResponse] => Boolean(entry[1])))
     const catalogIds = new Set(CURATED_CODING_MODELS.map(({ id }) => id.toLowerCase()))
     const runningById = new Map(running.flatMap((model) => {
       const id = model.model?.trim() || model.name?.trim()
@@ -905,6 +1102,8 @@ export class AIManager {
 
     const catalog = CURATED_CODING_MODELS.map((curated): AIModel => {
       const localModel = installedById.get(curated.id.toLowerCase())
+      const show = showById.get(curated.id.toLowerCase())
+      const modelCapabilities = ollamaDeclaredCapabilities(show)
       const runningModel = runningById.get(curated.id.toLowerCase())
       const estimate = curated.estimatedMemoryBytes ??
         curated.approximateDownloadSize ??
@@ -912,9 +1111,14 @@ export class AIManager {
       return {
         ...curated,
         size: localModel?.size,
-        parameterSize: localModel?.details?.parameter_size ?? curated.parameterSize,
-        quantization: localModel?.details?.quantization_level ?? curated.quantization,
-        family: localModel?.details?.family ?? curated.family,
+        parameterSize: show?.details?.parameter_size ?? localModel?.details?.parameter_size ?? curated.parameterSize,
+        quantization: show?.details?.quantization_level ?? localModel?.details?.quantization_level ?? curated.quantization,
+        family: show?.details?.family ?? localModel?.details?.family ?? curated.family,
+        contextWindow: typeof show?.model_info?.['phi3.context_length'] === 'number'
+          ? show.model_info['phi3.context_length'] as number
+          : curated.contextWindow,
+        toolUse: modelCapabilities?.supportsTools ?? curated.toolUse,
+        modelCapabilities,
         digest: localModel?.digest,
         modifiedAt: localModel?.modified_at,
         installed: Boolean(localModel),
@@ -930,6 +1134,8 @@ export class AIManager {
       .filter((model) => !catalogIds.has(installedModelId(model).toLowerCase()))
       .map((model): AIModel => {
         const id = installedModelId(model)
+        const show = showById.get(id.toLowerCase())
+        const modelCapabilities = ollamaDeclaredCapabilities(show)
         const runningModel = runningById.get(id.toLowerCase())
         return {
           id,
@@ -939,11 +1145,19 @@ export class AIManager {
           description: 'An installed model from the local Ollama library.',
           size: model.size,
           estimatedMemoryBytes: model.size ? model.size * 1.3 : undefined,
-          parameterSize: model.details?.parameter_size,
-          quantization: model.details?.quantization_level,
-          family: model.details?.family,
-          capabilities: ['Local inference'],
+          parameterSize: show?.details?.parameter_size ?? model.details?.parameter_size,
+          quantization: show?.details?.quantization_level ?? model.details?.quantization_level,
+          family: show?.details?.family ?? model.details?.family,
+          contextWindow: Object.entries(show?.model_info ?? {}).find(([key, value]) => key.endsWith('.context_length') && typeof value === 'number')?.[1] as number | undefined,
+          capabilities: [
+            'Local inference',
+            ...(modelCapabilities?.supportsNativeTools ? ['Native tool calling'] : modelCapabilities?.toolMode === 'structured' ? ['Structured tool adapter'] : []),
+            ...(modelCapabilities?.supportsVision ? ['Vision'] : []),
+            ...(modelCapabilities?.supportsEmbeddings ? ['Embeddings'] : [])
+          ],
           codingCapability: 'General',
+          toolUse: modelCapabilities?.supportsTools ?? false,
+          modelCapabilities,
           digest: model.digest,
           modifiedAt: model.modified_at,
           catalog: false,
@@ -975,12 +1189,17 @@ export class AIManager {
     }
     try {
       const parsed = JSON.parse(await readFile(this.#settingsPath, 'utf8')) as AIModelPreferences
+      const ollamaEndpoint = typeof parsed.ollamaEndpoint === 'string'
+        ? (() => { try { return normalizeOllamaBaseUrl(parsed.ollamaEndpoint) } catch { return undefined } })()
+        : undefined
       this.#preferences = {
         selectedModel: typeof parsed.selectedModel === 'string' &&
           MODEL_NAME_PATTERN.test(parsed.selectedModel) ? parsed.selectedModel : undefined,
         defaultModel: typeof parsed.defaultModel === 'string' &&
-          MODEL_NAME_PATTERN.test(parsed.defaultModel) ? parsed.defaultModel : undefined
+          MODEL_NAME_PATTERN.test(parsed.defaultModel) ? parsed.defaultModel : undefined,
+        ollamaEndpoint
       }
+      if (ollamaEndpoint) this.#ollamaBaseUrl = ollamaEndpoint
     } catch {
       this.#preferences = {}
     }
@@ -1060,7 +1279,8 @@ export class AIManager {
     emit(initial)
 
     try {
-      const response = await this.#fetch(`${this.#ollamaBaseUrl}/api/pull`, {
+      const endpoint = await this.#ollamaUrl()
+      const response = await this.#fetch(`${endpoint}/api/pull`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: requested, stream: true }),
@@ -1137,7 +1357,8 @@ export class AIManager {
     if (!installed.some((item) => installedModelId(item).toLowerCase() === requested.toLowerCase())) {
       throw new Error(`Install ${requested} before loading it.`)
     }
-    await fetchJson<Record<string, unknown>>(this.#fetch, `${this.#ollamaBaseUrl}/api/generate`, {
+    const endpoint = await this.#ollamaUrl()
+    await fetchJson<Record<string, unknown>>(this.#fetch, `${endpoint}/api/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: requested, prompt: '', stream: false, keep_alive: -1 })
@@ -1146,7 +1367,8 @@ export class AIManager {
 
   async unloadModel(model: string): Promise<void> {
     const requested = normalizedModelName(model)
-    await fetchJson<Record<string, unknown>>(this.#fetch, `${this.#ollamaBaseUrl}/api/generate`, {
+    const endpoint = await this.#ollamaUrl()
+    await fetchJson<Record<string, unknown>>(this.#fetch, `${endpoint}/api/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: requested, prompt: '', stream: false, keep_alive: 0 })
@@ -1155,7 +1377,8 @@ export class AIManager {
 
   async deleteModel(model: string): Promise<void> {
     const requested = normalizedModelName(model)
-    const response = await this.#fetch(`${this.#ollamaBaseUrl}/api/delete`, {
+    const endpoint = await this.#ollamaUrl()
+    const response = await this.#fetch(`${endpoint}/api/delete`, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: requested })
@@ -1340,6 +1563,78 @@ export class AIManager {
     )
   }
 
+  private async ollamaStructuredToolTurn(
+    request: AIToolTurnRequest,
+    tools: WireTool[],
+    model: string,
+    options: { signal?: AbortSignal }
+  ): Promise<ProviderReply<AIToolTurnResult>> {
+    const endpoint = await this.#ollamaUrl()
+    const requiredPlan = tools.find(({ descriptor }) => descriptor.id === 'omni.update-plan')
+    const planPending = Boolean(requiredPlan && !completedToolSuccessfully(request.messages, requiredPlan.descriptor.id))
+    const availableTools = planPending && requiredPlan
+      ? [requiredPlan]
+      : requiredPlan
+        ? tools.filter(({ descriptor }) => descriptor.id !== requiredPlan.descriptor.id)
+        : tools
+    const forceFinal = !planPending && availableTools.length === 1 &&
+      !(availableTools[0]!.descriptor.inputSchema.required?.length) &&
+      completedToolSuccessfully(request.messages, availableTools[0]!.descriptor.id)
+    const priorCalls = new Set(request.messages.flatMap((message) => message.role === 'assistant-tool'
+      ? message.calls.map((call) => `${call.name}\0${JSON.stringify(call.input)}`)
+      : []))
+    let lastError: Error | undefined
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const repeatedCallRepair = attempt > 0 && /call with those exact arguments already finished/iu.test(lastError?.message ?? '')
+      const repair = attempt === 0
+        ? undefined
+        : `Your previous response was rejected: ${lastError?.message ?? 'invalid structured response'}. Return one valid JSON object now.`
+      const { data: response, rateLimit } = await fetchProviderJson<{
+        done_reason?: string
+        prompt_eval_count?: number
+        eval_count?: number
+        message?: { content?: string }
+      }>(this.#fetch, `${endpoint}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          stream: false,
+          options: { temperature: 0 },
+          format: ollamaStructuredToolSchema(availableTools, planPending, forceFinal || repeatedCallRepair),
+          messages: ollamaStructuredToolMessages(
+            request.system,
+            request.messages,
+            availableTools,
+            [
+              planPending ? 'The visible Omni plan is a required prerequisite. Call the only available plan tool now before any action tool can be offered.' : '',
+              forceFinal ? 'The required read-only tool already completed successfully. Return a final answer based only on its authoritative TOOL_RESULT now.' : '',
+              repeatedCallRepair ? 'The repeated tool call was rejected because its result is already present. Return a final answer using the existing authoritative TOOL_RESULT.' : '',
+              repair ?? ''
+            ].filter(Boolean).join('\n\n') || undefined
+          )
+        }),
+        signal: options.signal
+      }, 180_000)
+      const rawContent = typeof response.message?.content === 'string' ? response.message.content : ''
+      try {
+        const parsed = parseOllamaStructuredToolResponse(rawContent, availableTools)
+        const repeated = parsed.calls.find((call) => priorCalls.has(`${call.name}\0${JSON.stringify(call.input)}`))
+        if (repeated) {
+          throw new Error(`The ${repeated.name} call with those exact arguments already finished. Use the existing tool result; return a final answer or choose a different necessary tool.`)
+        }
+        return {
+          value: { ...parsed, stopReason: response.done_reason ?? (parsed.calls.length ? 'structured_tool_call' : 'stop') },
+          usage: parseOllamaUsage(response),
+          rateLimit
+        }
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error))
+      }
+    }
+    throw new Error(`Ollama could not produce a valid structured tool response after one repair attempt. ${lastError?.message ?? ''}`.trim())
+  }
+
   private async toolTurnOnce(
     request: AIToolTurnRequest,
     options: { signal?: AbortSignal } = {}
@@ -1356,6 +1651,14 @@ export class AIManager {
     const model = request.model.trim()
     if (request.provider === 'ollama') {
       try {
+        const declared = ollamaDeclaredCapabilities(await this.#showModel(model))
+        if (declared?.toolMode === 'none') {
+          throw new Error(`${model} does not support completion or tool use through this Ollama runtime.`)
+        }
+        if (declared?.toolMode === 'structured') {
+          return await this.ollamaStructuredToolTurn(request, tools, model, options)
+        }
+        const endpoint = await this.#ollamaUrl()
         const { data: response, rateLimit } = await fetchProviderJson<{
           done_reason?: string
           prompt_eval_count?: number
@@ -1364,12 +1667,13 @@ export class AIManager {
             content?: string
             tool_calls?: Array<{ id?: unknown; function?: { name?: unknown; arguments?: unknown } }>
           }
-        }>(this.#fetch, `${this.#ollamaBaseUrl}/api/chat`, {
+        }>(this.#fetch, `${endpoint}/api/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             model,
             stream: false,
+            options: { temperature: 0 },
             messages: ollamaToolMessages(request.system, request.messages),
             tools: providerToolDefinitions(tools)
           }),
@@ -1381,7 +1685,10 @@ export class AIManager {
           return normalized ? [normalized] : []
         })
         const content = typeof response.message?.content === 'string' ? response.message.content : ''
-        if (!calls.length && !content.trim()) throw new Error(`Ollama returned no text or tool call${response.done_reason ? ` (${response.done_reason})` : ''}.`)
+        const followsToolResult = request.messages.some((message) => message.role === 'tool')
+        if (!calls.length && !content.trim() && !followsToolResult) {
+          throw new Error(`Ollama returned no text or tool call${response.done_reason ? ` (${response.done_reason})` : ''}.`)
+        }
         return {
           value: { content, calls, stopReason: response.done_reason },
           usage: parseOllamaUsage(response),
@@ -1389,7 +1696,14 @@ export class AIManager {
         }
       } catch (error) {
         if (isAbortError(error) || options.signal?.aborted) throw error
-        if (error instanceof Error && (error.message.startsWith('AI provider returned ') || error.message.startsWith('Ollama returned '))) throw error
+        if (error instanceof Error && /does not support tools/iu.test(error.message)) {
+          return this.ollamaStructuredToolTurn(request, tools, model, options)
+        }
+        if (error instanceof Error && (
+          error.message.startsWith('AI provider returned ') ||
+          error.message.startsWith('Ollama returned ') ||
+          error.message.startsWith('Ollama could not produce ')
+        )) throw error
         const status = await this.ollamaStatus().catch(() => ({ installed: false, available: false }))
         throw new Error(status.installed
           ? 'Ollama is installed, but its local service is unavailable. Start Ollama and try again.'
@@ -1571,7 +1885,8 @@ export class AIManager {
 
     if (provider === 'ollama') {
       try {
-        await withStreamingResponse(this.#fetch, `${this.#ollamaBaseUrl}/api/chat`, {
+        const endpoint = await this.#ollamaUrl()
+        await withStreamingResponse(this.#fetch, `${endpoint}/api/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ model, messages, stream: true }),
@@ -1729,7 +2044,8 @@ export class AIManager {
   private async sendOnce(provider: AIProviderId, model: string, messages: AIMessage[]): Promise<ProviderReply<string>> {
     if (provider === 'ollama') {
       try {
-        const { data: response, rateLimit } = await fetchProviderJson<{ prompt_eval_count?: number; eval_count?: number; message?: { content?: string } }>(this.#fetch, `${this.#ollamaBaseUrl}/api/chat`, {
+        const endpoint = await this.#ollamaUrl()
+        const { data: response, rateLimit } = await fetchProviderJson<{ prompt_eval_count?: number; eval_count?: number; message?: { content?: string } }>(this.#fetch, `${endpoint}/api/chat`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model, messages, stream: false })
         })
         return { value: response.message?.content ?? '', usage: parseOllamaUsage(response), rateLimit }

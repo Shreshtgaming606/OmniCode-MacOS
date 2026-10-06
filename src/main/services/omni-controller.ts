@@ -32,6 +32,21 @@ const EXECUTION_MODES = new Set<OmniExecutionMode>(['invisible', 'cursor'])
 const ACTIVATION_SOURCES = new Set(['main-window', 'overlay', 'global-shortcut', 'wake-word', 'menu-bar'])
 const MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,254}$/u
 const PLAN_TOOL_ID = 'omni.update-plan'
+const MAX_EXPOSED_ACTION_TOOLS = 16
+
+const TOOL_FAMILY_HINTS: Array<{ prefixes: string[]; terms: string[] }> = [
+  { prefixes: ['files.'], terms: ['file', 'files', 'folder', 'directory', 'project', 'workspace', 'package', 'source', 'code', 'html', 'create', 'edit', 'delete', 'remove', 'inspect', 'read'] },
+  { prefixes: ['terminal.', 'build.', 'test.', 'dependency.'], terms: ['terminal', 'command', 'shell', 'bash', 'zsh', 'run', 'execute', 'build', 'test', 'install', 'uname'] },
+  { prefixes: ['runtime.'], terms: ['runtime', 'compiler', 'toolchain', 'installed', 'installation', 'node', 'npm', 'python', 'swift', 'version'] },
+  { prefixes: ['git.'], terms: ['git', 'repository', 'branch', 'commit', 'diff', 'stage', 'push', 'pull'] },
+  { prefixes: ['server.'], terms: ['server', 'localhost', 'port', 'preview', 'development server'] },
+  { prefixes: ['browser.'], terms: ['browser', 'webpage', 'website', 'url', 'page title', 'navigate', 'internet'] },
+  { prefixes: ['app.'], terms: ['application', 'launch', 'textedit', 'xcode', 'safari', 'finder'] },
+  { prefixes: ['computer.'], terms: ['cursor', 'mouse', 'pointer', 'click', 'scroll', 'keyboard', 'screen'] },
+  { prefixes: ['gmail.'], terms: ['gmail', 'email', 'mailbox', 'inbox', 'draft', 'send email', 'reply'] },
+  { prefixes: ['drive.'], terms: ['google drive', 'drive file', 'drive folder', 'google doc', 'google sheet', 'google slide'] },
+  { prefixes: ['external.'], terms: ['external folder', 'outside the workspace', 'another folder'] }
+]
 
 const OMNI_SYSTEM = `You are Omni, OmniCode's voice-first macOS assistant.
 Use only the tools explicitly provided by OmniCode. Choose the smallest safe combination of Code, Work, browser, and computer tools that satisfies the user's request.
@@ -108,6 +123,7 @@ export interface OmniControllerOptions {
   onTaskChanged?(task: OmniTaskSummary): void
   onEvent?(event: OmniEvent): void
   onSpeak?(taskId: string, text: string): void
+  onResponseDelta?(taskId: string, delta: string): void
   onTaskStarted?(taskId: string, executionMode: OmniExecutionMode): void
   onExecutionModeChanged?(taskId: string, executionMode: OmniExecutionMode): void
   onTaskFinished?(taskId: string): void
@@ -156,6 +172,48 @@ function taskSummary(task: OmniTask): OmniTaskSummary {
 
 function stopped(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError' || error instanceof Error && /cancelled|canceled|aborted|stopped/iu.test(error.message)
+}
+
+function words(value: string): Set<string> {
+  return new Set(value.toLowerCase().match(/[a-z0-9][a-z0-9_-]{2,}/gu) ?? [])
+}
+
+function includesHint(value: string, hint: string): boolean {
+  if (hint.includes(' ')) return value.includes(hint)
+  return words(value).has(hint)
+}
+
+/**
+ * Keeps large Omni catalogs inside small-model context windows without
+ * changing tool execution or authorization. Selection is provider-neutral;
+ * the returned descriptors still execute through their original registries.
+ */
+export function selectRelevantOmniTools(input: string, tools: readonly ToolDescriptor[]): ToolDescriptor[] {
+  const request = input.toLowerCase()
+  const positiveRequest = request.replace(/\b(?:do not|don't|never|without)\b[^.!?;]*/gu, ' ')
+  const requestWords = words(positiveRequest)
+  const hintedPrefixes = new Set(TOOL_FAMILY_HINTS
+    .filter(({ terms }) => terms.some((term) => includesHint(positiveRequest, term)))
+    .flatMap(({ prefixes }) => prefixes))
+  if (!hintedPrefixes.size && tools.length <= MAX_EXPOSED_ACTION_TOOLS) return [...tools]
+  const candidates = hintedPrefixes.size
+    ? tools.filter((tool) => [...hintedPrefixes].some((prefix) => tool.id.startsWith(prefix)))
+    : tools
+  const scored = candidates.map((tool, index) => {
+    const searchable = `${tool.id} ${tool.name} ${tool.description} ${tool.connectorId}`.toLowerCase()
+    let score = [...requestWords].reduce((total, word) => total + (searchable.includes(word) ? 1 : 0), 0)
+    if (positiveRequest.includes(tool.id.toLowerCase())) score += 50
+    if (hintedPrefixes.size && [...hintedPrefixes].some((prefix) => tool.id.startsWith(prefix))) score += 10
+    if (/\b(read|inspect|list|find|search|report|tell)\b/u.test(positiveRequest) && tool.action === 'read') score += 3
+    if (/\b(create|write|edit|update|change)\b/u.test(positiveRequest) && tool.action === 'write') score += 3
+    if (/\b(delete|remove|trash|stop)\b/u.test(positiveRequest) && /(?:delete|remove|trash|stop)/u.test(tool.id)) score += 4
+    return { tool, index, score }
+  })
+  const selected = scored
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .slice(0, MAX_EXPOSED_ACTION_TOOLS)
+    .map(({ tool }) => tool)
+  return selected.length ? selected : tools.slice(0, MAX_EXPOSED_ACTION_TOOLS)
 }
 
 function kindFor(toolId: string): OmniEventKind {
@@ -387,7 +445,9 @@ export class OmniController {
         model: request.model.trim(),
         messages: [{ role: 'user', content: request.input.trim() }]
       }
-      const tools = active.toolCapable ? [PLAN_TOOL, ...active.router.list('cursor')] : []
+      const tools = active.toolCapable
+        ? [PLAN_TOOL, ...selectRelevantOmniTools(request.input, active.router.list(active.executionMode))]
+        : []
       const response = await this.options.agent.chat(
         chatRequest,
         tools,
@@ -401,6 +461,7 @@ export class OmniController {
             taskId
           },
           systemPrompt: active.toolCapable ? OMNI_SYSTEM : OMNI_CHAT_ONLY_SYSTEM,
+          ...(this.options.onResponseDelta ? { onDelta: (delta: string) => this.options.onResponseDelta?.(taskId, delta) } : {}),
           signal: active.controller.signal,
           maxSteps: 20,
           maxToolCalls: 40,
@@ -452,7 +513,7 @@ export class OmniController {
     await this.waitIfPaused(taskId, active)
     if (request.toolId === PLAN_TOOL_ID) return this.applyPlanUpdate(taskId, active, request.input, approvalMode)
     if (active.requiresPlanUpdate) throw new Error('Omni must update its visible plan before starting another action.')
-    const descriptor = active.router.list('cursor').find((tool) => tool.id === request.toolId)
+    const descriptor = active.router.list(active.executionMode).find((tool) => tool.id === request.toolId)
     if (!descriptor) throw new Error('The requested Omni tool is not registered.')
     const eventId = randomUUID()
     const timestamp = Date.now()

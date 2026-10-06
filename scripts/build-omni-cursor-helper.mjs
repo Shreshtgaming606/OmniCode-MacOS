@@ -11,7 +11,7 @@ const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 const source = path.join(projectRoot, 'native', 'omni-cursor-helper', 'main.swift')
 const outputDirectory = path.join(projectRoot, 'out', 'native')
 const output = path.join(outputDirectory, 'omnicode-cursor-helper')
-const requestedArchitecture = process.env.npm_config_arch || process.env.OMNICODE_TARGET_ARCH || process.arch
+const requestedArchitecture = process.env.OMNICODE_TARGET_ARCH || process.env.npm_config_arch || process.arch
 const targetArchitecture = requestedArchitecture === 'x64'
   ? 'x86_64'
   : requestedArchitecture === 'arm64'

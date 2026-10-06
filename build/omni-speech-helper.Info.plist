@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDisplayName</key>
+  <string>OmniCode Speech Helper</string>
+  <key>CFBundleExecutable</key>
+  <string>omnicode-speech-helper</string>
+  <key>CFBundleIdentifier</key>
+  <string>com.omnicode.editor.speech-helper</string>
+  <key>CFBundleName</key>
+  <string>OmniCode Speech Helper</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>0.9.0</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>14.0</string>
+  <key>LSUIElement</key>
+  <true/>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>OmniCode uses the microphone only while you explicitly record a voice request for Omni.</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>OmniCode converts an explicitly recorded voice request into text using on-device macOS Speech Recognition.</string>
+</dict>
+</plist>

@@ -1,9 +1,34 @@
 # OmniCode Known Issues
 
-Last updated: 2026-09-24
+Last updated: 2026-09-27
 
 Resolved issues remain in this file with a resolution so audit history is not
 lost. Secrets, tokens, and authorization headers must never be included here.
+
+## OMI-059 — phi3:mini is not reliable for broad multi-step tool workflows
+
+- Severity: Medium; local simple tools work, but complex autonomous tasks are
+  not release-reliable with this model.
+- Reproduction: Run the gated live suite or ask Omni with `phi3:mini` to inspect
+  multiple files, recover from an ordered failure, or create/read/clean data.
+- Expected: The model follows the visible plan, selects each necessary tool
+  once with valid arguments, consumes ToolResult, and returns a verified final
+  answer.
+- Actual: Simple capability, streaming, one-tool ToolRegistry, and one full
+  Omni `runtime.detect` workflow pass. The latest strict live suite passed 3/6;
+  broader cases selected the wrong file operation, ignored requested ordering,
+  repeated calls, or summarized only an incomplete prefix. A browser task
+  opened the page but wandered through unrelated tools to an approval boundary.
+- Suspected cause: Model capability/size and its effective 4,096-token runtime
+  context, not a separate Ollama tool implementation. Ollama declares only
+  `completion`; native tools return HTTP 400.
+- Relevant files: `src/main/services/ai-manager.ts`,
+  `src/main/services/omni-controller.ts`,
+  `src/main/services/ollama-live.integration.test.ts`.
+- Current status: 🟡 Open model limitation. OmniCode now reduces tool context,
+  constrains plan/single-tool schemas, rejects duplicates, forces a final-only
+  repair, and keeps the same registry/approval boundaries. Use a stronger
+  tool-capable Ollama model for complex work; do not weaken safety for Phi-3.
 
 ## OMI-058 — Usage cost is estimated and the bundled catalog requires release maintenance
 
@@ -121,8 +146,10 @@ lost. Secrets, tokens, and authorization headers must never be included here.
   `src/renderer/src/components/omni/OmniMode.tsx`.
 - Current status: ✅ Resolved in 0.7.0 for supported request paths. Automation
   remains correctly per-target and Files & Folders remains picker-scoped. Public
-  release identity still depends on Developer ID signing/notarization, and the
-  host still lacks an on-device Speech asset for a real transcript.
+  release identity still depends on Developer ID signing/notarization. The new
+  Apple M6 host has the on-device Speech asset and microphone authorization.
+  Speech authorization remains `not-determined`, and no input device is
+  currently connected.
 
 ## OMI-052 — Omni's primary UI was dense and setup was not first-run complete — Resolved
 
@@ -209,11 +236,10 @@ lost. Secrets, tokens, and authorization headers must never be included here.
 - Current status: 🟡 Partially resolved — resident activation, restricted
   overlay, and main-app background login are implemented. Post-quit helper
   claims remain blocked by helper implementation, Apple Developer ID signing,
-  notarization/stapling, stable identity, and matching Intel/Apple Silicon
-  execution tests. Packaged login/Space/closed-window/conflict testing also
-  remains.
+  notarization/stapling, and stable identity. Packaged
+  login/Space/closed-window/conflict testing also remains.
 
-## OMI-051 — Omni voice input is host-blocked and local wake activation is unavailable
+## OMI-051 — Omni push-to-talk is verified; local wake and physical route-disconnect testing remain incomplete
 
 - Severity: High for the promised voice-first interaction
 - Reproduction: Attempt to start listening, view a real partial/final
@@ -221,36 +247,37 @@ lost. Secrets, tokens, and authorization headers must never be included here.
 - Expected: Native permission-aware STT/TTS works on demand; optional wake
   detection runs locally in the lightweight helper with no pre-wake network
   traffic and bounded measured resource use.
-- Actual: OmniCode now has real bounded macOS TTS and a fixed-protocol Swift
-  push-to-talk helper using `AVAudioEngine` and Apple Speech. The provider,
-  typed IPC, bounded partial/final events, Stop/Cancel, permission mapping,
-  push-to-talk UI, package usage descriptions, and audio-input entitlement are
-  implemented. Renderer media remains deny-by-default and raw audio is never
-  returned or persisted. The current Mac reports both permissions not-determined
-  and `en-US` on-device recognition unavailable because its required Speech
-  assets are missing, so a real transcript cannot yet be produced. There is no
+- Actual: OmniCode now has real bounded macOS TTS and a stable-identity Swift
+  push-to-talk helper using `AVAudioEngine`, CoreAudio, and Apple Speech. The
+  provider, typed state machine, actual-amplitude events, live partial
+  replacement, deterministic Auto/Enter endpoint detection, last-word
+  finalization, double-submit guard, route-change failure, permission mapping,
+  compact overlay, package/helper usage descriptions, and audio-input
+  entitlement are implemented. Renderer media remains deny-by-default and raw
+  audio is never returned or persisted. The Apple M6 Mac reports `en-US`
+  supported, recognizer available, on-device and streaming true; microphone is
+  and streaming true. In the unlocked GUI, both permissions were granted and
+  `Shresht’s AirPods` supplied real 48,000 Hz mono capture. Auto, Press Enter,
+  Auto Enter override, long speech, empty speech, and repeated-session tests
+  produced real partial/final events without duplicate submission. There is no
   wake engine/model.
-- Suspected cause: The remaining push-to-talk block is the host's missing
-  on-device Apple Speech asset plus packaged permission approval. Wake still
-  requires selecting, licensing, bundling, and measuring a compatible local
-  engine/model rather than adding a cosmetic setting.
+- Suspected cause: Push-to-talk defects were caused by competing endpoint
+  timers, premature helper teardown, bare-helper TCC identity, and an AirPods
+  pre-ready event race. Those paths are repaired. Wake still requires selecting,
+  licensing, bundling, and measuring a compatible local engine/model rather
+  than adding a cosmetic setting.
 - Relevant files: `src/main/index.ts`, `package.json`,
   `docs/development/OMNI_VOICE.md`,
   `docs/development/OMNI_BACKGROUND_SERVICE.md`,
   `docs/development/OMNI_SECURITY.md`.
-- Current status: 🟡 Partially resolved — speech output and the push-to-talk STT
-  stack are implemented; focused tests and a real helper status/start probe
-  pass, including an explicit permission request that is independent of
-  on-device recognizer availability. Real capture remains **BLOCKED — HOST CONFIGURATION REQUIRED**
-  until an on-device speech asset is installed and permission can be approved.
-  The unsigned x64 package also reproduced the known first nested-helper timeout;
-  an immediate warm retry returned exact status and passed the UI smoke. Stable
-  cold identity remains blocked on Developer ID signing/notarization rather than
-  being hidden by a fake availability result.
+- Current status: 🟡 Partially resolved — speech output and push-to-talk STT are
+  implemented and live-verified with AirPods. Focused tests, the 701-test suite,
+  both 0.9.0 architecture-specific installers, and arm64/x86_64 strict signature
+  checks pass. Physical AirPods disconnect/recovery remains unperformed, and
+  stable public trust remains blocked on Developer ID signing/notarization.
   Wake activation remains blocked until a licensed local engine/model and
-  signed helper is implemented and verified. Both current helpers now
-  cross-compile and signature-verify as arm64, but execution still requires
-  matching Apple Silicon hardware.
+  signed helper is implemented and verified. Both current helpers execute
+  natively as arm64.
 
 ## OMI-048 — Code Agent lacked a structured visible course of action — Resolved
 
@@ -375,24 +402,35 @@ lost. Secrets, tokens, and authorization headers must never be included here.
 - Severity: High for public distribution; Low for local testing
 - Reproduction: Inspect build identities or distribute the DMG to another Mac.
 - Expected: Public release is signed, notarized, and stapled.
-- Actual: Versioned 0.5.1 Intel and Apple Silicon artifacts build and pass
-  archive validation, but no valid Developer ID Application identity is
-  installed, so they are unsigned and unnotarized. After each fresh unsigned
-  x64 directory-package rebuild, the first invocation of the replaced nested
-  Cursor helper exceeded both the 10-second audit timeout and the production
-  service's 15-second timeout during macOS provenance processing; the immediate
-  retry and complete packaged control audit passed. Ad-hoc signing verifies the
-  local helper bytes but does not provide a stable Developer ID identity.
-- Suspected cause: Apple developer credentials are an external requirement.
-- Relevant files: `package.json` build configuration and release artifacts.
+- Actual: The migrated arm64 packaging path reproduced a real malformed bundle:
+  electron-builder found no identity and skipped its final signing pass, while
+  linker-generated ad-hoc signatures remained on the copied Electron arm64
+  executable and nested code after the enclosing bundle was changed.
+  `syspolicy_check` reported missing sealed resources and an Info.plist not
+  covered by the signature. Corrected arm64 and x64 builds now receive a
+  complete final ad-hoc seal and produce DMGs that pass deep/strict verification,
+  integrity, and mounted-content comparison. The native arm64 package also
+  passes Code/Work/Omni/PTY smokes; the cross-built x64 package awaits real Intel
+  runtime testing because Rosetta is absent. A quarantined disposable arm64 copy
+  is still rejected because ad-hoc identity is not a trusted distribution identity.
+- Suspected cause: The “damaged” report was plausibly caused by the reproduced
+  incomplete final bundle seal, not CPU architecture or the custom helpers.
+  The exact historical downloaded DMG is unavailable, so its bytes cannot be
+  proven identical. Remaining rejection of the corrected artifact is the
+  expected Developer ID/notarization trust gate.
+- Relevant files: `package.json`, `scripts/build-macos-arm64-adhoc.mjs`,
+  `scripts/validate-macos-build.mjs`, and
+  `docs/development/MACOS_DMG_DIAGNOSTICS.md`.
 - Current status: 🔵 BLOCKED — APPLE DEVELOPER ID REQUIRED.
+  Normal release packaging now fails closed when no identity exists. The
+  explicit `dist:arm64:adhoc` and `dist:x64:adhoc` paths are diagnostic-only and
+  are not presented as publicly distributable.
   This also blocks native Notification Center delivery: the packaged notification
   IPC accepts valid bounded content and rejects invalid content, but Electron's
   macOS notification contract states unsigned development builds are not
   delivered. The current-host banner audit therefore observed no notification.
-  The cold nested-helper delay also remains a signing-sensitive release gate;
-  functional warm-helper results do not replace signed/notarized cold-launch
-  testing.
+  The historical x64 cold nested-helper delay was not reproduced by the current
+  arm64 helper, but signed/notarized cold-launch testing remains a release gate.
 
 ## OMI-007 — Critical renderer workflows lack end-to-end coverage — Resolved
 
@@ -1115,5 +1153,5 @@ lost. Secrets, tokens, and authorization headers must never be included here.
   implemented and regression/live-tested. Unrestricted AppleScript,
   screenshots, and shell automation remain blocked. General release still
   requires semantic AX/screen targeting, system-authorization/dialog
-  adversarial coverage, helper-owned stop defense, signed/notarized nested code,
-  and matching Intel and Apple Silicon runtime tests.
+  adversarial coverage, helper-owned stop defense, and signed/notarized nested
+  code.

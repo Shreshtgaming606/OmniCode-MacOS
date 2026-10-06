@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { OmniStartRequest } from '../../shared/omni-contracts'
 import type { ToolDescriptor, ToolExecutionRequest, ToolExecutionResult } from '../../shared/tool-contracts'
-import { OmniController } from './omni-controller'
+import { OmniController, selectRelevantOmniTools } from './omni-controller'
 import { OmniTaskStore } from './omni-task-store'
 import { OmniToolRouter, type OmniToolRoute, type OmniToolRouteContext } from './omni-tool-router'
 import type { WorkAgentManager } from './work-agent-manager'
@@ -79,6 +79,30 @@ async function waitForTask(controller: OmniController, taskId: string, status: s
 }
 
 describe('OmniController', () => {
+  it('bounds a large provider-neutral catalog to request-relevant registered tools', () => {
+    const descriptors = Array.from({ length: 20 }, (_, index): ToolDescriptor => ({
+      ...readDescriptor(),
+      id: `browser.audit-${index}`,
+      name: `Browser audit ${index}`,
+      description: 'Inspect a public web page.',
+      connectorId: 'browser'
+    }))
+    descriptors.push({
+      ...readDescriptor(),
+      id: 'runtime.detect',
+      name: 'Detect development tools',
+      description: 'Detect installed runtimes and compilers.',
+      connectorId: 'runtime'
+    })
+
+    const selected = selectRelevantOmniTools(
+      'Use runtime.detect exactly once and report whether Node.js is installed.',
+      descriptors
+    )
+
+    expect(selected.map((tool) => tool.id)).toEqual(['runtime.detect'])
+  })
+
   it('requires a visible plan before a real tool, records verified activity, and completes', async () => {
     const taskStore = await store()
     const speak = vi.fn()

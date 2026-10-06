@@ -1,4 +1,5 @@
 import type { AIProviderId } from './contracts'
+import type { ElevenLabsVoiceSettings } from './elevenlabs-contracts'
 import type { ToolActionCategory, ToolRiskLevel, WorkApprovalMode } from './tool-contracts'
 
 /** How Omni carries out a task. This is intentionally separate from approval policy. */
@@ -66,6 +67,13 @@ export interface OmniVoiceSettings {
   voiceId: string
   speakingRate: number
   spokenResponses: boolean
+  finishSpeaking: 'auto' | 'enter'
+  endOfSpeechDelayMs: number
+  outputProvider: 'system' | 'elevenlabs'
+  elevenlabsVoiceId: string
+  elevenlabsModelId: string
+  elevenlabsSettings: ElevenLabsVoiceSettings
+  fallbackToSystem: boolean
 }
 
 export interface OmniVoiceAvailability {
@@ -89,31 +97,77 @@ export interface OmniSpeechInputAvailability {
   streaming: boolean
   locale: string
   supportedLocales: string[]
+  inputDeviceName: string
+  inputDeviceTransport: string
+  sampleRate: number
+  channelCount: number
+}
+
+export type OmniVoiceSessionState =
+  | 'IDLE'
+  | 'STARTING'
+  | 'LISTENING'
+  | 'SPEECH_DETECTED'
+  | 'WAITING_FOR_END'
+  | 'FINALIZING_TRANSCRIPT'
+  | 'THINKING'
+  | 'WORKING'
+  | 'SPEAKING'
+  | 'COMPLETED'
+  | 'CANCELLED'
+  | 'FAILED'
+
+export type OmniVoiceFinalizationReason = 'SILENCE' | 'ENTER' | 'TIMEOUT' | 'MANUAL' | 'SPEECH_FRAMEWORK' | 'CANCEL'
+
+export interface OmniSpeechSessionDiagnostics {
+  inputDeviceName: string
+  inputDeviceTransport: string
+  sampleRate: number
+  channelCount: number
+  locale: string
+  onDeviceRequested: boolean
+  onDeviceSupported: boolean
+  onDeviceActive: boolean
+  sessionDurationMs?: number
+  speechStartMs?: number
+  finalSilenceMs?: number
+  partialResultCount?: number
+  finalizationReason?: OmniVoiceFinalizationReason
 }
 
 export interface OmniSpeechInputEvent {
   sessionId: string
-  type: 'listening' | 'amplitude' | 'partial' | 'final' | 'cancelled' | 'error'
+  type: 'state' | 'listening' | 'amplitude' | 'partial' | 'final' | 'cancelled' | 'error' | 'diagnostic'
+  state?: OmniVoiceSessionState
+  reason?: OmniVoiceFinalizationReason
   transcript?: string
   amplitude?: number
   error?: string
+  diagnostics?: OmniSpeechSessionDiagnostics
 }
 
 export interface OmniSpeechOutputEvent {
-  type: 'speaking' | 'finished' | 'interrupted' | 'error'
+  type: 'speaking' | 'finished' | 'interrupted' | 'error' | 'fallback'
   taskId?: string
   text?: string
+  reason?: string
 }
 
 export interface OmniSpeechRecognitionResult {
   transcript: string
   cancelled: boolean
+  reason: OmniVoiceFinalizationReason
+  diagnostics?: OmniSpeechSessionDiagnostics
 }
 
 export interface OmniSpeechStartOptions {
   locale?: string
   /** Omni's current privacy contract requires local recognition. */
   requireOnDevice?: true
+  finishSpeaking?: 'auto' | 'enter'
+  endOfSpeechDelayMs?: number
+  /** Setup-only microphone checks can disable automatic agent submission. */
+  submitOnFinal?: boolean
 }
 
 export interface OmniSettings {
@@ -312,7 +366,14 @@ export function createDefaultOmniSettings(): OmniSettings {
     voice: {
       voiceId: '',
       speakingRate: 1,
-      spokenResponses: true
+      spokenResponses: true,
+      finishSpeaking: 'auto',
+      endOfSpeechDelayMs: 1_600,
+      outputProvider: 'system',
+      elevenlabsVoiceId: '',
+      elevenlabsModelId: '',
+      elevenlabsSettings: { stability: 0.5, similarityBoost: 0.75, style: 0, speed: 1 },
+      fallbackToSystem: true
     },
     model: {
       provider: 'ollama',

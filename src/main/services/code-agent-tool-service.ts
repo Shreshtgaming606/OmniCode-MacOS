@@ -123,11 +123,11 @@ export class CodeAgentToolService {
     entries.push({
       descriptor: {
         ...base('files.list', 'List directory', 'List one workspace directory without recursively loading the project.', 'files'), ...read,
-        inputSchema: { type: 'object', properties: { path: { type: 'string', maxLength: 1_024 } }, additionalProperties: false }, maxResultBytes: 128 * 1024
+        inputSchema: { type: 'object', properties: { path: { type: 'string', maxLength: 1_024, description: 'Optional relative directory inside the workspace. Omit this field for the workspace root; do not use "." or an absolute path.' } }, additionalProperties: false }, maxResultBytes: 128 * 1024
       },
       execute: async (input) => {
         const root = workspace()
-        const relative = typeof input.path === 'string' && input.path.trim() ? relativeInput(input.path) : ''
+        const relative = typeof input.path === 'string' && input.path.trim() ? relativeInput(input.path, 'path', true) : ''
         const directory = relative ? workspacePath(root, relative) : root
         const values = await fs.readdir(this.options.fileSystem.resolveAuthorizedPath(directory), { withFileTypes: true })
         return {
@@ -140,7 +140,7 @@ export class CodeAgentToolService {
     entries.push({
       descriptor: {
         ...base('files.read', 'Read file', 'Read a bounded UTF-8 text file in the current workspace.', 'files'), ...read,
-        inputSchema: { type: 'object', properties: { path: { type: 'string', minLength: 1, maxLength: 1_024 } }, required: ['path'], additionalProperties: false }, maxResultBytes: 256 * 1024
+        inputSchema: { type: 'object', properties: { path: { type: 'string', minLength: 1, maxLength: 1_024, description: 'A relative file path inside the workspace, for example package.json. Never use an absolute path.' } }, required: ['path'], additionalProperties: false }, maxResultBytes: 256 * 1024
       },
       execute: async (input) => {
         const root = workspace()
@@ -164,7 +164,7 @@ export class CodeAgentToolService {
     entries.push({
       descriptor: {
         ...base('files.write', 'Write workspace file', 'Create or replace one workspace text file through the reviewable diff and undo system.', 'files'), ...fileWrite,
-        inputSchema: { type: 'object', properties: { path: { type: 'string', minLength: 1, maxLength: 1_024 }, content: { type: 'string', maxLength: MAX_AGENT_FILE_CONTENT } }, required: ['path', 'content'], additionalProperties: false }
+        inputSchema: { type: 'object', properties: { path: { type: 'string', minLength: 1, maxLength: 1_024, description: 'A relative file path inside the workspace, for example hello.txt. Never use an absolute path.' }, content: { type: 'string', maxLength: MAX_AGENT_FILE_CONTENT, description: 'The complete UTF-8 text to write.' } }, required: ['path', 'content'], additionalProperties: false }
       },
       execute: async (input) => {
         const root = workspace()
