@@ -2,15 +2,19 @@
 
 OmniCode is a complete macOS-first code editor with Monaco editing, real PTY
 terminals, project run/build tools, Git, local Ollama models, optional cloud AI,
-agent workflows, and reviewable AI diffs. It targets **macOS Sonoma 14 or
-newer** on both Intel and Apple silicon.
+agent workflows, and reviewable AI diffs. Current OmniCode targets **macOS 15+**;
+the explicit Sonoma Legacy profile targets **macOS 14**. Both support Intel and
+Apple silicon from one source tree.
 
 This repository builds a real Electron desktop application. File, process,
 terminal, Git, credential, and provider operations run behind a sandboxed,
 typed preload boundary; the React renderer has no direct Node.js access.
 
-Current prerelease: [OmniCode Beta v1 0.1.0 downloads](https://omnicode.omnicoretech.org/download/)
-and [GitHub release](https://github.com/Shreshtgaming606/OmniCode-MacOS/releases/tag/v0.1.0).
+Current website downloads: [OmniCode Beta v1 0.1.2](https://omnicode.omnicoretech.org/download/).
+See [0.1.2 release notes](RELEASE_NOTES_BETA_V1_0.1.2.md) and the local
+`dist/release-macos/OmniCode-0.1.2-release-manifest.json` for the four
+validated installers. The GitHub release is
+[Beta v1 0.1.2](https://github.com/Shreshtgaming606/OmniCode-MacOS/releases/tag/v0.1.2).
 
 ## What is included
 
@@ -45,6 +49,9 @@ and [GitHub release](https://github.com/Shreshtgaming606/OmniCode-MacOS/releases
   Agent Mode, permission tiers, and reversible file/hunk diff review.
 - Six-step first-launch setup for theme, tools, runtimes, local AI, cloud AI,
   and a starting workspace, with real tool installers and local model downloads.
+- Optional nine-step tour of the real interface after setup, restartable from
+  Settings → Help, plus an in-app Notification Center for completed work and
+  failures with persistent unread state and task/conversation links.
 
 Supported editing modes include HTML, CSS, JavaScript, TypeScript, JSX, TSX,
 Python, Java, C, C++, Objective-C, Objective-C++, Swift, C#, Rust, Go, PHP,
@@ -57,7 +64,7 @@ runtime is available.
 
 For the packaged app:
 
-- macOS 14 Sonoma or newer
+- macOS 15 or newer for Current; macOS 14 Sonoma for Sonoma Legacy
 - An Intel x86-64 Mac or Apple silicon Mac
 - No compiler or AI service is required just to edit files
 
@@ -128,9 +135,11 @@ Useful commands:
 | `npm run preview` | Launch the production bundles without packaging |
 | `npm run rebuild:native` | Rebuild `node-pty` for Electron |
 | `npm run dist:dir` | Create an unpacked app for local smoke testing |
-| `npm run dist:x64` | Create Intel DMG and ZIP artifacts |
-| `npm run dist:arm64` | Create Apple silicon DMG and ZIP artifacts |
-| `npm run dist` | Package the architecture of the current Mac |
+| `npm run dist:x64` | Build and validate Current Intel DMG |
+| `npm run dist:arm64` | Build and validate Current Apple silicon DMG |
+| `npm run dist:legacy:x64` | Build and validate Sonoma Legacy Intel DMG |
+| `npm run dist:legacy:arm64` | Build and validate Sonoma Legacy Apple silicon DMG |
+| `npm run release:mac` / `npm run dist` | Typecheck, test, build and validate all four; generate manifest |
 
 ## Building the macOS app
 
@@ -140,20 +149,22 @@ For an unpacked application:
 npm run dist:dir
 ```
 
-For release archives, build the architecture you need:
+For profile-specific local testing installers:
 
 ```zsh
 npm run dist:x64
 npm run dist:arm64
+npm run dist:legacy:x64
+npm run dist:legacy:arm64
 ```
 
 Artifacts are written to `dist/` with names such as:
 
 ```text
-OmniCode-0.1.0-x64.dmg
-OmniCode-0.1.0-x64.zip
-OmniCode-0.1.0-arm64.dmg
-OmniCode-0.1.0-arm64.zip
+OmniCode-0.1.2-macOS15-x64.dmg
+OmniCode-0.1.2-macOS15-arm64.dmg
+OmniCode-0.1.2-Sonoma-Legacy-x64.dmg
+OmniCode-0.1.2-Sonoma-Legacy-arm64.dmg
 ```
 
 `node-pty` contains native code, so each artifact must contain the matching CPU

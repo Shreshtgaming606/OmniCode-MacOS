@@ -1,0 +1,26 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 60;
+	objects = {
+		A00000000000000000000001 = {isa = PBXBuildFile; fileRef = A00000000000000000000002; };
+		A00000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "../../out/native/OmniCodeIntents.swift"; sourceTree = "<group>"; };
+		A00000000000000000000005 = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = OmniCodeIntents.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		A00000000000000000000006 = {isa = PBXGroup; children = (A00000000000000000000002, A00000000000000000000007, A00000000000000000000008,); sourceTree = "<group>"; };
+		A00000000000000000000007 = {isa = PBXGroup; name = Products; children = (A00000000000000000000005,); sourceTree = "<group>"; };
+		A00000000000000000000008 = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; name = "omni-intents.Info.plist"; path = "../../build/omni-intents.Info.plist"; sourceTree = "<group>"; };
+		A00000000000000000000009 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000001,); runOnlyForDeploymentPostprocessing = 0; };
+		A0000000000000000000000A = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		A0000000000000000000000B = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		A0000000000000000000000C = {isa = PBXNativeTarget; buildConfigurationList = A0000000000000000000000D; buildPhases = (A00000000000000000000009, A0000000000000000000000A, A0000000000000000000000B,); buildRules = (); dependencies = (); name = OmniCodeIntents; productName = OmniCodeIntents; productReference = A00000000000000000000005; productType = "com.apple.product-type.app-extension"; };
+		A0000000000000000000000D = {isa = XCConfigurationList; buildConfigurations = (A0000000000000000000000E, A0000000000000000000000F,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A0000000000000000000000E = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGNING_ALLOWED = NO; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = "../../build/omni-intents.Info.plist"; MACOSX_DEPLOYMENT_TARGET = 15.0; PRODUCT_BUNDLE_IDENTIFIER = com.omnicode.editor.intents; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; SKIP_INSTALL = NO; SUPPORTED_PLATFORMS = macosx; SWIFT_VERSION = 5.0; }; name = Debug; };
+		A0000000000000000000000F = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGNING_ALLOWED = NO; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = "../../build/omni-intents.Info.plist"; MACOSX_DEPLOYMENT_TARGET = 15.0; PRODUCT_BUNDLE_IDENTIFIER = com.omnicode.editor.intents; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; SKIP_INSTALL = NO; SUPPORTED_PLATFORMS = macosx; SWIFT_VERSION = 5.0; }; name = Release; };
+		A00000000000000000000010 = {isa = PBXProject; attributes = {BuildIndependentTargetsInParallel = 1; LastUpgradeCheck = 2700; TargetAttributes = {A0000000000000000000000C = {CreatedOnToolsVersion = 27.0; }; }; }; buildConfigurationList = A00000000000000000000011; compatibilityVersion = "Xcode 15.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base,); mainGroup = A00000000000000000000006; productRefGroup = A00000000000000000000007; projectDirPath = ""; projectRoot = ""; targets = (A0000000000000000000000C,); };
+		A00000000000000000000011 = {isa = XCConfigurationList; buildConfigurations = (A00000000000000000000012, A00000000000000000000013,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A00000000000000000000012 = {isa = XCBuildConfiguration; buildSettings = {CLANG_ENABLE_MODULES = YES; CODE_SIGNING_ALLOWED = NO; MACOSX_DEPLOYMENT_TARGET = 15.0; SDKROOT = macosx; SWIFT_VERSION = 5.0; }; name = Debug; };
+		A00000000000000000000013 = {isa = XCBuildConfiguration; buildSettings = {CLANG_ENABLE_MODULES = YES; CODE_SIGNING_ALLOWED = NO; MACOSX_DEPLOYMENT_TARGET = 15.0; SDKROOT = macosx; SWIFT_VERSION = 5.0; }; name = Release; };
+	};
+	rootObject = A00000000000000000000010;
+}

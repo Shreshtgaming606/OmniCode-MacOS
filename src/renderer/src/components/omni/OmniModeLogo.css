@@ -1,0 +1,2 @@
+.omni-mode-logo { position: relative; display: inline-block; width: 100%; height: 100%; flex: 0 0 auto; overflow: hidden; }
+.omni-mode-logo img { position: absolute; width: 180%; height: 180%; max-width: none; top: -40%; left: -40%; object-fit: cover; clip-path: polygon(50% 17%, 75% 31%, 75% 61%, 50% 75%, 26% 61%, 26% 31%); pointer-events: none; }

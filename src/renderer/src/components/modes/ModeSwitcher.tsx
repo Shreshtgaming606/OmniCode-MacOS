@@ -2,6 +2,7 @@ import type { KeyboardEvent } from 'react'
 import { AudioWaveform, BriefcaseBusiness, Code2 } from 'lucide-react'
 
 import type { AppMode } from '../../../../shared/work-contracts'
+import { OmniModeLogo } from '../omni/OmniModeLogo'
 import './ModeSwitcher.css'
 
 const MODES: ReadonlyArray<{
@@ -70,7 +71,7 @@ export function ModeSwitcher({
         onClick={() => onChange(mode.id)}
         onKeyDown={(event) => moveSelection(event, index)}
       >
-        <Icon />
+        {mode.id === 'omni' ? <OmniModeLogo /> : <Icon />}
         <span>{mode.label}</span>
       </button>
     })}

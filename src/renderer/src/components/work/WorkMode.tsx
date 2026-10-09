@@ -288,7 +288,7 @@ export function WorkMode({ active, targetConversationId, onOpenSettings, onError
 
   const refreshConnectors = useCallback(async (refresh = false): Promise<void> => {
     const next = await window.omnicode.work.connectors.list(refresh)
-    if (mounted.current) setConnectors(next)
+    if (mounted.current) setConnectors(next.filter((connector) => connector.id !== 'system-native'))
   }, [])
 
   const refreshModels = useCallback(async (provider: AIProviderId, forceRefresh = false): Promise<AIModelDescriptor[]> => {

@@ -736,6 +736,20 @@ export interface OmniOverlayAPI {
 }
 
 export interface OmniCodeAPI {
+  platform: {
+    snapshot(): Promise<import('./platform-contracts').MacOSPlatformSnapshot>
+    translateClipboard(source: string, target: string): Promise<{ text: string; engine: string }>
+    captureOwnWindow(): Promise<{ path: string } | null>
+    openShortcuts(): Promise<void>
+  }
+  spotlight: {
+    settings(): Promise<import('./spotlight-contracts').SpotlightSettingsSnapshot>
+    updateSettings(value: Partial<import('./spotlight-contracts').SpotlightSettings>): Promise<import('./spotlight-contracts').SpotlightSettings>
+    rebuild(): Promise<void>
+    clear(): Promise<void>
+    search(text: string): Promise<import('./spotlight-contracts').SpotlightItem[]>
+    openResult(identifier: string): Promise<void>
+  }
   workspace: WorkspaceAPI
   terminal: TerminalAPI
   diff: DiffAPI

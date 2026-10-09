@@ -41,6 +41,7 @@ interface WorkConversationStore {
 interface WorkConversationManagerOptions {
   now?: () => number
   createId?: () => string
+  onChanged?: () => void
 }
 
 export class WorkConversationStoreCorruptError extends Error {
@@ -259,6 +260,7 @@ export class WorkConversationManager {
   private readonly storagePath: string
   private readonly now: () => number
   private readonly createId: () => string
+  private readonly onChanged?: () => void
   private queue: Promise<void> = Promise.resolve()
 
   constructor(storagePath: string, options: WorkConversationManagerOptions = {}) {
@@ -266,12 +268,26 @@ export class WorkConversationManager {
     this.storagePath = storagePath
     this.now = options.now ?? Date.now
     this.createId = options.createId ?? randomUUID
+    this.onChanged = options.onChanged
   }
 
   async list(): Promise<WorkConversationSummary[]> {
     await this.queue
     const store = await this.readStore()
     return this.sorted(store.conversations).map(summary)
+  }
+
+  /** Only metadata needed by the local Spotlight index; never returns message content. */
+  async spotlightMetadata(): Promise<Array<{ id: string; title: string; mode: 'work'; containsConnectedData: boolean }>> {
+    await this.queue
+    const store = await this.readStore()
+    return this.sorted(store.conversations).slice(0, 100).map((conversation) => ({
+      id: conversation.id,
+      title: conversation.title,
+      mode: 'work' as const,
+      containsConnectedData: conversation.messages.some((message) =>
+        message.dataSources?.includes('google-workspace') || message.attachments?.some((attachment) => attachment.source === 'connected-app'))
+    }))
   }
 
   async search(request: WorkConversationSearchRequest = {}): Promise<WorkConversationSummary[]> {
@@ -529,6 +545,7 @@ export class WorkConversationManager {
       }
       await fs.rename(temporary, this.storagePath)
       await fs.chmod(this.storagePath, 0o600)
+      this.onChanged?.()
     } catch (error) {
       await fs.rm(temporary, { force: true }).catch(() => undefined)
       throw error

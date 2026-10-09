@@ -5,11 +5,14 @@ import type { AIModelDescriptor, CloudAIProviderId } from '../../../shared/model
 import type { OmniPermissionId, OmniPermissionsSnapshot, OmniSettings, OmniSpeechInputAvailability } from '../../../shared/omni-contracts'
 import type { ConnectorDescriptor, WorkApprovalMode, WorkPermissionSettings } from '../../../shared/tool-contracts'
 import type { NotificationSettings } from '../../../shared/notification-contracts'
+import type { MacOSPlatformSnapshot } from '../../../shared/platform-contracts'
+import type { SpotlightSettings, SpotlightSettingsSnapshot } from '../../../shared/spotlight-contracts'
 import { googleAccountSummary } from '../lib/google-account-status'
 import { WORK_APPROVAL_MODES, WORK_APPROVAL_MODE_COPY } from '../lib/work-approval-mode'
 import { FullAccessWarning } from './work/FullAccessWarning'
 import { AIUsageDashboard } from './AIUsageDashboard'
 import { ElevenLabsVoiceSettings } from './omni/ElevenLabsVoiceSettings'
+import { OmniModeLogo } from './omni/OmniModeLogo'
 
 type CloudProvider = Exclude<AIProviderId, 'ollama'>
 const PROVIDERS: Array<{ id: CloudProvider; name: string; placeholder: string }> = [
@@ -65,7 +68,8 @@ export function SettingsPanel({
   onAutocompleteProvider,
   onAutocompleteModel,
   onWorkspaceSettings,
-  onClose
+  onClose,
+  onRestartTour
 }: {
   workspacePath: string | null
   theme: ThemePreference
@@ -82,6 +86,7 @@ export function SettingsPanel({
   onAutocompleteModel(value: string): void
   onWorkspaceSettings(value: WorkspaceSettings): void
   onClose(): void
+  onRestartTour(): void
 }) {
   const [keys, setKeys] = useState<Record<CloudProvider, string>>({ openai: '', anthropic: '', google: '' })
   const [stored, setStored] = useState<Record<CloudProvider, boolean | null>>({ openai: null, anthropic: null, google: null })
@@ -120,9 +125,34 @@ export function SettingsPanel({
   const [omniBusy, setOmniBusy] = useState(false)
   const [omniPermissionBusy, setOmniPermissionBusy] = useState<OmniPermissionId | null>(null)
   const [notificationSettings, setNotificationSettings] = useState<NotificationSettings | null>(null)
+  const [platform, setPlatform] = useState<MacOSPlatformSnapshot | null>(null)
+  const [spotlightSettings, setSpotlightSettings] = useState<SpotlightSettingsSnapshot | null>(null)
+  const [spotlightBusy, setSpotlightBusy] = useState(false)
+  useEffect(() => { void window.omnicode.platform.snapshot().then(setPlatform).catch(() => undefined) }, [])
+  useEffect(() => { void window.omnicode.spotlight.settings().then(setSpotlightSettings).catch(() => undefined) }, [])
+  const updateSpotlight = async (changes: Partial<SpotlightSettings>): Promise<void> => {
+    setSpotlightBusy(true)
+    try {
+      await window.omnicode.spotlight.updateSettings(changes)
+      setSpotlightSettings(await window.omnicode.spotlight.settings())
+    } catch (cause) { setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause)) }
+    finally { setSpotlightBusy(false) }
+  }
+  const manageSpotlight = async (action: 'rebuild' | 'clear'): Promise<void> => {
+    setSpotlightBusy(true)
+    try {
+      if (action === 'rebuild') await window.omnicode.spotlight.rebuild()
+      else await window.omnicode.spotlight.clear()
+      setSpotlightSettings(await window.omnicode.spotlight.settings())
+      setStatusError(false)
+      setStatus(action === 'rebuild' ? 'OmniCode Spotlight metadata was rebuilt.' : 'OmniCode Spotlight metadata was cleared and indexing was turned off.')
+    } catch (cause) { setStatusError(true); setStatus(cause instanceof Error ? cause.message : String(cause)) }
+    finally { setSpotlightBusy(false) }
+  }
   useEffect(() => {
     const dismiss = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape') return
+      if (document.querySelector('[data-guided-tour]')) return
       event.preventDefault()
       if (fullAccessTarget) setFullAccessTarget(null)
       else onClose()
@@ -166,7 +196,7 @@ export function SettingsPanel({
   const refreshConnectors = async (verify = false): Promise<void> => {
     try {
       setConnectorError('')
-      setConnectors(await window.omnicode.work.connectors.list(verify))
+      setConnectors((await window.omnicode.work.connectors.list(verify)).filter((connector) => connector.id !== 'system-native'))
     } catch (cause) {
       setConnectorError(cause instanceof Error ? cause.message : String(cause))
     }
@@ -504,11 +534,24 @@ export function SettingsPanel({
     <div className="settings-panel">
       <header><div><h1>Settings</h1><p>User settings · stored locally</p></div><button onClick={onClose} title="Close settings"><X /></button></header>
       <div className="settings-content">
-        <nav><a href="#appearance">Appearance</a><a href="#files">Files & Autosave</a><a href="#notifications">Notifications</a><a href="#providers">AI Providers</a><a href="#ai-usage">AI Usage & Cost</a><a href="#autocomplete">AI Autocomplete</a><a href="#omni">Omni</a><a href="#work-mode">Work Mode</a><a href="#connected-apps">Connected Apps</a><a href="#workspace">Workspace</a><a href="#permissions">Permissions & Privacy</a></nav>
+        <nav><a href="#appearance">Appearance</a><a href="#files">Files & Autosave</a><a href="#spotlight">Spotlight</a><a href="#notifications">Notifications</a><a href="#providers">AI Providers</a><a href="#ai-usage">AI Usage & Cost</a><a href="#autocomplete">AI Autocomplete</a><a href="#omni">Omni</a><a href="#work-mode">Work Mode</a><a href="#connected-apps">Connected Apps</a><a href="#workspace">Workspace</a><a href="#permissions">Permissions & Privacy</a><a href="#help">Help</a></nav>
         <main>
+          {platform && <section id="platform"><h2>macOS Platform</h2><p>{platform.label} · minimum macOS {platform.minimumMacOS}</p><p>Running macOS {platform.actualMacOS} · {platform.architecture}</p><p>{platform.release === 'current' ? 'On-device Translation, Vision image text, and targeted window capture are available on supported hardware and with required permissions.' : 'Sonoma Legacy retains the shared Code, Work, and Omni features; macOS 15 native integrations are unavailable.'}</p></section>}
+          <section id="spotlight"><h2>macOS Integration</h2><p>Make project names and eligible conversation titles searchable in macOS. Only metadata goes into the local Spotlight index—never workspace files, prompts, connector content, tokens, or terminal output.</p>
+            {spotlightSettings && <div className="notification-settings-list" aria-busy={spotlightBusy}>
+              <label className="setting-toggle"><span><strong>Spotlight integration</strong><small>{spotlightSettings.available ? 'Available on this Mac.' : 'System indexing is unavailable.'}</small></span><input type="checkbox" disabled={spotlightBusy || !spotlightSettings.available} checked={spotlightSettings.enabled} onChange={(event) => void updateSpotlight({ enabled: event.target.checked })} /></label>
+              <label className="setting-toggle"><span><strong>Recent workspaces</strong><small>Indexes project names with opaque IDs, not paths or file contents.</small></span><input type="checkbox" disabled={spotlightBusy || !spotlightSettings.enabled} checked={spotlightSettings.recentWorkspaces} onChange={(event) => void updateSpotlight({ recentWorkspaces: event.target.checked })} /></label>
+              <label className="setting-toggle"><span><strong>Conversation titles</strong><small>Indexes eligible Work titles only; conversations involving connected-app data are excluded.</small></span><input type="checkbox" disabled={spotlightBusy || !spotlightSettings.enabled} checked={spotlightSettings.conversationTitles} onChange={(event) => void updateSpotlight({ conversationTitles: event.target.checked })} /></label>
+              <div className="ollama-provider-actions"><button type="button" disabled={spotlightBusy || !spotlightSettings.available || !spotlightSettings.enabled} onClick={() => void manageSpotlight('rebuild')}><RefreshCw />Rebuild OmniCode Index</button><button type="button" disabled={spotlightBusy || !spotlightSettings.available} onClick={() => void manageSpotlight('clear')}><Trash2 />Clear OmniCode Index</button></div>
+              <p>Shortcuts: {platform?.release === 'legacy' ? '7' : '8'} navigation actions in the packaged macOS app. Some actions open OmniCode for further input.</p>
+              <div className="ollama-provider-actions"><button type="button" onClick={() => void window.omnicode.platform.openShortcuts().catch((error) => setStatus(String(error)))}>Open Shortcuts</button></div>
+              <small>Saved workflows and workspace filenames are not indexed in this release.</small>
+            </div>}
+          </section>
           <section id="appearance"><h2>Appearance</h2><p>Choose how OmniCode follows macOS.</p>
             <div className="segmented">{(['system', 'dark', 'light'] as ThemePreference[]).map((item) => <button className={theme === item ? 'active' : ''} key={item} onClick={() => onTheme(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}</div>
           </section>
+          <section id="help"><h2>Help</h2><p>Explore the main OmniCode interface whenever you like.</p><button type="button" className="omni-rerun-setup" aria-label="Restart Tour" onClick={onRestartTour}><RefreshCw />Take OmniCode Tour</button></section>
           <section id="files"><h2>Files & Autosave</h2><label className="setting-toggle"><span><strong>Autosave</strong><small>Save changed files after a short delay.</small></span><input type="checkbox" checked={autosave} onChange={(event) => onAutosave(event.target.checked)} /></label></section>
           <section id="notifications"><h2>Notifications</h2><p>Keep important task outcomes visible in OmniCode and optionally mirror them to macOS.</p>
             {!notificationSettings ? <div className="omni-settings-loading"><LoaderCircle className="spin" />Loading notification settings…</div> : <div className="notification-settings-list">
@@ -587,7 +630,7 @@ export function SettingsPanel({
           </section>
           <section id="omni"><h2>Omni</h2><p>Configure the voice-first system assistant. These private settings are stored locally and use the existing provider and permission systems.</p>
             {!omniSettings ? <div className="omni-settings-loading"><LoaderCircle className="spin" />Loading Omni settings…</div> : <div className="omni-settings-groups">
-              <div className="omni-settings-group"><h3><AudioWaveform />General</h3>
+              <div className="omni-settings-group"><h3><OmniModeLogo />General</h3>
                 <label className="setting-toggle"><span><strong>Enable Omni</strong><small>Register the global activation shortcut and make Omni available.</small></span><input type="checkbox" disabled={omniBusy} checked={omniSettings.enabled} onChange={(event) => void updateOmni({ enabled: event.target.checked })} /></label>
                 <button type="button" className="omni-rerun-setup" disabled={omniBusy} onClick={() => void window.omnicode.omni.settings.update({ setupCompleted: false }).then(() => onClose())}><RefreshCw />Setup & Permissions</button>
               </div>

@@ -21,7 +21,8 @@ describe('SettingsPanel Work and model settings', () => {
       onAutocompleteProvider: () => undefined,
       onAutocompleteModel: () => undefined,
       onWorkspaceSettings: () => undefined,
-      onClose: () => undefined
+      onClose: () => undefined,
+      onRestartTour: () => undefined
     }))
 
     expect(html).toContain('aria-label="Google Gemini autocomplete model"')

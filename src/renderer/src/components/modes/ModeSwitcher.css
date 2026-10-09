@@ -59,6 +59,7 @@
 .mode-switcher button.active { color: var(--text); }
 .mode-switcher button.active svg { color: var(--accent); }
 .mode-switcher button svg { width: 14px; height: 14px; transition: color var(--motion-fast) var(--ease-standard); }
+.mode-switcher button .omni-mode-logo { width: 18px; height: 18px; }
 
 @media (max-width: 760px) {
   .mode-switcher button { min-width: 34px; padding: 0 8px; }

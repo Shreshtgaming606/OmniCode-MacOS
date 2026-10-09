@@ -1,6 +1,21 @@
 # OmniCode Stabilization Test Matrix
 
-Last updated: 2026-10-01
+Last updated: 2026-10-09
+
+## Native Spotlight and App Intents (0.1.1)
+
+| System | Feature | Test | Result | Automated/Manual | Notes |
+| --- | --- | --- | --- | --- | --- |
+| Spotlight | Metadata index and query | Index isolated workspace and Work title in signed packaged arm64 app, then query Core Spotlight | Pass | Packaged integration | Both real metadata records returned; no file contents indexed |
+| Spotlight | Exact navigation | Open queried IDs through trusted router and inspect renderer | Pass | Packaged integration | Exact workspace and Work conversation opened |
+| Spotlight | Clear | Remove isolated test records and query again | Pass | Packaged integration | Neither temporary item remained |
+| Spotlight | Semantic query | Query a related phrase through `CSUserQuery` | Unverified | Packaged integration | Related project was not returned; no semantic-match claim |
+| Spotlight | System GUI result click | Search and click through Cmd+Space | Pending | Manual GUI | After the Mac was unlocked, Cmd+Space did not present an observable Spotlight result in the automation session; packaged IPC navigation is not a substitute |
+| App Intents | Native metadata | Build real Xcode extension target for Current/Legacy and both architectures | Pass | Native build | Current has 8 action definitions, Legacy 7; extension retains the sandbox entitlement and Xcode target marker |
+| App Intents | Shortcuts action discovery | Launch registered Current test app, search OmniCode in Shortcuts | Pass with registration caveat | Live macOS 27 GUI | All eight Current actions appeared after unregistering the stale installed 0.9.0 app's LaunchServices entry; two apps with the same bundle ID had competed |
+| App Intents | Shortcuts action execution | Run Code, Work, and Omni mode actions from Shortcuts and inspect OmniCode | Pass | Packaged Current arm64 GUI on macOS 27 | Xcode-built extension executed without the helper error; each action visibly selected the corresponding app mode. Other actions, x64, and macOS 14 runtime remain untested |
+| Release | Four profile DMGs | Strict signatures, architectures, mounted DMG equivalence | Pass | Packaging | 0.1.1 `release:mac` completed; each profile's final DMG validator reported 84 PASS, 7 expected ad-hoc/notarization WARNING, 0 FAIL |
+| Build environment | Documents checkout | Run `electron-vite build` from this checkout | Blocked on this host | macOS 27 native build | ARM64 `esbuild` stalled in a file-open call when reading repository files under Documents, despite the app's visible Documents permission being enabled. An owner-only temporary copy outside Documents built successfully; its four validated DMGs and checksums were copied back and reverified. No privacy setting was changed. |
 
 ## Omni voice endpoint and transcript repair
 
@@ -334,3 +349,51 @@ substitute for a real integration test where one is required.
 | Omni dashboard | Responsive layouts | Verify normal, 960×600, and 720×720 layouts | Pass | Production UI + screenshot review | No horizontal overflow; Omni Core remained at least 175 px at 960×600 and Activity stayed accessible at both compact sizes |
 | Omni dashboard | Reduce Motion | Disable continuous Core and listening animation | Pass | Automated emulation | Computed animation name was `none` for orbit and microphone under reduced motion |
 | Omni dashboard | Friendly provider errors | Present actionable copy and keep technical detail secondary | Pass | Renderer unit | Raw provider detail is sanitized/preserved under disclosure rather than becoming the primary message |
+# macOS 15 Current / Sonoma Legacy profile matrix (2026-10-08)
+
+| Profile | Architecture | Minimum | Build validation | Runtime validation |
+| --- | --- | --- | --- | --- |
+| Current | arm64 | 15.0 | Pending four-variant release run | macOS 27 host; Translation and Vision local audit passed, window capture pending |
+| Current | x64 | 15.0 | Pending four-variant release run | Intel Mac required |
+| Sonoma Legacy | arm64 | 14.0 | Pending four-variant release run | Sonoma Mac required |
+| Sonoma Legacy | x64 | 14.0 | Pending four-variant release run | Sonoma Intel Mac required |
+
+For each row validate Code, Work, Omni, voice, connectors, Ollama, cloud
+providers when credentials exist, browser, permissions, native helpers, activity,
+and notifications. On Current verify native Translation, Vision OCR, and
+window-specific capture. On Legacy verify these actions are hidden and that
+shared core features remain functional. See the manual checklist at
+`docs/testing/SONOMA_LEGACY_TEST_CHECKLIST.md`.
+
+## Post-setup tour, notifications, and Omni identity (2026-10-09)
+
+| Area | Result | Evidence and remaining boundary |
+| --- | --- | --- |
+| First-run offer and nine-step tour | Pass on Current arm64 | An isolated packaged-app profile completed the six setup screens, displayed the optional offer, highlighted real Code/Work/Omni/Settings/notification targets, completed all nine steps, and did not auto-reopen after restart. Settings → Help restarted the tour; Escape dismissed it. |
+| Skip path | Pass on Current arm64 | A second isolated profile completed setup, selected Skip, restarted, and received no repeat offer. |
+| In-app Notification Center | Pass on Current arm64 | The visible bell opened the panel. A real local Work task and a real Code Agent `npm test` run created persisted notifications; unread badges, mark-read, mark-all, clear, restart persistence, and Work/Code click-through worked. The disposable test command exited 1 and correctly displayed “Tests failed” after its event-status repair. |
+| Native macOS alerts | Not validated | In-app notifications worked with the optional native setting off. Actual macOS delivery or TCC-denial behavior was not exercised; ad-hoc signing/notarization remains a distribution limitation. |
+| Omni Mode logo | Partial on Current arm64 | The packaged renderer includes the exact user-supplied JPEG asset, and the new mark appeared in the mode switcher, tour, and Omni setup surface. A final source edit also placed it at the Omni Core center; that final placement and the voice overlay were not visually exercised in a packaged build. |
+| Current arm64 package validation | Pass with trust warnings | Temporary `0.1.1` Current arm64 package passed 84 validator checks, including strict code sealing, architecture, DMG integrity, and checksum; seven expected ad-hoc/unnotarized trust warnings remain. This temporary package was not published. |
+| Sonoma Legacy | Source/test only | The tour and Notification Center use shared renderer/main paths with no macOS-15-only UI requirement. No macOS 14 host was available; the exact updated Legacy binaries were not built or runtime-tested in this task. |
+
+`npm run typecheck` passed and `npm test` passed with 748 tests, 8 skipped
+(88 files passed, 3 skipped). The Code/Work/Omni voice and shortcut regression
+matrix, physical macOS notification denial, and compact-window visual matrix
+still need dedicated real-device checks before claiming full coverage.
+
+## Beta v1 0.1.2 release gate (2026-10-09)
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| TypeScript and automated tests | Pass | `npm run release:mac` passed typecheck and 748 tests; 8 tests remain intentionally skipped. |
+| Four DMGs | Pass with distribution-trust warnings | Current arm64/x64 and Sonoma Legacy arm64/x64 each passed 84 validator checks, including strict/deep sealing, required native architecture, Info.plist minimum OS, mounted-image content equivalence, DMG integrity, and SHA-256. Each had 7 expected ad-hoc/unnotarized warnings and 0 validator failures. |
+| Google publisher OAuth build data | Pass, structural | All four packaged main bundles contain the configured publisher Desktop client fields. The raw developer JSON and the developer's absolute credentials path are absent. No credential values were printed during this check. Live Google sign-in was not repeated for this release. |
+| Omni identity asset | Pass, structural | All four packaged renderers contain a byte-identical copy of the supplied Omni Mode JPEG. |
+| Current arm64 first-run UI | Pass, packaged GUI | An isolated 0.1.2 app displayed the post-setup tour offer, highlighted the real navigation, Omni logo and bell, completed all nine steps, and opened the Notification Center panel. Earlier 0.1.1 packaged tests covered real notification creation, failure classification, persistence, and click-through; they were not all repeated on the 0.1.2 binary. |
+| Current x64 and Sonoma runtime | Not tested on matching hardware | Intel and macOS 14 behavior remains a matching-device validation requirement; cross-build, signing, and minimum-OS inspection are not runtime tests. |
+
+The four-artifact SHA-256 manifest is generated locally at
+`dist/release-macos/OmniCode-0.1.2-release-manifest.json`; it is also attached
+to the GitHub release. These installers are ad-hoc signed, not Developer ID
+signed or notarized.

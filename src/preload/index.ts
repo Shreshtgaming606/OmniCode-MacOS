@@ -31,6 +31,20 @@ ipcRenderer.on('app:command', (_event, command: string, payload?: unknown) => {
 })
 
 const api: OmniCodeAPI = {
+  platform: {
+    snapshot: () => ipcRenderer.invoke('platform:snapshot'),
+    translateClipboard: (source, target) => ipcRenderer.invoke('platform:translate-clipboard', source, target),
+    captureOwnWindow: () => ipcRenderer.invoke('platform:capture-own-window'),
+    openShortcuts: () => ipcRenderer.invoke('platform:open-shortcuts')
+  },
+  spotlight: {
+    settings: () => ipcRenderer.invoke('spotlight:settings'),
+    updateSettings: (value) => ipcRenderer.invoke('spotlight:update-settings', value),
+    rebuild: () => ipcRenderer.invoke('spotlight:rebuild'),
+    clear: () => ipcRenderer.invoke('spotlight:clear'),
+    search: (text) => ipcRenderer.invoke('spotlight:search', text),
+    openResult: (identifier) => ipcRenderer.invoke('spotlight:open-result', identifier)
+  },
   workspace: {
     inspectDroppedFile: (file) => {
       const path = webUtils.getPathForFile(file)

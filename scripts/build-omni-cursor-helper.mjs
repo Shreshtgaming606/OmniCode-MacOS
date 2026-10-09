@@ -2,6 +2,7 @@ import { chmod, mkdir } from 'node:fs/promises'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { releaseProfile } from './macos-release-profile.mjs'
 
 if (process.platform !== 'darwin') {
   throw new Error('The Omni cursor helper can only be built on macOS.')
@@ -19,11 +20,12 @@ const targetArchitecture = requestedArchitecture === 'x64'
     : null
 
 if (!targetArchitecture) throw new Error(`Unsupported Omni cursor helper architecture: ${requestedArchitecture}`)
+const profile = releaseProfile(process.env.OMNICODE_RELEASE_PROFILE)
 
 await mkdir(outputDirectory, { recursive: true })
 const result = spawnSync('xcrun', [
   'swiftc',
-  '-target', `${targetArchitecture}-apple-macos14.0`,
+  '-target', `${targetArchitecture}-apple-macos${profile.minimumMacOS}`,
   source,
   '-o', output,
   '-framework', 'AppKit',
@@ -62,4 +64,4 @@ if (signing.status !== 0) {
   throw new Error(`Could not ad-hoc sign the Omni cursor helper for ${targetArchitecture}:\n${diagnostic}`)
 }
 
-console.log(`Built and ad-hoc signed Omni cursor helper for ${targetArchitecture}.`)
+console.log(`Built and ad-hoc signed Omni cursor helper for ${targetArchitecture}, macOS ${profile.minimumMacOS}+.`)

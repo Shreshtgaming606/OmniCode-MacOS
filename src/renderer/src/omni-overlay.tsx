@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { Check, ExternalLink, Mic, RotateCcw, Square, X } from 'lucide-react'
 
 import type { OmniOverlayAPI } from '../../shared/contracts'
+import { OmniModeLogo } from './components/omni/OmniModeLogo'
 import type {
   OmniEvent,
   OmniPermissionId,
@@ -302,7 +303,7 @@ export function Overlay() {
 
   return <main className={`omni-voice-overlay phase-${phase}`} aria-live="polite">
     <header className="omni-voice-header">
-      <div className="omni-voice-brand"><span className="omni-mark" aria-hidden="true" /><strong>Omni</strong></div>
+      <div className="omni-voice-brand"><OmniModeLogo className="omni-mark" /><strong>Omni</strong></div>
       <div className="omni-window-actions">
         <button type="button" onClick={() => void window.omniOverlay.activation.openMainWindow()} aria-label="Open full Omni"><ExternalLink /></button>
         <button type="button" onClick={() => void close()} aria-label="Close Omni"><X /></button>

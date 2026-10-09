@@ -17,9 +17,15 @@ import {
   Tray
 } from 'electron'
 import path from 'node:path'
+import { tmpdir } from 'node:os'
 import { promises as fs } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { installApplicationMenu } from './menu'
+import { packagedReleaseProfile, resolvePlatformCapabilities } from './services/platform-capabilities'
+import { ModernMacOSService } from './services/modern-macos-service'
+import { registerModernMacOSTools } from './services/modern-macos-tools'
+import { NativeSpotlightAdapter, SpotlightManager } from './services/spotlight-manager'
+import { parseOmniCodeDeepLink, routeForSpotlightIdentifier, type OmniCodeRoute } from './services/omnicode-deep-links'
 import { FileSystemManager, isPathInside } from './services/filesystem-manager'
 import { TerminalManager } from './services/terminal-manager'
 import { RunManager } from './services/run-manager'
@@ -121,6 +127,8 @@ let quitRequested = false
 let closeAfterSave: 'window' | 'quit' | null = null
 let finalCleanupStarted = false
 const pendingOpenPaths: Array<{ path: string; kind: 'file' | 'directory' }> = []
+const pendingNavigation: Array<{ kind: 'workspace'; path: string } | { kind: 'conversation'; mode: 'work'; id: string } | { kind: 'mode'; mode: 'code' | 'work' | 'omni' } | { kind: 'action'; action: 'open-workspace' | 'translate-clipboard' }> = []
+const pendingDeepLinks: string[] = []
 let pendingDestinationRoot: string | null = null
 let pendingDestinationExpiresAt = 0
 const fileSystem = new FileSystemManager()
@@ -137,6 +145,8 @@ const notifications = new NotificationManager(path.join(app.getPath('userData'),
     if (Notification.isSupported()) new Notification({ title, body }).show()
   }
 })
+const platformSnapshot = () => resolvePlatformCapabilities(packagedReleaseProfile(), process.getSystemVersion(), process.arch)
+const modernMacOS = new ModernMacOSService(platformSnapshot)
 const aiUsage = new AIUsageManager(path.join(app.getPath('userData'), 'ai-usage.sqlite'))
 const ai = new AIManager(credentials, indexer, detectHardware, {
   settingsPath: path.join(app.getPath('userData'), 'ai-model-preferences.json'),
@@ -157,8 +167,9 @@ const ai = new AIManager(credentials, indexer, detectHardware, {
   }
 })
 const settings = new SettingsManager()
-const workspaceHistory = new WorkspaceHistoryManager(path.join(app.getPath('userData'), 'recent-workspaces.json'))
-const workConversations = new WorkConversationManager(path.join(app.getPath('userData'), 'work-conversations.json'))
+let spotlight: SpotlightManager | undefined
+const workspaceHistory = new WorkspaceHistoryManager(path.join(app.getPath('userData'), 'recent-workspaces.json'), () => spotlight?.schedule())
+const workConversations = new WorkConversationManager(path.join(app.getPath('userData'), 'work-conversations.json'), { onChanged: () => spotlight?.schedule() })
 const workAttachments = new WorkAttachmentManager(path.join(app.getPath('userData'), 'work-attachments'))
 const workTransfers = new WorkTransferStore(path.join(app.getPath('userData'), 'work-transfers'))
 const workPermissionSettings = new WorkPermissionSettingsManager(path.join(app.getPath('userData'), 'work-action-settings.json'))
@@ -166,6 +177,12 @@ const workActionHistory = new WorkActionHistoryManager(path.join(app.getPath('us
 const codeAgentActivity = new CodeAgentActivityManager(path.join(app.getPath('userData'), 'code-agent-activity.json'))
 const omniSettings = new OmniSettingsManager(path.join(app.getPath('userData'), 'omni-settings.json'))
 const omniTasks = new OmniTaskStore(path.join(app.getPath('userData'), 'omni-tasks.json'))
+spotlight = new SpotlightManager(
+  path.join(app.getPath('userData'), 'spotlight-metadata.json'),
+  { workspaces: () => workspaceHistory.list(), conversations: () => workConversations.spotlightMetadata() },
+  new NativeSpotlightAdapter(path.join(app.isPackaged ? process.resourcesPath : app.getAppPath(),
+    app.isPackaged ? 'omni-native/omnicode-spotlight.node' : 'out/native/omnicode-spotlight.node'))
+)
 const omniVoice = new OmniVoiceService()
 const elevenlabsVoice = new ElevenLabsTTSProvider({
   keychain: new SecureKeychainStore('com.omnicode.editor.elevenlabs'),
@@ -364,6 +381,24 @@ codeBrowserConnector.registerTools(codeTools)
 codeToolService.register(codeTools)
 omniBrowserConnector.registerTools(omniBrowserTools)
 omniComputerToolService.register(omniComputerTools)
+if (packagedReleaseProfile() === 'current') {
+  registerModernMacOSTools(modernMacOS, codeTools, workTools, omniComputerTools, () => fileSystem.getWorkspace(), async (signal) => {
+    if ((await macosPermissions.snapshot()).permissions['screen-recording'] !== 'granted') {
+      throw new Error('Screen Recording permission is required to read the OmniCode window.')
+    }
+    if (!mainWindow || mainWindow.isDestroyed()) throw new Error('OmniCode has no window to read.')
+    const match = /^window:(\d+):/u.exec(mainWindow.getMediaSourceId())
+    if (!match) throw new Error('OmniCode could not resolve its own window identifier.')
+    const temporary = await fs.mkdtemp(path.join(tmpdir(), 'omnicode-window-'))
+    const imagePath = path.join(temporary, 'window.png')
+    try {
+      await modernMacOS.captureOwnWindow(Number(match[1]), imagePath, signal)
+      return await modernMacOS.recognizeImage(imagePath, signal)
+    } finally {
+      await fs.rm(temporary, { recursive: true, force: true })
+    }
+  })
+}
 const codeAgent = new CodeAgentManager({
   activity: codeAgentActivity,
   agent: workAgent,
@@ -442,6 +477,19 @@ const WORK_REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/u
 workConnectors.register(browserConnector)
 workConnectors.register(gmailConnector)
 workConnectors.register(googleDriveConnector)
+if (packagedReleaseProfile() === 'current') {
+  workConnectors.register({
+    descriptor: {
+      id: 'system-native', name: 'On-device macOS tools',
+      description: 'Apple Translation runs on this Mac without an AI-provider translation call.',
+      capabilities: ['On-device translation'], requestedScopes: [], accessLevel: 'read-only'
+    },
+    connect: async () => undefined,
+    verify: async () => ({ connectorId: 'system-native', state: 'connected', message: 'Available on this Mac.', checkedAt: new Date().toISOString(), grantedScopes: [] }),
+    disconnect: async () => { throw new Error('Built-in macOS features cannot be disconnected.') }
+  })
+  void workConnectors.verify('system-native')
+}
 browserConnector.registerTools(workTools)
 gmailConnector.registerTools(workTools)
 googleDriveConnector.registerTools(workTools)
@@ -1079,6 +1127,7 @@ async function createOmniToolRouter(taskId: string, provider: WorkAgentChatReque
   const providerPolicy = await providerPolicies.policyFor(provider, model)
   for (const descriptor of workTools.list('work').filter((tool) => {
     if (tool.connectorId === 'browser') return false
+    if (tool.connectorId === 'system-native') return false // Code route already exposes the same shared native translation tool.
     if (isGoogleWorkspaceConnector(tool.connectorId) && !providerPolicy.allowsGoogleWorkspaceData) return false
     const connector = connectorStatuses.get(tool.connectorId)
     if (!connector || connector.status.state !== 'connected') return false
@@ -1519,9 +1568,48 @@ async function openPathFromFinder(target: string): Promise<void> {
   }
 }
 
+function deliverNavigation(target: (typeof pendingNavigation)[number]): void {
+  if (mainWindow && rendererReady) mainWindow.webContents.send('app:command', 'navigate-route', target)
+  else pendingNavigation.push(target)
+  showMainWindow()
+}
+
+async function navigateRoute(route: OmniCodeRoute): Promise<void> {
+  if (route.kind === 'workspace') {
+    const root = await spotlight!.resolveWorkspace(route.id)
+    deliverNavigation({ kind: 'workspace', path: await workspaceHistory.authorize(root) })
+  } else if (route.kind === 'conversation') {
+    await workConversations.get(route.id)
+    deliverNavigation({ kind: 'conversation', mode: 'work', id: route.id })
+  } else if (route.kind === 'mode') {
+    deliverNavigation(route)
+  } else if (route.action === 'start-voice') {
+    await showOmniOverlay('menu-bar')
+  } else if (route.action === 'open-workspace') {
+    deliverNavigation({ kind: 'action', action: 'open-workspace' })
+  } else if (route.action === 'translate-clipboard') {
+    if (!platformSnapshot().capabilities.nativeTranslation) throw new Error('On-device Translation is unavailable in this macOS release profile.')
+    deliverNavigation({ kind: 'action', action: 'translate-clipboard' })
+  } else if (route.action === 'open-recent-workspace') {
+    const recent = (await workspaceHistory.list())[0]
+    if (recent) deliverNavigation({ kind: 'workspace', path: await workspaceHistory.authorize(recent) })
+    else deliverNavigation({ kind: 'action', action: 'open-workspace' })
+  } else {
+    deliverNavigation({ kind: 'mode', mode: 'omni' })
+  }
+}
+
+function receiveDeepLink(value: string): void {
+  const route = parseOmniCodeDeepLink(value)
+  if (!route) return
+  if (!app.isReady()) { pendingDeepLinks.push(value); return }
+  void navigateRoute(route).catch((error) => diagnostics.failure('navigation:deep-link', error))
+}
+
 async function openLaunchArguments(argumentsList: string[]): Promise<void> {
   if (!app.isPackaged) return
   for (const candidate of argumentsList.slice(1).filter((value) => !value.startsWith('-')).slice(0, 20)) {
+    if (candidate.startsWith('omnicode://')) { receiveDeepLink(candidate); return }
     const target = path.resolve(candidate)
     try {
       await openPathFromFinder(target)
@@ -1537,11 +1625,13 @@ function registerIpc(): void {
     rendererReady = true
     const pending = pendingOpenPaths.splice(0)
     for (const target of pending) mainWindow.webContents.send('app:command', 'open-path', target)
+    const navigation = pendingNavigation.splice(0)
+    for (const target of navigation) mainWindow.webContents.send('app:command', 'navigate-route', target)
     if (pendingOmniActivation) {
       pendingOmniActivation = false
       mainWindow.webContents.send('app:command', 'activate-omni')
     }
-    return pending.length
+    return pending.length + navigation.length
   })
   handle('app:close-window', (event) => {
     const owner = BrowserWindow.fromWebContents(event.sender)
@@ -1560,6 +1650,9 @@ function registerIpc(): void {
     if (url.protocol !== 'https:') throw new Error('OmniCode opens only secure external links.')
     await shell.openExternal(url.toString())
   })
+  handle('platform:open-shortcuts', async () => {
+    await shell.openExternal('shortcuts://')
+  })
   handle('app:copy-text', (_event, value: string) => {
     if (typeof value !== 'string' || Buffer.byteLength(value, 'utf8') > 2 * 1024 * 1024 || value.includes('\0')) {
       throw new Error('The copied text is invalid or exceeds the 2 MB limit.')
@@ -1571,6 +1664,43 @@ function registerIpc(): void {
       throw new Error('The notification content is invalid or too long.')
     }
     if (Notification.isSupported()) new Notification({ title: title.trim(), body: body.trim() }).show()
+  })
+  handle('platform:snapshot', () => platformSnapshot())
+  handle('spotlight:settings', () => spotlight!.settings())
+  handle('spotlight:update-settings', (_event, update) => spotlight!.updateSettings(update))
+  handle('spotlight:rebuild', () => spotlight!.rebuild())
+  handle('spotlight:clear', () => spotlight!.clear())
+  handle('spotlight:search', (_event, text: string) => spotlight!.search(text, platformSnapshot().release === 'current' && platformSnapshot().capabilities.semanticSpotlightSearch))
+  handle('spotlight:open-result', async (_event, identifier: string) => {
+    const route = routeForSpotlightIdentifier(identifier)
+    if (!route) throw new Error('Spotlight result identifier is invalid.')
+    await navigateRoute(route)
+  })
+  handle('platform:translate-clipboard', async (_event, source: string, target: string) => {
+    const text = await clipboard.readText()
+    if (!text.trim()) throw new Error('Copy text before choosing on-device translation.')
+    return modernMacOS.translate(text, source, target)
+  })
+  handle('platform:capture-own-window', async () => {
+    if (!mainWindow || mainWindow.isDestroyed()) throw new Error('OmniCode has no window to capture.')
+    if (!platformSnapshot().capabilities.windowCapture) throw new Error('Window capture requires Current OmniCode on macOS 15 or later.')
+    const permission = (await macosPermissions.snapshot()).permissions['screen-recording']
+    if (permission !== 'granted') {
+      await macosPermissions.request('screen-recording')
+      if ((await macosPermissions.snapshot()).permissions['screen-recording'] !== 'granted') {
+        throw new Error('Allow Screen Recording for OmniCode in System Settings, then retry. No capture was saved.')
+      }
+    }
+    const match = /^window:(\d+):/u.exec(mainWindow.getMediaSourceId())
+    if (!match) throw new Error('OmniCode could not resolve its own window identifier.')
+    const choice = await dialog.showSaveDialog(mainWindow, {
+      title: 'Save OmniCode Window Snapshot', defaultPath: 'OmniCode-window.png',
+      filters: [{ name: 'PNG image', extensions: ['png'] }], buttonLabel: 'Capture Window'
+    })
+    if (choice.canceled || !choice.filePath) return null
+    const outputPath = choice.filePath.toLowerCase().endsWith('.png') ? choice.filePath : `${choice.filePath}.png`
+    await modernMacOS.captureOwnWindow(Number(match[1]), outputPath)
+    return { path: outputPath }
   })
   handle('notifications:snapshot', () => notifications.snapshot())
   handle('notifications:mark-read', async (_event, id: string, read?: boolean) => {
@@ -2264,10 +2394,13 @@ app.whenReady().then(async () => {
   await workAttachments.removeUnreferenced(await workConversations.attachmentIds())
     .catch((error) => diagnostics.failure('work:attachment-retention', error))
   registerIpc()
+  if (app.isPackaged && process.platform === 'darwin') app.setAsDefaultProtocolClient('omnicode')
   if (!backgroundLaunch) createWindow()
+  void spotlight!.sync().catch((error) => diagnostics.failure('spotlight:startup', error))
   void applyOmniRuntimeSettings(initialOmniSettings).catch((error) => diagnostics.failure('omni:startup', error))
   void diagnostics.lifecycle('ready', `OmniCode ${app.getVersion()} started on ${process.platform}/${process.arch}.`).catch(() => undefined)
   void openLaunchArguments(process.argv)
+  for (const value of pendingDeepLinks.splice(0)) receiveDeepLink(value)
   installApplicationMenu(() => mainWindow)
   app.on('activate', () => {
     void macosPermissions.refreshAfterActivation()
@@ -2284,6 +2417,21 @@ app.on('second-instance', (_event, argv) => {
 app.on('open-file', (event, target) => {
   event.preventDefault()
   void openPathFromFinder(target).catch(() => undefined)
+})
+
+app.on('open-url', (event, value) => {
+  event.preventDefault()
+  receiveDeepLink(value)
+})
+
+app.on('continue-activity', (event, _type, userInfo) => {
+  event.preventDefault()
+  const info = userInfo as Record<string, unknown>
+  const identifier = info.CSSearchableItemActivityIdentifier ?? info.kCSSearchableItemActivityIdentifier
+  const route = routeForSpotlightIdentifier(identifier)
+  if (!route) return
+  if (!app.isReady()) return
+  void navigateRoute(route).catch((error) => diagnostics.failure('navigation:spotlight', error))
 })
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })

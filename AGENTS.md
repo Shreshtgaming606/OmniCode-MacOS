@@ -1,5 +1,14 @@
 # OmniCode Project Instructions
 
+## macOS release profiles
+
+Current OmniCode targets macOS 15+; Sonoma Legacy targets macOS 14 from the
+same source tree. For each new native macOS feature, verify Apple's minimum OS,
+implement the best Current version, choose a real Sonoma fallback/reduction or
+hide it, add capability tests, and document the difference. Do not duplicate
+Code/Work/Omni business logic or weaken Keychain, OAuth, or permissions in Legacy.
+Never describe cross-built Sonoma artifacts as runtime-tested without macOS 14.
+
 ## End-of-task cleanup
 
 After substantial development, testing, packaging, or release work, clean up before the final response:

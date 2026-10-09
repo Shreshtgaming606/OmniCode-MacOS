@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { releaseProfile } from './macos-release-profile.mjs'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const packageMetadata = JSON.parse(await fs.readFile(path.join(projectRoot, 'package.json'), 'utf8'))
@@ -19,13 +20,14 @@ for (let index = 2; index < process.argv.length; index += 2) {
 }
 
 const targetArchitecture = argumentsByName.get('--arch') ?? 'arm64'
+const profile = releaseProfile(argumentsByName.get('--profile') ?? 'current')
 if (!['arm64', 'x64'].includes(targetArchitecture)) {
   throw new Error(`Unsupported macOS architecture: ${targetArchitecture}`)
 }
 const expectedMachOArchitecture = targetArchitecture === 'x64' ? 'x86_64' : 'arm64'
 const expectedPrebuildArchitecture = targetArchitecture === 'x64' ? 'darwin-x64' : 'darwin-arm64'
 const defaultAppDirectory = targetArchitecture === 'x64' ? 'mac' : 'mac-arm64'
-const defaultOutputDirectory = targetArchitecture === 'x64' ? 'release-x64' : 'release-arm64'
+const defaultOutputDirectory = `release-${profile.id}-${targetArchitecture}`
 const appPath = argumentsByName.has('--app')
   ? path.resolve(argumentsByName.get('--app'))
   : path.join(projectRoot, 'dist', defaultOutputDirectory, defaultAppDirectory, 'OmniCode.app')
@@ -101,7 +103,13 @@ async function validateApp(candidate, label) {
     'Contents/Resources/app.asar.unpacked/node_modules/node-pty/build/Release/pty.node',
     'Contents/Resources/omni-native/omnicode-cursor-helper',
     'Contents/Resources/omni-native/omnicode-speech-helper.app/Contents/Info.plist',
-    'Contents/Resources/omni-native/omnicode-speech-helper.app/Contents/MacOS/omnicode-speech-helper'
+    'Contents/Resources/omni-native/omnicode-speech-helper.app/Contents/MacOS/omnicode-speech-helper',
+    'Contents/Resources/omni-native/omnicode-modern-helper.app/Contents/Info.plist',
+    'Contents/Resources/omni-native/omnicode-modern-helper.app/Contents/MacOS/omnicode-modern-helper',
+    'Contents/Resources/omni-native/omnicode-spotlight.node',
+    'Contents/Extensions/OmniCodeIntents.appex/Contents/Info.plist',
+    'Contents/Extensions/OmniCodeIntents.appex/Contents/MacOS/OmniCodeIntents',
+    'Contents/Extensions/OmniCodeIntents.appex/Contents/Resources/Metadata.appintents/extract.actionsdata'
   ]
   for (const relative of required) {
     if (await exists(path.join(candidate, relative))) pass(`${label} contains ${relative}.`)
@@ -111,17 +119,22 @@ async function validateApp(candidate, label) {
   const plistLint = result('/usr/bin/plutil', ['-lint', plist])
   if (plistLint.status === 0) pass(`${label} Info.plist is valid.`)
   else fail(`${label} Info.plist is invalid: ${plistLint.output}`)
+  const urlSchemes = result('/usr/bin/plutil', ['-extract', 'CFBundleURLTypes.0.CFBundleURLSchemes.0', 'raw', '-o', '-', plist])
+  if (urlSchemes.status === 0 && urlSchemes.output === 'omnicode') pass('OmniCode navigation URL scheme is registered.')
+  else fail(`OmniCode navigation URL scheme is missing: ${urlSchemes.output}`)
 
   const expectedPlist = new Map([
     ['CFBundleExecutable', 'OmniCode'],
     ['CFBundleIdentifier', 'com.omnicode.editor'],
     ['CFBundleName', 'OmniCode'],
     ['CFBundlePackageType', 'APPL'],
-    ['CFBundleShortVersionString', packageMetadata.version]
+    ['CFBundleShortVersionString', packageMetadata.version],
+    ['LSMinimumSystemVersion', profile.minimumMacOS]
   ])
   for (const [key, expected] of expectedPlist) {
     const query = result('/usr/bin/plutil', ['-extract', key, 'raw', '-o', '-', plist])
-    if (query.status === 0 && query.output === expected) pass(`${key}=${expected}.`)
+    const equivalentMinimum = key === 'LSMinimumSystemVersion' && Number(query.output) === Number(expected)
+    if (query.status === 0 && (query.output === expected || equivalentMinimum)) pass(`${key}=${expected}.`)
     else fail(`${key} expected ${expected}, received ${query.output || '<missing>'}.`)
   }
 
@@ -142,15 +155,41 @@ async function validateApp(candidate, label) {
 
   const helperExecutables = [
     'Contents/Resources/omni-native/omnicode-cursor-helper',
-    'Contents/Resources/omni-native/omnicode-speech-helper.app/Contents/MacOS/omnicode-speech-helper'
+    'Contents/Resources/omni-native/omnicode-speech-helper.app/Contents/MacOS/omnicode-speech-helper',
+    'Contents/Resources/omni-native/omnicode-modern-helper.app/Contents/MacOS/omnicode-modern-helper'
   ]
   for (const relative of helperExecutables) {
     const mode = (await fs.stat(path.join(candidate, relative))).mode
     if ((mode & 0o111) !== 0) pass(`${relative} is executable.`)
     else fail(`${relative} is not executable.`)
+    const deployment = result('/usr/bin/xcrun', ['vtool', '-show-build', path.join(candidate, relative)])
+    if (deployment.status === 0 && new RegExp(`minos\\s+${profile.minimumMacOS.replace('.', '\\.')}(?:\\s|$)`, 'u').test(deployment.output)) {
+      pass(`${relative} deployment target is macOS ${profile.minimumMacOS}.`)
+    } else fail(`${relative} has an unexpected deployment target: ${deployment.output}`)
   }
 
   const speechHelperBundle = path.join(candidate, 'Contents/Resources/omni-native/omnicode-speech-helper.app')
+  const intentsBundle = path.join(candidate, 'Contents/Extensions/OmniCodeIntents.appex')
+  const spotlightAddon = path.join(candidate, 'Contents/Resources/omni-native/omnicode-spotlight.node')
+  const addonSignature = result('/usr/bin/codesign', ['--verify', '--strict', '--verbose=2', spotlightAddon])
+  if (addonSignature.status === 0) pass('Core Spotlight native addon signature is strictly valid.')
+  else fail(`Core Spotlight native addon signature is invalid: ${addonSignature.output}`)
+  const intentsSignature = result('/usr/bin/codesign', ['--verify', '--strict', '--verbose=2', intentsBundle])
+  if (intentsSignature.status === 0) pass('App Intents extension signature is strictly valid.')
+  else fail(`App Intents extension signature is invalid: ${intentsSignature.output}`)
+  const intentsEntitlements = result('/usr/bin/codesign', ['-d', '--entitlements', ':-', intentsBundle])
+  if (intentsEntitlements.output.includes('com.apple.security.app-sandbox')) pass('App Intents extension is sandboxed.')
+  else fail('App Intents extension is missing its required sandbox entitlement.')
+  const intentsMin = result('/usr/bin/plutil', ['-extract', 'LSMinimumSystemVersion', 'raw', '-o', '-', path.join(intentsBundle, 'Contents/Info.plist')])
+  if (intentsMin.status === 0 && Number(intentsMin.output) === Number(profile.minimumMacOS)) pass(`App Intents extension minimum is macOS ${profile.minimumMacOS}.`)
+  else fail(`App Intents extension minimum is unexpected: ${intentsMin.output}`)
+  const xcodeMarker = result('/usr/bin/plutil', ['-extract', 'DTXcode', 'raw', '-o', '-', path.join(intentsBundle, 'Contents/Info.plist')])
+  if (xcodeMarker.status === 0 && /^\d+$/u.test(xcodeMarker.output)) pass('App Intents extension was built as an Xcode app-extension target.')
+  else fail('App Intents extension is missing its Xcode target build marker.')
+  const modernHelperBundle = path.join(candidate, 'Contents/Resources/omni-native/omnicode-modern-helper.app')
+  const modernMinimum = result('/usr/bin/plutil', ['-extract', 'LSMinimumSystemVersion', 'raw', '-o', '-', path.join(modernHelperBundle, 'Contents/Info.plist')])
+  if (modernMinimum.status === 0 && modernMinimum.output === profile.minimumMacOS) pass(`Native feature helper bundle minimum is macOS ${profile.minimumMacOS}.`)
+  else fail(`Native feature helper bundle minimum expected ${profile.minimumMacOS}, received ${modernMinimum.output}.`)
   const speechHelper = path.join(speechHelperBundle, 'Contents/MacOS/omnicode-speech-helper')
   const speechInfoPlist = path.join(speechHelperBundle, 'Contents/Info.plist')
   const speechIdentity = result('/usr/bin/codesign', ['-dv', '--verbose=4', speechHelperBundle])

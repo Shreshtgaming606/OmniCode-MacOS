@@ -163,6 +163,12 @@ function resultOutput(value: JsonValue): string {
   try { return redactCodeAgentText(JSON.stringify(value, null, 2)) } catch { return 'The tool returned a result that could not be displayed.' }
 }
 
+function failedValidationExitCode(toolId: string, value: JsonValue): number | undefined {
+  if (toolId !== 'test.run' && toolId !== 'build.run') return undefined
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  return typeof value.exitCode === 'number' && value.exitCode !== 0 ? value.exitCode : undefined
+}
+
 function stopped(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError' || error instanceof Error && /cancelled|aborted|stopped/iu.test(error.message)
 }
@@ -464,9 +470,12 @@ export class CodeAgentManager {
       })
       const visiblePlan = planResult(result.result)
       const copy = visiblePlan ? planEventCopy(visiblePlan) : undefined
+      const failedExitCode = failedValidationExitCode(descriptor.id, result.result)
       await this.putEvent(active.senderId, taskId, {
-        id: eventId, timestamp, completedAt: Date.now(), kind: kindFor(descriptor.id), status: 'succeeded', title: copy?.title ?? descriptor.name,
-        summary: copy?.summary ?? `${descriptor.name} completed${decision?.requiredApproval ? ' after approval' : ''}.`, toolId: descriptor.id,
+        id: eventId, timestamp, completedAt: Date.now(), kind: kindFor(descriptor.id), status: failedExitCode === undefined ? 'succeeded' : 'failed', title: copy?.title ?? descriptor.name,
+        summary: copy?.summary ?? (failedExitCode === undefined
+          ? `${descriptor.name} completed${decision?.requiredApproval ? ' after approval' : ''}.`
+          : `${descriptor.name} failed (exit code ${failedExitCode}).`), toolId: descriptor.id,
         category: descriptor.category, risk: decision?.risk ?? descriptor.risk, approvalMode, output: resultOutput(result.result),
         ...(result.result && typeof result.result === 'object' && !Array.isArray(result.result) && typeof result.result.proposalId === 'string' ? { proposalId: result.result.proposalId } : {}),
         ...fields

@@ -1,6 +1,6 @@
 {
   "name": "omnicode",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "A native macOS code editor with local and cloud AI assistance.",
   "main": "./out/main/index.js",
   "author": "OmniCode contributors",
@@ -12,18 +12,21 @@
     "dev": "electron-vite dev",
     "build": "npm run typecheck && electron-vite build && npm run build:native",
     "build:main": "electron-vite build -c electron.main.vite.config.ts",
-    "build:native": "node scripts/build-omni-cursor-helper.mjs && node scripts/build-omni-speech-helper.mjs",
+    "build:native": "node scripts/build-omni-cursor-helper.mjs && node scripts/build-omni-speech-helper.mjs && node scripts/build-omni-modern-helper.mjs && node scripts/build-omni-spotlight-addon.mjs && node scripts/build-omni-intents.mjs",
     "audit:omni-cursor-live": "node scripts/audit-omni-cursor-live.mjs",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --configLoader runner --maxWorkers=1 --no-file-parallelism",
     "test:watch": "vitest --configLoader runner",
-    "dist": "npm run build && electron-builder --mac",
+    "dist": "npm run release:mac",
     "dist:dir": "npm run build && electron-builder --mac --dir",
-    "dist:x64": "OMNICODE_TARGET_ARCH=x64 npm run build && electron-builder --mac --x64",
-    "dist:arm64": "OMNICODE_TARGET_ARCH=arm64 npm run build && electron-builder --mac --arm64",
-    "dist:arm64:adhoc": "node scripts/build-macos-arm64-adhoc.mjs",
-    "dist:x64:adhoc": "node scripts/build-macos-x64-adhoc.mjs",
+    "dist:x64": "node scripts/build-macos-adhoc.mjs --profile current --arch x64",
+    "dist:arm64": "node scripts/build-macos-adhoc.mjs --profile current --arch arm64",
+    "dist:arm64:adhoc": "node scripts/build-macos-adhoc.mjs --profile current --arch arm64",
+    "dist:x64:adhoc": "node scripts/build-macos-adhoc.mjs --profile current --arch x64",
+    "dist:legacy:arm64": "node scripts/build-macos-adhoc.mjs --profile legacy --arch arm64",
+    "dist:legacy:x64": "node scripts/build-macos-adhoc.mjs --profile legacy --arch x64",
+    "release:mac": "node scripts/release-macos.mjs",
     "validate:mac": "node scripts/validate-macos-build.mjs",
     "rebuild:native": "electron-rebuild -f -w node-pty"
   },
@@ -75,12 +78,26 @@
       {
         "from": "out/native/omnicode-speech-helper.app",
         "to": "omni-native/omnicode-speech-helper.app"
+      },
+      {
+        "from": "out/native/omnicode-modern-helper.app",
+        "to": "omni-native/omnicode-modern-helper.app"
+      },
+      {
+        "from": "out/native/omnicode-spotlight.node",
+        "to": "omni-native/omnicode-spotlight.node"
+      }
+    ],
+    "extraFiles": [
+      {
+        "from": "out/native/OmniCodeIntents.appex",
+        "to": "Extensions/OmniCodeIntents.appex"
       }
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "build/icon.icns",
-      "minimumSystemVersion": "14.0",
+      "minimumSystemVersion": "15.0",
       "target": ["dmg", "zip"],
       "forceCodeSigning": true,
       "hardenedRuntime": true,
@@ -88,6 +105,9 @@
       "gatekeeperAssess": false,
       "extendInfo": {
         "NSHighResolutionCapable": true,
+        "CFBundleURLTypes": [
+          { "CFBundleURLName": "OmniCode Navigation", "CFBundleURLSchemes": ["omnicode"] }
+        ],
         "NSMicrophoneUsageDescription": "OmniCode uses the microphone only while you explicitly record a voice request for Omni.",
         "NSSpeechRecognitionUsageDescription": "OmniCode converts an explicitly recorded voice request into text using macOS Speech Recognition."
       }

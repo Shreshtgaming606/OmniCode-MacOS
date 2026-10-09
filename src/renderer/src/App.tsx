@@ -4,7 +4,7 @@ import type { CancellationToken, Position, editor, languages } from 'monaco-edit
 import {
   AudioWaveform, Bot, Bug, ChevronDown, CircleAlert, CircleDot, Code2, Command, Cpu, FileCode2, Files,
   GitBranch, Menu, PanelBottom, Play, Plus, Save, Search, Settings, Sparkles, TerminalSquare,
-  X, Boxes, FolderOpen, GitFork, Server, CheckCircle2, LoaderCircle, Info, TriangleAlert
+  X, Boxes, FolderOpen, GitFork, Server, CheckCircle2, LoaderCircle, Info, TriangleAlert, Languages, Camera
 } from 'lucide-react'
 import type {
   AIModel, AIProviderId, DevServerOption, DiffProposal, FileNode, GitCloneProgress, GitStatus, OllamaPullProgress, PackageScript, ServerState, ThemePreference, ToolInfo, ToolInstallationProgress, WorkspaceSettings
@@ -22,12 +22,16 @@ import { TerminalPanel, type TerminalRunRequest } from './components/TerminalPan
 import { ToolsView } from './components/ToolsView'
 import { ModeSwitcher } from './components/modes/ModeSwitcher'
 import { OmniMode } from './components/omni/OmniMode'
+import { OmniModeLogo } from './components/omni/OmniModeLogo'
 import { WorkMode } from './components/work/WorkMode'
 import { NotificationCenter } from './components/notifications/NotificationCenter'
+import { GuidedTour } from './components/tour/GuidedTour'
+import { saveTourOutcome, shouldOfferTour, type TourStep } from './lib/guided-tour'
 import { fileName, flattenFiles, languageDefinitionForPath, languageForPath } from './lib/languages'
 import { storedAgentPermission, storedAIProvider, storedAppMode, storedModelName, storedTheme } from './lib/preferences'
 import type { AppMode } from '../../shared/work-contracts'
 import type { OmniNotification } from '../../shared/notification-contracts'
+import type { MacOSPlatformSnapshot } from '../../shared/platform-contracts'
 
 type Activity = 'explorer' | 'search' | 'source' | 'run' | 'models' | 'tools'
 type PanelTab = 'terminal' | 'output' | 'problems' | 'runlog'
@@ -111,10 +115,13 @@ const MODE_TITLEBAR: Record<Exclude<AppMode, 'code'>, {
 
 function ModeTitlebarLabel({ mode }: { mode: Exclude<AppMode, 'code'> }) {
   const { description, icon: Icon } = MODE_TITLEBAR[mode]
-  return <div className={`mode-titlebar-label ${mode}`}><Icon /><span>{description}</span></div>
+  return <div className={`mode-titlebar-label ${mode}`}>{mode === 'omni' ? <OmniModeLogo /> : <Icon />}<span>{description}</span></div>
 }
 
 export function App() {
+  const [platform, setPlatform] = useState<MacOSPlatformSnapshot | null>(null)
+  useEffect(() => { void window.omnicode.platform.snapshot().then(setPlatform).catch(() => undefined) }, [])
+  const [nativeTranslation, setNativeTranslation] = useState<string | null>(null)
   const [appMode, setAppMode] = useState<AppMode>(() => storedAppMode(localStorage))
   const [workspacePath, setWorkspacePath] = useState<string | null>(null)
   const [recentFolders, setRecentFolders] = useState<string[]>([])
@@ -140,6 +147,8 @@ export function App() {
   const [showSettings, setShowSettings] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
   const [showOnboarding, setShowOnboarding] = useState(() => localStorage.getItem('omnicode.onboardingComplete') !== 'true')
+  const [showTourOffer, setShowTourOffer] = useState(false)
+  const [showGuidedTour, setShowGuidedTour] = useState(false)
   const [detectedTools, setDetectedTools] = useState<ToolInfo[]>([])
   const [ollamaState, setOllamaState] = useState<OllamaState>({ status: 'checking' })
   const [setupModelCatalog, setSetupModelCatalog] = useState<AIModel[]>([])
@@ -192,6 +201,28 @@ export function App() {
     setAppMode(mode)
   }, [appMode])
 
+  const finishSetup = (): void => {
+    const offerTour = shouldOfferTour(localStorage)
+    localStorage.setItem('omnicode.onboardingComplete', 'true')
+    setShowOnboarding(false)
+    if (offerTour) setShowTourOffer(true)
+  }
+
+  const prepareGuidedTour = useCallback((step: TourStep): void => {
+    if (step.mode) {
+      localStorage.setItem('omnicode.appMode', step.mode)
+      setAppMode(step.mode)
+      if (step.mode === 'code') setAiVisible(true)
+    }
+    setShowSettings(Boolean(step.settingsSection))
+  }, [])
+
+  const finishGuidedTour = useCallback((outcome: 'completed' | 'skipped'): void => {
+    saveTourOutcome(localStorage, outcome)
+    setShowGuidedTour(false)
+    setShowSettings(false)
+  }, [])
+
   const navigateNotification = useCallback((notification: OmniNotification): void => {
     const target = notification.actionTarget ?? (notification.sourceMode === 'system' ? undefined : {
       mode: notification.sourceMode,
@@ -223,6 +254,15 @@ export function App() {
       })
     })
   }, [])
+  const requestClipboardTranslation = useCallback((): void => {
+    void requestTextInput({ title: 'On-device translation', label: 'Source → target language codes', value: 'en → es', confirmLabel: 'Translate Clipboard' }).then(async (pair) => {
+      if (!pair) return
+      const match = /^\s*([A-Za-z0-9-]+)\s*(?:→|->)\s*([A-Za-z0-9-]+)\s*$/u.exec(pair)
+      if (!match) { reportError(new Error('Use language codes such as en → es.')); return }
+      try { setNativeTranslation((await window.omnicode.platform.translateClipboard(match[1], match[2])).text) }
+      catch (error) { reportError(error) }
+    })
+  }, [reportError, requestTextInput])
   const captureTerminalOutput = useCallback((data: string): void => {
     const plain = data.replace(/\u001B\[[0-?]*[ -\/]*[@-~]/g, '').replace(/\r(?!\n)/g, '\n')
     setTerminalOutput((current) => `${current}${plain}`.slice(-24_000))
@@ -910,6 +950,26 @@ export function App() {
         const opened = payload as { path?: unknown; kind?: unknown }
         if (typeof opened.path === 'string' && (opened.kind === 'file' || opened.kind === 'directory')) void openGrantedPath(opened.path, opened.kind)
       },
+      'navigate-route': () => {
+        if (!payload || typeof payload !== 'object') return
+        const target = payload as { kind?: unknown; path?: unknown; mode?: unknown; id?: unknown; action?: unknown }
+        externalOpenReceivedRef.current = true
+        setShowOnboarding(false)
+        if (target.kind === 'workspace' && typeof target.path === 'string') {
+          changeAppMode('code')
+          void openWorkspace(target.path)
+        } else if (target.kind === 'conversation' && target.mode === 'work' && typeof target.id === 'string') {
+          changeAppMode('work')
+          setNotificationTarget({ mode: 'work', conversationId: target.id })
+        } else if (target.kind === 'mode' && (target.mode === 'code' || target.mode === 'work' || target.mode === 'omni')) {
+          changeAppMode(target.mode)
+        } else if (target.kind === 'action' && target.action === 'open-workspace') {
+          changeAppMode('code')
+          void openWorkspace()
+        } else if (target.kind === 'action' && target.action === 'translate-clipboard') {
+          requestClipboardTranslation()
+        }
+      },
       'save-all-and-close': () => {
         void (async () => {
           try {
@@ -958,7 +1018,7 @@ export function App() {
       }
     }).catch(reportError)
     return unsubscribe
-  }, [workspacePath, runCurrent, startServer, saveDocument, saveAs, closeDocument, selectNativeFile, openWorkspace, openGrantedPath, handleInlineAI, reportError, showOnboarding, changeAppMode])
+  }, [workspacePath, runCurrent, startServer, saveDocument, saveAs, closeDocument, selectNativeFile, openWorkspace, openGrantedPath, handleInlineAI, reportError, showOnboarding, changeAppMode, requestClipboardTranslation])
 
   const startResize = (kind: 'sidebar' | 'ai' | 'panel', event: React.PointerEvent): void => {
     event.preventDefault()
@@ -979,10 +1039,10 @@ export function App() {
     onInstallTool={installSetupTool} onRefreshSetup={refreshSetup} onPullModel={downloadSetupModel}
     onCancelToolInstallation={async (toolId) => { await window.omnicode.tools.cancelInstallation(toolId) }}
     onCancelModelPull={async (model) => { await window.omnicode.ai.cancelModelPull(model) }}
-    onAppearanceChange={setTheme} onComplete={() => { localStorage.setItem('omnicode.onboardingComplete', 'true'); setShowOnboarding(false) }}
+    onAppearanceChange={setTheme} onComplete={finishSetup}
     onSaveProvider={(provider, apiKey) => window.omnicode.ai.setCredential(provider, apiKey)}
-    onCloneRepository={async () => { if (await cloneRepository()) { localStorage.setItem('omnicode.onboardingComplete', 'true'); setShowOnboarding(false) } }} onCreateProject={async () => { if (await createProject()) { localStorage.setItem('omnicode.onboardingComplete', 'true'); setShowOnboarding(false) } }}
-    onOpenFolder={async () => { const opened = await openWorkspace(); if (opened) { localStorage.setItem('omnicode.onboardingComplete', 'true'); setShowOnboarding(false) } }} />
+    onCloneRepository={async () => { if (await cloneRepository()) finishSetup() }} onCreateProject={async () => { if (await createProject()) finishSetup() }}
+    onOpenFolder={async () => { const opened = await openWorkspace(); if (opened) finishSetup() }} />
 
   return <div className="app-shell" onDragOver={(event) => { if (appMode === 'code') event.preventDefault() }} onDrop={(event) => {
     if (appMode !== 'code') return
@@ -992,6 +1052,7 @@ export function App() {
     <header className="titlebar">
       <div className="titlebar-spacer" />
       <ModeSwitcher value={appMode} onChange={changeAppMode} />
+      {platform?.release === 'legacy' && <span className="release-profile-badge" title="Sonoma Legacy · macOS 14 compatible">SONOMA LEGACY</span>}
       {appMode === 'code' ? <>
         <button className="layout-button" title="Toggle sidebar" onClick={() => setSidebarVisible((value) => !value)}><Menu /></button>
         <button className="command-center" onClick={() => { setPalette('files'); setPaletteQuery('') }}><Search /><span>{workspacePath ? fileName(workspacePath) : 'Search files by name'}</span><kbd>⌘P</kbd></button>
@@ -999,6 +1060,12 @@ export function App() {
         <button className="run-menu" title="Run configurations" onClick={() => { setActivity('run'); setSidebarVisible(true) }}><ChevronDown /></button>
         <div className="titlebar-layout"><button className={sidebarVisible ? 'active' : ''} title="Primary sidebar" onClick={() => setSidebarVisible((value) => !value)}><Files /></button><button className={panelVisible ? 'active' : ''} title="Bottom panel" onClick={() => setPanelVisible((value) => !value)}><PanelBottom /></button><button className={aiVisible ? 'active' : ''} title="AI sidebar" onClick={() => setAiVisible((value) => !value)}><Sparkles /></button></div>
       </> : <ModeTitlebarLabel mode={appMode} />}
+      {platform?.capabilities.nativeTranslation && <button className="layout-button" title="Translate clipboard on this Mac" aria-label="Translate clipboard on this Mac" onClick={requestClipboardTranslation}><Languages /></button>}
+      {platform?.capabilities.windowCapture && <button className="layout-button" title="Capture only the OmniCode window" aria-label="Capture only the OmniCode window" onClick={() => {
+        void window.omnicode.platform.captureOwnWindow().then((result) => {
+          if (result) setToast({ message: 'Window snapshot saved locally.', kind: 'success' })
+        }).catch(reportError)
+      }}><Camera /></button>}
       <NotificationCenter onNavigate={navigateNotification} />
     </header>
     <div className="mode-content">
@@ -1077,10 +1144,13 @@ export function App() {
     }}><form className="input-modal" role="dialog" aria-modal="true" aria-label={modalInput.title} onKeyDown={(event) => {
       if (event.key === 'Escape') { event.preventDefault(); modalInput.onCancel?.(); setModalInput(null) }
     }} onSubmit={(event) => { event.preventDefault(); modalInput.onConfirm(modalInput.value) }}><h2>{modalInput.title}</h2><label>{modalInput.label}<input autoFocus value={modalInput.value} onChange={(event) => setModalInput({ ...modalInput, value: event.target.value })} /></label><div><button type="button" onClick={() => { modalInput.onCancel?.(); setModalInput(null) }}>Cancel</button><button className="primary-button" disabled={!modalInput.value.trim()}>{modalInput.confirmLabel}</button></div></form></div>}
+    {nativeTranslation !== null && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setNativeTranslation(null) }}><section className="input-modal" role="dialog" aria-modal="true" aria-label="On-device translation"><h2>System · On-device Translation</h2><p style={{ whiteSpace: 'pre-wrap', maxHeight: 280, overflow: 'auto' }}>{nativeTranslation}</p><div><button onClick={() => setNativeTranslation(null)}>Close</button><button className="primary-button" onClick={() => { void window.omnicode.app.copyText(nativeTranslation); setNativeTranslation(null) }}>Copy Translation</button></div></section></div>}
     {showHelp && <div className="modal-backdrop"><section className="help-modal" role="dialog" aria-modal="true" aria-label="OmniCode help"><header><div><Code2 /><span><h2>OmniCode</h2><small>macOS developer workspace</small></span></div><button title="Close help" onClick={() => setShowHelp(false)}><X /></button></header><p>Write, run, host, version, and review AI-assisted changes without leaving your workspace. AI is optional; local models stay on this Mac.</p><div className="help-shortcuts">{[['⌘ P', 'Quick Open'], ['⌘ ⇧ P', 'Command Palette'], ['⌘ S', 'Save'], ['⌘ ⇧ F', 'Workspace Search'], ['⌘ `', 'Terminal'], ['⌘ I', 'Inline AI'], ['⌃ R', 'Run Current File'], ['⌘ ,', 'Settings']].map(([shortcut, label]) => <div key={shortcut}><kbd>{shortcut}</kbd><span>{label}</span></div>)}</div><footer><button onClick={() => { setShowHelp(false); setShowOnboarding(true) }}>Run Setup Guide Again</button><button className="primary-button" onClick={() => setShowHelp(false)}>Done</button></footer></section></div>}
     {inlineEdit && <div className="inline-ai-overlay"><div className={`inline-ai-dialog ${inlineEdit.phase === 'review' ? 'review' : ''}`}><header><Sparkles /><strong>OmniCode Inline Edit</strong><span className="privacy-badge local"><Cpu /> LOCAL</span><button onClick={() => setInlineEdit(null)}><X /></button></header>{inlineEdit.phase !== 'review' ? <><textarea autoFocus value={inlineEdit.instruction} disabled={inlineEdit.phase === 'loading'} onChange={(event) => setInlineEdit({ ...inlineEdit, instruction: event.target.value })} placeholder="Describe the change…" />{inlineEdit.error && <div className="inline-error">{inlineEdit.error}</div>}<footer><span>{inlineEdit.original.split('\n').length} selected line(s)</span><button onClick={() => setInlineEdit(null)}>Cancel</button><button className="primary-button" disabled={!inlineEdit.instruction.trim() || inlineEdit.phase === 'loading'} onClick={() => void submitInlineAI()}>{inlineEdit.phase === 'loading' ? 'Generating…' : 'Generate Diff'}</button></footer></> : <><div className="diff-host"><DiffEditor original={inlineEdit.original} modified={inlineEdit.proposal} language={activeDocument ? languageForPath(activeDocument.path) : 'plaintext'} theme={dark ? 'vs-dark' : 'light'} options={{ automaticLayout: true, readOnly: true, minimap: { enabled: false }, renderSideBySide: true, fontSize: 12 }} /></div><footer><span>Review the proposed replacement before applying.</span><button onClick={() => setInlineEdit(null)}>Reject</button><button className="primary-button" onClick={acceptInlineAI}>Accept Change</button></footer></>}</div></div>}
     {diffProposalId && <div className="change-review-overlay"><div className="change-review-dialog"><DiffReview proposalId={diffProposalId} onClose={() => setDiffProposalId(null)} onProposalChange={handleProposalChange} /></div></div>}
-    {showSettings && <SettingsPanel workspacePath={workspacePath} theme={theme} autosave={autosave} permission={permission} aiAutocomplete={aiAutocomplete} autocompleteProvider={autocompleteProvider} autocompleteModel={autocompleteModel} onTheme={setTheme} onAutosave={setAutosave} onPermission={setPermission} onAIAutocomplete={setAiAutocomplete} onAutocompleteProvider={setAutocompleteProvider} onAutocompleteModel={setAutocompleteModel} onWorkspaceSettings={applyWorkspaceSettings} onClose={() => setShowSettings(false)} />}
+    {showSettings && <SettingsPanel workspacePath={workspacePath} theme={theme} autosave={autosave} permission={permission} aiAutocomplete={aiAutocomplete} autocompleteProvider={autocompleteProvider} autocompleteModel={autocompleteModel} onTheme={setTheme} onAutosave={setAutosave} onPermission={setPermission} onAIAutocomplete={setAiAutocomplete} onAutocompleteProvider={setAutocompleteProvider} onAutocompleteModel={setAutocompleteModel} onWorkspaceSettings={applyWorkspaceSettings} onClose={() => setShowSettings(false)} onRestartTour={() => { setShowSettings(false); setShowGuidedTour(true) }} />}
+    {showTourOffer && <div className="tour-offer-backdrop" role="presentation"><section className="tour-offer" role="dialog" aria-modal="true" aria-label="OmniCode is ready"><span className="tour-offer__eyebrow">SETUP COMPLETE</span><h2>OmniCode is ready.</h2><p>Want a quick tour of the real interface?</p><div><button type="button" onClick={() => { saveTourOutcome(localStorage, 'skipped'); setShowTourOffer(false) }}>Skip</button><button type="button" className="primary-button" onClick={() => { setShowTourOffer(false); setShowGuidedTour(true) }}>Start Tour</button></div></section></div>}
+    {showGuidedTour && <GuidedTour onPrepare={prepareGuidedTour} onFinish={finishGuidedTour} />}
     {toast && <ToastNotice toast={toast} onClose={() => setToast(null)} />}
   </div>
 }

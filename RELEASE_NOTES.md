@@ -1,6 +1,9 @@
 # OmniCode release notes
 
-The current prerelease is [Beta v1 0.1.0](RELEASE_NOTES_BETA_V1_0.1.0.md).
+The current website and GitHub beta is [Beta v1 0.1.2](RELEASE_NOTES_BETA_V1_0.1.2.md).
+The previous website beta is [Beta v1 0.1.1](RELEASE_NOTES_BETA_V1_0.1.1.md).
+The macOS 15 Current / macOS 14 Sonoma Legacy work is documented in the
+[platform-profile candidate notes](RELEASE_NOTES_MACOS_PROFILES_0.1.0.md).
 The version reset from 0.9.0 to 0.1.0 is intentional beta numbering, not a
 rollback of the application features.
 

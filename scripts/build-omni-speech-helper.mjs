@@ -2,6 +2,7 @@ import { chmod, copyFile, mkdir, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { releaseProfile } from './macos-release-profile.mjs'
 
 if (process.platform !== 'darwin') throw new Error('The Omni speech helper can only be built on macOS.')
 
@@ -19,6 +20,7 @@ const legacyOutput = path.join(outputDirectory, 'omnicode-speech-helper')
 const requestedArchitecture = process.env.OMNICODE_TARGET_ARCH || process.env.npm_config_arch || process.arch
 const targetArchitecture = requestedArchitecture === 'x64' ? 'x86_64' : requestedArchitecture === 'arm64' ? 'arm64' : null
 if (!targetArchitecture) throw new Error(`Unsupported Omni speech helper architecture: ${requestedArchitecture}`)
+const profile = releaseProfile(process.env.OMNICODE_RELEASE_PROFILE)
 
 await rm(outputBundle, { recursive: true, force: true })
 await rm(legacyOutput, { force: true })
@@ -32,7 +34,7 @@ if (plistValidation.status !== 0) {
   throw new Error(`The Omni speech helper Info.plist is invalid:\n${diagnostic}`)
 }
 const compilation = spawnSync('xcrun', [
-  'swiftc', '-target', `${targetArchitecture}-apple-macos14.0`, source, '-o', output,
+  'swiftc', '-target', `${targetArchitecture}-apple-macos${profile.minimumMacOS}`, source, '-o', output,
   '-framework', 'AVFoundation', '-framework', 'CoreAudio', '-framework', 'Speech'
 ], {
   cwd: projectRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 5 * 60_000, windowsHide: true
@@ -56,4 +58,4 @@ if (signing.status !== 0) {
   throw new Error(`Could not ad-hoc sign the Omni speech helper for ${targetArchitecture}:\n${diagnostic}`)
 }
 
-console.log(`Built and ad-hoc signed Omni speech helper app bundle for ${targetArchitecture}.`)
+console.log(`Built and ad-hoc signed Omni speech helper app bundle for ${targetArchitecture}, macOS ${profile.minimumMacOS}+.`)

@@ -49,12 +49,9 @@ button { font: inherit; color: inherit; }
 .omni-voice-brand, .omni-window-actions, .omni-voice-actions { display: flex; align-items: center; }
 .omni-voice-brand { gap: 9px; font-size: 15px; letter-spacing: -.01em; }
 .omni-mark {
-  width: 19px;
-  height: 19px;
-  border-radius: 50%;
-  border: 3px solid transparent;
-  background: linear-gradient(#0b1730, #0b1730) padding-box, conic-gradient(from 20deg, #38dcff, #5585ff, #c25dff, #38dcff) border-box;
-  box-shadow: 0 0 15px rgba(66, 188, 255, .55);
+  width: 28px;
+  height: 28px;
+  filter: drop-shadow(0 0 6px rgba(66, 188, 255, .35));
 }
 
 .omni-window-actions { gap: 2px; -webkit-app-region: no-drag; }

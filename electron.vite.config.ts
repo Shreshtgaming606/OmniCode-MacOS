@@ -4,6 +4,8 @@ import react from '@vitejs/plugin-react'
 import { loadEnv } from 'vite'
 import { readGoogleOAuthBuildConfig } from './src/build/google-oauth-build-config'
 
+const releaseProfile = process.env.OMNICODE_RELEASE_PROFILE === 'legacy' ? 'legacy' : 'current'
+
 export default defineConfig(({ mode }) => {
   const environment = { ...loadEnv(mode, process.cwd(), ''), ...process.env }
   const googleOAuth = readGoogleOAuthBuildConfig(environment)
@@ -17,7 +19,8 @@ export default defineConfig(({ mode }) => {
         // provides the code-exchange security boundary.
         __OMNICODE_GOOGLE_OAUTH_CLIENT_ID__: JSON.stringify(googleOAuth?.clientId ?? ''),
         __OMNICODE_GOOGLE_OAUTH_CLIENT_SECRET__: JSON.stringify(googleOAuth?.clientSecret ?? ''),
-        __OMNICODE_GOOGLE_OAUTH_TESTING__: JSON.stringify(googleOAuth?.testing ?? false)
+        __OMNICODE_GOOGLE_OAUTH_TESTING__: JSON.stringify(googleOAuth?.testing ?? false),
+        __OMNICODE_RELEASE_PROFILE__: JSON.stringify(releaseProfile)
       }
     },
     preload: {

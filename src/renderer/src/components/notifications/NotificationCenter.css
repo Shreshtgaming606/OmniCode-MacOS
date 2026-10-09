@@ -1,4 +1,4 @@
-.notification-center { position: relative; margin-left: 3px; -webkit-app-region: no-drag; }
+.notification-center { position: relative; flex: 0 0 auto; margin-left: 3px; -webkit-app-region: no-drag; }
 .notification-bell { position: relative; width: 30px; height: 30px; display: grid; place-items: center; border-radius: var(--radius-sm); color: var(--text-secondary); }
 .notification-bell:hover, .notification-bell.active { color: var(--text); background: var(--bg-hover); }
 .notification-bell > svg { width: 16px; height: 16px; }
@@ -27,6 +27,7 @@
 .severity-error .notification-type-icon { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
 .severity-warning .notification-type-icon { color: var(--warning); background: color-mix(in srgb, var(--warning) 10%, transparent); }
 .notification-type-icon svg { width: 14px; height: 14px; }
+.notification-type-icon .omni-mode-logo { width: 20px; height: 20px; }
 .notification-open > span:nth-child(2) { min-width: 0; display: grid; gap: 2px; }
 .notification-open strong { overflow: hidden; color: var(--text); font-size: var(--font-xs); text-overflow: ellipsis; white-space: nowrap; }
 .notification-open small { display: -webkit-box; overflow: hidden; color: var(--text-secondary); font-size: 10px; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
@@ -41,6 +42,8 @@
 .notification-empty > svg { width: 23px; height: 23px; opacity: .65; }
 .notification-empty strong { color: var(--text-secondary); font-size: var(--font-sm); }
 .notification-empty p { max-width: 240px; margin: 0; font-size: 10px; line-height: 1.4; }
+.notification-error { padding: 9px; color: var(--danger); font-size: 10px; }
+.notification-error button { margin-left: 8px; text-decoration: underline; }
 .notification-panel > footer { padding: 8px 10px; display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--border); }
 .notification-panel > footer button { padding: 5px 7px; display: flex; align-items: center; gap: 5px; border-radius: 6px; color: var(--text-muted); font-size: 10px; }
 .notification-panel > footer button:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); }

@@ -87,6 +87,23 @@ describe('NotificationManager', () => {
     expect(snapshot.notifications).toEqual([])
     expect(snapshot.settings.emailSent).toBe(false)
   })
+
+  it('restores unread notifications after restart even when native macOS alerts are disabled', async () => {
+    const showNative = vi.fn()
+    const first = await manager({ createId: () => 'persisted-1', showNative })
+    await first.create({
+      type: 'BUILD_FAILED', title: 'Build failed', description: 'A test build failed.',
+      sourceMode: 'code', severity: 'error', taskId: 'task-1', actionTarget: { mode: 'code', taskId: 'task-1' }
+    })
+    const reopened = new NotificationManager(first.storePath, { showNative })
+    const snapshot = await reopened.snapshot()
+    expect(snapshot.settings.nativeMacOS).toBe(false)
+    expect(snapshot.unreadCount).toBe(1)
+    expect(snapshot.notifications[0].actionTarget).toEqual({ mode: 'code', taskId: 'task-1' })
+    expect(showNative).not.toHaveBeenCalled()
+    expect((await reopened.markAllRead()).unreadCount).toBe(0)
+    expect((await new NotificationManager(first.storePath).snapshot()).unreadCount).toBe(0)
+  })
 })
 
 describe('sanitizeNotificationText', () => {

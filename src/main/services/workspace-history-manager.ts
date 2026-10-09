@@ -7,7 +7,7 @@ const MAX_RECENT_WORKSPACES = 12
 export class WorkspaceHistoryManager {
   private readonly storagePath: string
 
-  constructor(storagePath: string) {
+  constructor(storagePath: string, private readonly onChanged?: () => void) {
     this.storagePath = storagePath
   }
 
@@ -48,10 +48,10 @@ export class WorkspaceHistoryManager {
     try {
       await fs.writeFile(temporary, JSON.stringify(value, null, 2), { encoding: 'utf8', mode: 0o600 })
       await fs.rename(temporary, this.storagePath)
+      this.onChanged?.()
     } catch (error) {
       await fs.rm(temporary, { force: true }).catch(() => undefined)
       throw error
     }
   }
 }
-

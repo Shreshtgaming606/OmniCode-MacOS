@@ -79,6 +79,36 @@ describe('CodeAgentManager', () => {
     await vi.waitFor(() => expect(value.cleanupTask).toHaveBeenCalledWith(started.id))
   })
 
+  it.each([
+    ['test.run', 'test'],
+    ['build.run', 'build']
+  ] as const)('records a nonzero %s exit as a failed validation event even when the agent reports it', async (toolId, kind) => {
+    const value = await fixture()
+    value.tools.register({
+      id: toolId, name: kind === 'test' ? 'Run project test' : 'Run project build', description: 'Run validation.',
+      connectorId: kind, modes: ['code'], action: 'read', category: 'read', risk: 'low', reversible: true,
+      externalSideEffect: false, confirmation: 'never', requiredScopes: [],
+      inputSchema: { type: 'object', properties: {}, additionalProperties: false }
+    }, async () => ({ status: 'exited', exitCode: 1, output: 'Validation failed.' }))
+    const chat = vi.fn(async (_request, _tools, execute) => {
+      expect((await execute({ toolId, mode: 'code', input: {} })).result).toMatchObject({ exitCode: 1 })
+      return { content: 'The validation command failed with exit code 1.', toolActivities: [], toolCallCount: 1 }
+    })
+    const manager = new CodeAgentManager({
+      activity: value.activity, tools: value.tools, agent: { chat } as unknown as WorkAgentManager,
+      toolService: { cleanupTask: value.cleanupTask } as unknown as CodeAgentToolService,
+      currentWorkspace: () => value.root, confirm: vi.fn(async () => true)
+    })
+    const started = await manager.start(7, {
+      provider: 'ollama', model: 'tool-model', workspaceRoot: value.root, task: 'Run validation',
+      approvalMode: 'ask', visibility: 'standard', focusBehavior: 'never'
+    })
+    await vi.waitFor(async () => expect((await manager.get(started.id)).status).toBe('completed'))
+    expect((await manager.get(started.id)).events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind, status: 'failed', toolId, summary: expect.stringContaining('exit code 1') })
+    ]))
+  })
+
   it('pauses for a user plan edit and delivers the revised course before the next action', async () => {
     const value = await fixture()
     let options: WorkAgentRunOptions | undefined

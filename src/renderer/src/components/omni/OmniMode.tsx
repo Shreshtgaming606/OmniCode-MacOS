@@ -17,6 +17,7 @@ import {
   OMNI_CURSOR_EMERGENCY_STOP_LABEL, OMNI_CURSOR_EMERGENCY_STOP_SHORTCUT, type OmniCursorRuntimeStatus
 } from '../../../../shared/omni-cursor-contracts'
 import './OmniMode.css'
+import { OmniModeLogo } from './OmniModeLogo'
 
 const TERMINAL_STATUSES = new Set<OmniStatus>(['completed', 'failed', 'stopped'])
 const PAUSABLE_STATUSES = new Set<OmniStatus>([
@@ -321,7 +322,7 @@ export function OmniMode({ active }: { active: boolean }) {
 }
 
 function OmniLoading({ loading, error, onRetry }: { loading: boolean; error: PresentedError | null; onRetry(): void }) {
-  return <section className="omni-mode omni-loading-screen" aria-label="Omni mode"><div className="omni-loading-mark"><AudioWaveform /></div>
+  return <section className="omni-mode omni-loading-screen" aria-label="Omni mode"><div className="omni-loading-mark"><OmniModeLogo /></div>
     <h1>{error ? error.title : 'Starting Omni'}</h1><p>{error?.message ?? 'Connecting to the Omni controller and checking local capabilities…'}</p>
     {loading ? <LoaderCircle className="omni-spin" /> : <button type="button" onClick={onRetry}><RefreshCw />Try again</button>}</section>
 }
@@ -341,7 +342,7 @@ function OmniSetupWizard({
 }) {
   const nextDisabled = step === 5 && (!settings.model.modelId || !modelDraft)
   return <section className="omni-mode omni-setup" aria-label="Set up Omni"><div className="omni-setup-shell">
-    <header className="omni-setup-header"><span className="omni-setup-logo"><AudioWaveform /></span>
+    <header className="omni-setup-header"><span className="omni-setup-logo"><OmniModeLogo /></span>
       <span><strong>Set Up Omni</strong><small>Your voice-first system assistant</small></span>
       <span className="omni-setup-count">{step + 1} of {SETUP_STEPS.length}</span></header>
     <ol className="omni-setup-progress" aria-label="Setup progress">{SETUP_STEPS.map((label, index) => <li key={label} className={index === step ? 'active' : index < step ? 'complete' : ''}>
@@ -367,7 +368,7 @@ function OmniSetupWizard({
 }
 
 function SetupIntro() {
-  return <div className="omni-setup-intro"><div className="omni-setup-orb" aria-hidden="true"><span /><AudioWaveform /></div>
+  return <div className="omni-setup-intro"><div className="omni-setup-orb" aria-hidden="true"><span /><OmniModeLogo /></div>
     <p className="omni-kicker">MEET OMNI</p><h1>Your voice-first AI assistant.</h1>
     <p>Omni can code, work with approved files and connected services, browse the web, and perform tasks across your Mac.</p>
     <div className="omni-capability-grid"><span><Code2 /><strong>Code</strong><small>Build, run, and debug</small></span>
@@ -510,7 +511,7 @@ function OmniDashboard({
   const latestEvents = task?.events.slice(-ACTIVITY_LIMIT).reverse() ?? []
   const execution = taskRunning ? task?.executionMode : settings.executionMode
   return <section className="omni-mode omni-dashboard" data-active={active} data-state={currentStatus} aria-label="Omni mode">
-    <header className="omni-command-bar"><div className="omni-command-identity"><span><AudioWaveform /></span><div><strong>Omni</strong><small>Voice-first AI assistant</small></div></div>
+    <header className="omni-command-bar"><div className="omni-command-identity"><span><OmniModeLogo /></span><div><strong>Omni</strong><small>Voice-first AI assistant</small></div></div>
       <div className="omni-command-controls" aria-label="Omni operating settings">
         <label><span>Provider</span><select value={settings.model.provider} disabled={busy} onChange={(event) => void onProvider(event.target.value as AIProviderId)}>{PROVIDERS.map((provider) => <option key={provider.id} value={provider.id}>{provider.label}</option>)}</select></label>
         <label><span>Model</span><select value={modelDraft} disabled={busy || !models.length} onChange={(event) => onModel(event.target.value)}>{!models.length && <option value="">No models</option>}{models.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}</select></label>
@@ -522,7 +523,7 @@ function OmniDashboard({
 
     <div className="omni-dashboard-grid">
       <aside className="omni-context-column">
-        <section className="omni-holo-panel omni-identity-card"><div className="omni-identity-emblem"><AudioWaveform /></div><p className="omni-kicker">OMNICODE</p><h2>Omni</h2><p>Your voice-first assistant that gets things done.</p>
+        <section className="omni-holo-panel omni-identity-card"><div className="omni-identity-emblem"><OmniModeLogo /></div><p className="omni-kicker">OMNICODE</p><h2>Omni</h2><p>Your voice-first assistant that gets things done.</p>
           <div className="omni-online-state" data-online={controllerAvailable}><span />{controllerAvailable ? 'Controller online' : 'Controller unavailable'}</div>
           <ul><li><Code2 /><span><strong>Code</strong><small>Write, refactor, and debug</small></span></li><li><FolderSync /><span><strong>Work</strong><small>Research, plan, and execute</small></span></li><li><WandSparkles /><span><strong>Automate</strong><small>Use approved tools safely</small></span></li><li><Mic /><span><strong>Voice-first</strong><small>Just talk. Omni handles the rest.</small></span></li></ul>
         </section>
@@ -538,7 +539,7 @@ function OmniDashboard({
         <section className={`omni-core-stage status-${currentStatus}`} aria-labelledby="omni-core-state"><p className="omni-core-motto">LISTEN <i /> THINK <i /> TAKE ACTION</p>
           <div className="omni-wave-line omni-wave-left" aria-hidden="true" /><div className="omni-wave-line omni-wave-right" aria-hidden="true" />
           <div className="omni-core" aria-hidden="true"><span className="omni-core-glow" /><span className="omni-core-orbit orbit-one" /><span className="omni-core-orbit orbit-two" /><span className="omni-core-orbit orbit-three" />
-            <span className="omni-core-ticks" /><span className="omni-core-center">{busy || ['planning', 'transcribing', 'working'].includes(currentStatus) ? <LoaderCircle /> : <AudioWaveform />}</span></div>
+            <span className="omni-core-ticks" /><span className="omni-core-center" data-busy={busy || ['planning', 'transcribing', 'working'].includes(currentStatus)}><OmniModeLogo /></span></div>
           <div className="omni-core-copy" role="status" aria-live="polite"><span>OMNI</span><h1 id="omni-core-state">{state.title}</h1><p>{state.detail}</p></div>
           <div className="omni-core-signals"><span data-ready={voiceInput.available}><Mic />{voiceSessionId ? 'Listening now' : voiceInput.available ? 'Voice input ready' : 'Voice needs attention'}</span>
             <span data-ready={voiceOutput.available}><Sparkles />{voiceOutput.available ? 'System voice available' : 'System voice unavailable'}</span>
